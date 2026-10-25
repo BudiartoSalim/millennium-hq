@@ -54,8 +54,9 @@ func TestLoadRejects(t *testing.T) {
 	}{
 		{"unknown field", `{"version":1,"languages":["go"],"lint":"off"}`, `unknown field "lint"`},
 		{"unknown nested field", `{"version":1,"languages":["go"],"python":{"typecheckr":"off"}}`, `unknown field "typecheckr"`},
-		{"duplicate key", `{"version":1,"languages":["go"],"ci":"none","ci":"github-actions"}`, `"ci" appears more than once`},
-		{"duplicate key differing in case", `{"version":1,"languages":["go"],"CI":"none","ci":"github-actions"}`, "appears more than once"},
+		{"duplicate key", `{"version":1,"languages":["go"],"testing":"tests-required","testing":"tests-required"}`, `"testing" appears more than once`},
+		{"duplicate key differing in case", `{"version":1,"languages":["go"],"Testing":"tests-required","testing":"tests-required"}`, "appears more than once"},
+		{"ci is no longer a setting", `{"version":1,"languages":["go"],"ci":"none"}`, `unknown field "ci"`},
 		{"duplicate nested key", `{"version":1,"languages":["go"],"run":{"start":"a","start":"b","healthUrl":"http://localhost/"}}`, `"start" appears more than once in $.run`},
 		{"trailing data", `{"version":1,"languages":["go"]} {"version":1}`, "unexpected data after"},
 		{"not an object", `["go"]`, "parse"},

@@ -12,7 +12,6 @@ type configDTO struct {
 	Conventions      []string   `json:"conventions"`
 	Testing          *string    `json:"testing"`
 	DependencyPolicy *string    `json:"dependencyPolicy"`
-	CI               *string    `json:"ci"`
 	Python           *pythonDTO `json:"python"`
 	Paths            *pathsDTO  `json:"paths"`
 	Run              *runDTO    `json:"run"`
@@ -38,7 +37,6 @@ func (d configDTO) toInput() domain.ConfigInput {
 		Conventions:      d.Conventions,
 		Testing:          d.Testing,
 		DependencyPolicy: d.DependencyPolicy,
-		CI:               d.CI,
 	}
 	if d.Python != nil {
 		in.PythonTypeCheck = d.Python.TypeCheck

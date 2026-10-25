@@ -38,11 +38,6 @@
       "enum": ["strict"],
       "default": "strict"
     },
-    "ci": {
-      "description": "CI provider whose templates the project uses.",
-      "enum": ["github-actions", "none"],
-      "default": "github-actions"
-    },
     "python": {
       "type": "object",
       "additionalProperties": false,

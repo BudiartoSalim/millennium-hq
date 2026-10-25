@@ -117,7 +117,6 @@ func TestSchemaEnumsMatchDomain(t *testing.T) {
 		{"conventions", child(t, props, "conventions", "items"), asStrings(domain.Conventions())},
 		{"testing", child(t, props, "testing"), asStrings(domain.TestingProfiles())},
 		{"dependencyPolicy", child(t, props, "dependencyPolicy"), asStrings(domain.DependencyPolicies())},
-		{"ci", child(t, props, "ci"), asStrings(domain.CIProviders())},
 		{"python.typeCheck", child(t, props, "python", "properties", "typeCheck"), asStrings(domain.PythonTypeChecks())},
 	}
 	for _, e := range enums {
@@ -137,7 +136,6 @@ func TestSchemaDefaultsAndRequiredMatchDomain(t *testing.T) {
 	}{
 		{"testing", child(t, props, "testing"), string(domain.DefaultTesting)},
 		{"dependencyPolicy", child(t, props, "dependencyPolicy"), string(domain.DefaultDependencyPolicy)},
-		{"ci", child(t, props, "ci"), string(domain.DefaultCI)},
 		{"python.typeCheck", child(t, props, "python", "properties", "typeCheck"), string(domain.DefaultPythonTypeCheck)},
 		{"paths.acceptanceTests", child(t, props, "paths", "properties", "acceptanceTests"), domain.DefaultAcceptanceTests},
 	}

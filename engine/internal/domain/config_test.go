@@ -23,7 +23,6 @@ func TestNewConfigAppliesDefaults(t *testing.T) {
 		Conventions:      []Convention{},
 		Testing:          DefaultTesting,
 		DependencyPolicy: DefaultDependencyPolicy,
-		CI:               DefaultCI,
 		PythonTypeCheck:  DefaultPythonTypeCheck,
 		AcceptanceTests:  DefaultAcceptanceTests,
 	}
@@ -39,7 +38,6 @@ func TestNewConfigAcceptsFullConfig(t *testing.T) {
 		Conventions:      []string{"clean-architecture", "react-feature-based"},
 		Testing:          ptr("tests-required"),
 		DependencyPolicy: ptr("strict"),
-		CI:               ptr("none"),
 		PythonTypeCheck:  ptr("mypy"),
 		AcceptanceTests:  ptr("qa/acceptance-tests"),
 		Run:              &RunRecipe{Start: "make run", HealthURL: "http://127.0.0.1:8080/health"},
@@ -48,7 +46,7 @@ func TestNewConfigAcceptsFullConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
-	if cfg.CI != CINone || cfg.PythonTypeCheck != PythonTypeCheckMypy || cfg.AcceptanceTests != "qa/acceptance-tests" {
+	if cfg.PythonTypeCheck != PythonTypeCheckMypy || cfg.AcceptanceTests != "qa/acceptance-tests" {
 		t.Fatalf("explicit values not kept: %+v", cfg)
 	}
 	if cfg.Run == nil || cfg.Run.HealthURL != "http://127.0.0.1:8080/health" {
@@ -69,7 +67,6 @@ func TestNewConfigRejects(t *testing.T) {
 		{"duplicate language", func(in *ConfigInput) { in.Languages = []string{"go", "go"} }, `"go" is listed more than once`},
 		{"unknown convention", func(in *ConfigInput) { in.Conventions = []string{"mvc"} }, `conventions: "mvc"`},
 		{"explicit empty testing", func(in *ConfigInput) { in.Testing = ptr("") }, `testing: "" is not one of`},
-		{"unknown ci", func(in *ConfigInput) { in.CI = ptr("jenkins") }, `ci: "jenkins"`},
 		{"unknown dependency policy", func(in *ConfigInput) { in.DependencyPolicy = ptr("lax") }, `dependencyPolicy: "lax"`},
 		{"react without typescript", func(in *ConfigInput) { in.Conventions = []string{"react-feature-based"} }, `needs "typescript"`},
 		{"mypy without python", func(in *ConfigInput) { in.PythonTypeCheck = ptr("mypy") }, `needs "python"`},
@@ -128,14 +125,14 @@ func TestNewConfigHealthURL(t *testing.T) {
 }
 
 func TestNewConfigReportsEveryProblem(t *testing.T) {
-	in := ConfigInput{Languages: []string{"cobol"}, CI: ptr("jenkins")}
+	in := ConfigInput{Languages: []string{"cobol"}, Testing: ptr("tdd")}
 	_, err := NewConfig(in)
 	var cfgErr *ConfigError
 	if !errors.As(err, &cfgErr) {
 		t.Fatalf("want *ConfigError, got %v", err)
 	}
 	if len(cfgErr.Problems) != 3 {
-		t.Fatalf("want 3 problems (version, language, ci), got %q", cfgErr.Problems)
+		t.Fatalf("want 3 problems (version, language, testing), got %q", cfgErr.Problems)
 	}
 }
 
@@ -156,7 +153,6 @@ func equalConfig(a, b Config) bool {
 		slices.Equal(a.Conventions, b.Conventions) &&
 		a.Testing == b.Testing &&
 		a.DependencyPolicy == b.DependencyPolicy &&
-		a.CI == b.CI &&
 		a.PythonTypeCheck == b.PythonTypeCheck &&
 		a.AcceptanceTests == b.AcceptanceTests &&
 		(a.Run == nil) == (b.Run == nil)

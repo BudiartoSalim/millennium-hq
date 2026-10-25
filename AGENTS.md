@@ -66,7 +66,7 @@ per-caller special cases.
   imports `domain` only, adapters and `interface` import inward, and only
   `main.go` sees everything.
 - Enumerations are typed strings with an allowlist function (`Languages()`,
-  `CIProviders()`), and validation lives in `domain`.
+  `Conventions()`), and validation lives in `domain`.
 - Sentinel errors live in the use-case package, or in `port` when adapters must
   return them; wrap with `%w`; map them to output only in `interface/cli`.
 - **Exit status:** 0 only for a pass or a repository that is not opted in;

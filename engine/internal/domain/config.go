@@ -64,18 +64,6 @@ const DependencyPolicyStrict DependencyPolicy = "strict"
 // DependencyPolicies lists every supported dependency policy.
 func DependencyPolicies() []DependencyPolicy { return []DependencyPolicy{DependencyPolicyStrict} }
 
-// CIProvider is the CI platform whose templates a project uses.
-type CIProvider string
-
-// Supported CI providers.
-const (
-	CIGitHubActions CIProvider = "github-actions"
-	CINone          CIProvider = "none"
-)
-
-// CIProviders lists every supported CI provider in a stable order.
-func CIProviders() []CIProvider { return []CIProvider{CIGitHubActions, CINone} }
-
 // PythonTypeCheck selects the Python type checker. Type checking is optional
 // because the standard library has none.
 type PythonTypeCheck string
@@ -95,7 +83,6 @@ func PythonTypeChecks() []PythonTypeCheck {
 const (
 	DefaultTesting          = TestingTestsRequired
 	DefaultDependencyPolicy = DependencyPolicyStrict
-	DefaultCI               = CIGitHubActions
 	DefaultPythonTypeCheck  = PythonTypeCheckOff
 	DefaultAcceptanceTests  = "tests/acceptance"
 )
@@ -106,7 +93,6 @@ type Config struct {
 	Conventions      []Convention
 	Testing          TestingProfile
 	DependencyPolicy DependencyPolicy
-	CI               CIProvider
 	PythonTypeCheck  PythonTypeCheck
 	AcceptanceTests  string
 	Run              *RunRecipe
@@ -128,7 +114,6 @@ type ConfigInput struct {
 	Conventions      []string
 	Testing          *string
 	DependencyPolicy *string
-	CI               *string
 	PythonTypeCheck  *string
 	AcceptanceTests  *string
 	Run              *RunRecipe
@@ -161,7 +146,6 @@ func NewConfig(in ConfigInput) (Config, error) {
 		Conventions:      parseList(v, "conventions", in.Conventions, Conventions()),
 		Testing:          parseChoice(v, "testing", in.Testing, TestingProfiles(), DefaultTesting),
 		DependencyPolicy: parseChoice(v, "dependencyPolicy", in.DependencyPolicy, DependencyPolicies(), DefaultDependencyPolicy),
-		CI:               parseChoice(v, "ci", in.CI, CIProviders(), DefaultCI),
 		PythonTypeCheck:  parseChoice(v, "python.typeCheck", in.PythonTypeCheck, PythonTypeChecks(), DefaultPythonTypeCheck),
 		AcceptanceTests:  v.repoDir("paths.acceptanceTests", in.AcceptanceTests, DefaultAcceptanceTests),
 		Run:              v.run(in.Run),

@@ -1,8 +1,9 @@
 # millennium: design
 
-Status: agreed in planning on 2026-10-25. Items under
-[To verify before building](#to-verify-before-building) are platform details
-still to confirm.
+Status: agreed in planning on 2026-10-25. Sections marked **Proposed** are
+designed but not yet confirmed; they are listed again under
+[Open decisions](#open-decisions). Platform details still to confirm are under
+[To verify before building](#to-verify-before-building).
 
 ## Purpose
 
@@ -23,15 +24,18 @@ hooks, `/vet-dependency`) into something any project can install.
    is for what no tool can decide.
 2. **Fail closed.** A missing tool, an unreadable config, or a network check that
    could not run is a block, never a silent pass.
-3. **Thin and portable.** Users install Claude Code, git, and the toolchains of
+3. **Agents propose, humans decide.** No agent can change the rules it is
+   checked against. Config and other protected files change only through a
+   command the user runs.
+4. **Thin and portable.** Users install Claude Code, git, and the toolchains of
    the languages they already use. Nothing else is required.
-4. **Strict supply chain.** The `server-scripts` stance (stdlib first, vet every
+5. **Strict supply chain.** The `server-scripts` stance (stdlib first, vet every
    dependency, exact pins, lockfiles, no install scripts) is the default, and the
    procedural parts of it become gates.
-5. **Harness-agnostic where possible.** Skills (Agent Skills format), the gate
+6. **Harness-agnostic where possible.** Skills (Agent Skills format), the gate
    engine, convention packs, and the AGENTS.md template are portable. Agent
    definitions and hook wiring are a thin per-harness adapter.
-6. **Independent verification.** The author of a change never certifies it alone:
+7. **Independent verification.** The author of a change never certifies it alone:
    fresh-context reviewers see the spec and the diff, not the author's reasoning,
    and a significant rewrite gets a fresh review.
 
@@ -41,7 +45,11 @@ hooks, `/vet-dependency`) into something any project can install.
 - Languages: TypeScript (Node backend and React), Go, Python.
 - Conventions: Clean Architecture for backend code, feature-based structure for
   React, required unit tests.
-- CI: GitHub Actions templates, behind a provider-agnostic interface.
+- Focus: the agent workflow and the in-session gates.
+- **Out of scope:** CI templates and git hooks. The engine is a plain CLI, so a
+  project that wants CI enforcement can call `millennium gate --require-config`
+  from its own pipeline; that is the user's choice and not something v1 ships
+  or supports. The tech lead's final CI-equivalent run is the last gate.
 
 ## Roles
 
@@ -60,8 +68,8 @@ Notes:
 - **The tech lead is a skill, not a mandatory layer.** `/millennium:lead <task>`
   loads it into the main session, so the user sees and can overrule every
   triage decision. The same skill can be preloaded by a `tech-lead` agent for
-  headless runs (CI, background). Sessions that do not invoke it work normally;
-  the gates still apply.
+  background runs. Sessions that do not invoke it work normally; the gates
+  still apply.
 - **Agents are split by tools and permissions, persona is a mode.** An agent
   definition is a template that can run as many parallel instances, so one
   `security-engineer` with three modes avoids a bottleneck without a separate
@@ -76,6 +84,9 @@ Notes:
   paths when `agent_type` is qa-tester. Bash cannot be path-filtered reliably,
   so this is best-effort; it protects test independence, not a security
   boundary.
+- **When a gate seems wrong, the lead escalates.** The playbook forbids working
+  around a gate; the lead brings the case to the user. The stop hook enforces
+  the same: repeated blocked attempts escalate to the user instead of passing.
 
 ## Workflow
 
@@ -98,7 +109,8 @@ spec + acceptance criteria (lead, with the user)
      reject + reason) in the decision log
   -> fix loop, bounded rounds: every bug fix comes with a regression test;
      a significant rewrite gets a fresh review and a re-test
-  -> final gates: full suite, supply chain, CI-equivalent run
+  -> final gates: the CI-equivalent run (every check, against the target
+     branch, config required) plus the full test suite and supply chain
   -> summary with the decision log
 ```
 
@@ -132,40 +144,51 @@ are independent, so development is not limited to one engineer.
 ## Enforcement model
 
 An agent with Bash on the same machine can, in principle, forge anything that
-only an in-session hook checks. Enforcement is therefore layered, and every
-layer runs the same gate engine so they cannot drift:
+only an in-session hook checks, so enforcement is layered:
 
-1. **Claude Code hooks.** Fast feedback; block an agent's stop while gates fail;
-   per-agent rules via `agent_type` (engineer cannot edit acceptance tests,
-   qa-tester cannot read source). Repeated stop attempts escalate to the user
-   instead of passing (the `server-scripts` stop hook passes on the second
+| Layer | Applies to | Does not apply to |
+|---|---|---|
+| **Plugin hooks** | Every Claude Code session with the plugin enabled, whether or not the tech lead is used, including every subagent's tool calls. They do nothing in a repo that is not opted in. | Sessions with the plugin disabled; other harnesses |
+| **Sandbox and permission rules** | Every Claude Code session in the repo, plugin or not: they live in the project's `.claude/settings.json`, which `config apply` writes because plugins cannot ship settings. | Sessions with the sandbox off; commands the user approves to run unsandboxed; other harnesses |
+| **Merge-time diff checks** | Every engineer branch the lead merges: ownership, protected paths (for example `tests/acceptance/**`), however the files were written | Changes that never go through the lead |
+
+What each layer does:
+
+1. **Hooks** give fast feedback, block an agent's stop while gates fail, and
+   apply per-agent rules via `agent_type` (the engineer cannot edit acceptance
+   tests, qa-tester cannot read source). Repeated stop attempts escalate to the
+   user instead of passing (the `server-scripts` stop hook passes on the second
    attempt).
-2. **OS sandbox write-deny** on protected paths: gate configs, tool configs
-   (tsconfig, lint config), CI workflows, `.millennium/`. Unlike hooks, this also
-   covers files written through Bash.
-3. **Diff-based checks on merge.** The engineer works on its own worktree
-   branch; before the lead merges it, the engine checks the branch diff (for
-   example, it must not touch `tests/acceptance/**`). This holds however the
-   files were written.
-4. **Git hooks** (pre-commit, pre-push) running the engine.
-5. **CI with required checks and branch protection.** The root of trust: agents
-   cannot touch it. CODEOWNERS requires a human on protected paths, including
-   dependency approvals.
+2. **The sandbox write-denies protected paths**: `.millennium/`, tool configs
+   (tsconfig, lint config), `.git/config` and `.git/hooks`. Unlike hooks, this
+   also covers files written through Bash. A hook additionally denies Edit and
+   Write on the same paths for every agent, the main session included.
+3. **Merge-time checks** hold whatever path the files took.
+
+Every Claude Code session in an opted-in repo loads the plugin: `config apply`
+enables it in the project's `.claude/settings.json`, which Claude Code itself
+protects from sandboxed agents. A user can still disable it in their own local
+settings; that is a human choice.
+
+Honest limits: a command the user approves to run unsandboxed is outside the
+sandbox (the setup docs recommend disabling unsandboxed commands); a loosening
+the user confirms without reading goes through; other harnesses get the
+portable layers only (AGENTS.md, skills) until they offer comparable hooks.
 
 Additional rules:
 
-- **Opt-in per repository.** Hooks do nothing in a repo without
-  `.millennium/config.json`; once it exists, everything fails closed. A config
-  missing from the working tree while still tracked at HEAD blocks, so deleting
-  it cannot switch the gates off; CI runs with `--require-config`.
+- **Opt-in per repository.** Hooks do nothing in a repo without a config; once
+  one exists, everything fails closed. A config missing from the working tree
+  while still tracked at HEAD blocks, so deleting it cannot switch the gates
+  off.
 - **One exit-status contract.** The engine exits 0 only for a pass (or a repo
   that is not opted in) and 2 for everything else, errors included. Claude
   Code hooks block only on 2 and treat 1 as non-blocking, so 1 is never used.
 - **Git cannot be turned against the engine.** Hooks run outside the agents'
   sandbox, and a repository's own config can name programs git runs
   (`core.fsmonitor`). The engine disables fsmonitor on every git call and
-  refuses revisions that look like options; `/millennium:init` must also
-  write-protect `.git/config` and `.git/hooks`.
+  refuses revisions that look like options; `config apply` write-protects
+  `.git/config` and `.git/hooks`.
 - **Hook-owned state** (stop-attempt counters, gate results) lives in
   `${CLAUDE_PLUGIN_DATA}`, outside the sandboxed Bash tool's writable area.
 - **Config integrity.** The engine verifies that tool configs have not been
@@ -175,12 +198,110 @@ Additional rules:
   `# type: ignore`, `//nolint` and similar comments are blocked unless they carry
   a written justification, and every one is listed in the summary.
 
+## Changing the rules: proposals and `config apply`
+
+Agents can draft configuration but never make it effective.
+
+```
+/millennium:init or /millennium:adopt
+  -> the engine discovers the project; an agent drafts millennium.proposal.json
+     (an unprotected, git-ignored file that does nothing by itself)
+  -> the user runs: millennium config apply
+       validates the proposal, shows the diff, and lists every change that
+       loosens the rules (a convention removed, a check disabled, a language
+       dropped) before asking for confirmation
+  -> protected files are written: the config, the AGENTS.md section, the
+     project's .claude/settings.json (plugin enabled, sandbox and permission
+     rules)
+```
+
+`config apply` writes protected paths, so it fails inside an agent's sandbox;
+it works from the user's own terminal (and possibly from Claude Code's `!`
+prefix, see To verify). Dependency approval records in `.millennium/deps/` use
+the same path.
+
+**Disabling a check needs a reason (Proposed).** A config may switch a check off
+only with a written reason, and every report lists the disabled checks with
+their reasons, so nothing is silently off:
+
+```json
+"disable": [
+  { "check": "complexity", "reason": "upstream style; 80-line handlers are the norm here" }
+]
+```
+
+## Adopting an existing project (Proposed)
+
+`/millennium:adopt` onboards a project that already has code:
+
+1. **Mode:** committed (`.millennium/config.json` in the repo, for projects the
+   user owns) or local (see below).
+2. **Discovery (engine, deterministic):** `millennium discover` reports module
+   roots (`go.mod`, `package.json`, `pyproject.toml`, `requirements*.txt`),
+   languages, test runners, existing lint configs, the import graph between
+   directories, and how much existing code already exceeds the limits.
+3. **Matching:** the engine evaluates each available pack against each module
+   and counts violations; an agent proposes which pack fits which module, and
+   drafts a custom pack from the observed structure where none fits. The
+   project's own check commands (`npm run lint`, its golangci setup) can be
+   listed so they run through the same gate.
+4. **Review and apply:** the user reviews the proposal and a dry run of what
+   would block today, then runs `millennium config apply`.
+
+**Existing code does not block adoption.** Gates look at what a change touches:
+new code meets every rule, existing functions that are modified must not get
+worse (longer, deeper, more complex), and only new imports are held to the
+layer rules.
+
+**Local mode, for projects the user does not own.** The config lives on the
+user's machine at
+`${CLAUDE_PLUGIN_DATA}/projects/<repo-key>/config.json`, not in the repo.
+`<repo-key>` derives from git's common directory, so every worktree of a repo
+(including parallel engineers') resolves to the same config. A committed config
+always wins over a local one, and the report says the local one was ignored.
+Agents cannot write there; only the user creates or changes it. Local mode is
+not shared across machines and is deleted on uninstall unless the plugin is
+removed with `--keep-data`, so it needs export and import commands.
+
+## Monorepos: components (Proposed)
+
+A config can list components, each mapping paths to languages, conventions and,
+where the layout differs from the pack's default, layer paths:
+
+```json
+{
+  "version": 1,
+  "components": [
+    { "paths": ["services/*/api"], "languages": ["go"],
+      "conventions": ["clean-architecture"] },
+    { "paths": ["services/identity/api", "services/ai-agent/api"], "languages": ["typescript"],
+      "conventions": ["clean-architecture"] },
+    { "paths": ["services/kokoro-tts/app"], "languages": ["python"],
+      "conventions": ["clean-architecture"],
+      "layers": { "domain": "*/domain.py", "application": "*/service.py" } },
+    { "paths": ["services/game-dashboard", "services/porto-webapp/web"], "languages": ["typescript"],
+      "conventions": ["react-feature-based"] },
+    { "paths": ["services/websearch/api"], "languages": ["go"], "conventions": [],
+      "reason": "older flat package, not the template" }
+  ],
+  "exclude": ["**/node_modules/**", "**/dist/**"]
+}
+```
+
+- Every changed file belongs to exactly one component; the most specific path
+  wins, and two equally specific matches are a config error, not a guess.
+- Layer paths are relative to the component root.
+- A file outside every component still gets the checks that apply to any code
+  (secrets, suppressions, TODOs, dependencies), but no convention rules.
+- A single-project repo keeps top-level `languages` and `conventions` and no
+  `components`.
+
 ## Gate engine
 
 ### Language: Go, stdlib only
 
-The engine runs on every user's machine (in hooks, git hooks, and CI), so its
-runtime is a hard requirement for every user regardless of project language.
+The engine runs on every user's machine, so its runtime is a hard requirement
+for every user regardless of project language.
 
 | Option | User must install | Problem |
 |---|---|---|
@@ -189,28 +310,79 @@ runtime is a hard requirement for every user regardless of project language.
 | Node | Node | Claude Code's native installer no longer requires it |
 | **Go binary** | **Nothing** | Must be built and distributed per OS/arch |
 
-Go compiles to one static binary with no runtime, and its standard library parses
-Go source natively (`go/parser`, `go/ast`). Distribution:
+Most checks parse structured data (JSON config and hook input, lockfiles,
+source code, coverage reports, registry responses); in Bash that would need
+extra tools such as jq and curl on every machine, or the security-sensitive
+logic written three times in each project's runtime. Go compiles to one static
+binary with no runtime, and its standard library parses Go source natively.
 
-- Reproducible release builds (`CGO_ENABLED=0`, `-trimpath`, pinned Go version)
-  for linux/darwin/windows on amd64/arm64.
-- The plugin repo commits `checksums.txt`. A launcher script detects the OS and
-  architecture itself (users never pick a build), downloads the matching release
-  binary into `${CLAUDE_PLUGIN_DATA}` on first use, and verifies the SHA-256
-  before it ever runs. Anyone can rebuild and compare hashes.
-- Users with Go installed can build from source instead.
-- Binaries stay out of the plugin's top-level `bin/`, which claude.ai and Cowork
-  refuse to install; skills reference the launcher through `${CLAUDE_PLUGIN_ROOT}`.
+### Engine design: analyzers and packs
+
+The engine separates two concerns, so new languages and conventions are
+additions, not rewrites:
+
+- **Language analyzers** turn code into facts: imports per file, functions with
+  length, nesting and cognitive complexity, comments, calls. Go is analysed in
+  the engine (`go/ast`); TypeScript and Python by two small helpers of ours (a
+  JS file using the project's own `typescript`, a stdlib Python script using
+  `ast`), run with the project's runtime, because a correct TS or Python parser
+  in Go would be a large source of bugs. A new language is a new analyzer
+  producing the same facts.
+- **Convention packs** are rules over those facts, written as data. A new
+  convention is a new pack folder. The engine only changes when a convention
+  needs a new kind of rule; that rule type is then available to every pack.
+
+### Checks
+
+Every change (hooks and the lead's runs):
+
+| Check | How |
+|---|---|
+| Config validation | Strict JSON: unknown fields, duplicate keys, trailing data, symlinks and oversized files are errors |
+| Change detection | git, NUL-separated output, special files skipped, fsmonitor disabled |
+| Toolchain | Required tools present; a missing one blocks |
+| Format and types | `gofmt`, `go vet`, `tsc --noEmit`, optional mypy, run with the project's own tools |
+| Config integrity | tsconfig (comments and `extends` chains included) and lint thresholds not weakened |
+| Architecture | Layer import rules from the active packs |
+| Complexity | Function length, nesting depth, cognitive complexity |
+| Banned APIs | `eval`, `shell=True`, `InsecureSkipVerify`, string-built `exec`, ... from real parsing, so comments and strings do not count |
+| Suppressions | Need a written reason |
+| TODOs | Need a linked follow-up |
+| Secrets | High-confidence patterns, binary files skipped, bounded reads |
+| Tests required | Changed code in tested layers comes with changed tests |
+| Changed-line coverage | Changed lines covered by the suite |
+| Ownership | Each engineer's branch stays inside its package's paths; protected paths untouched |
+
+Hooks:
+
+| Check | How |
+|---|---|
+| Hook input | JSON on stdin: tool, file, calling agent |
+| Per-agent rules | Engineer cannot edit acceptance tests; qa-tester cannot read source; edit content checked for new suppressions |
+| Protected paths | Edit/Write on protected paths denied for every agent |
+| Stop gating | Block "done" while gates fail; escalate after repeated attempts |
+
+Supply chain: see [Supply chain](#supply-chain).
+
+The analysis tools per language:
+
+| | Go | TypeScript | Python |
+|---|---|---|---|
+| Parser | `go/ast` in the engine | TypeScript compiler API, via a small JS helper run with the project's own `typescript` | `ast`, via a stdlib-only helper run with the project's Python |
+| Format / vet / types | `gofmt`, `go vet` | `tsc --noEmit` with verified strict flags | optional mypy (`"typeCheck": "mypy" \| "off"`); when on, a missing mypy blocks |
+| Coverage | `go test -cover` | Node's built-in test coverage | own `sys.monitoring` helper on 3.12+; coverage.py (vetted) below 3.12, blocking with an install hint when absent |
+
+Initial limits come from `server-scripts`: a function fits on one screen
+(about 50 lines), nests at most three levels, and stays under cognitive
+complexity 15.
 
 ### Config: `.millennium/config.json`
 
 JSON because Go's standard library parses it; the JSON Schema in
 `schema/millennium.schema.json` gives editors autocompletion and validation,
-which compensates for the lack of comments. The engine reads it strictly:
-unknown fields, duplicate keys (which would hide the effective value from a
-reviewer), trailing data, symlinks and oversized files are errors. Only
-`version` and `languages` are required; `run.healthUrl` must be a loopback
-address so qa-tester can never be pointed at a shared deployment.
+which compensates for the lack of comments. Only `version` and `languages` are
+required; `run.healthUrl` must be a loopback address so qa-tester can never be
+pointed at a shared deployment.
 
 ```json
 {
@@ -220,7 +392,6 @@ address so qa-tester can never be pointed at a shared deployment.
   "conventions": ["clean-architecture", "react-feature-based"],
   "testing": "tests-required",
   "dependencyPolicy": "strict",
-  "ci": "github-actions",
   "python": { "typeCheck": "off" },
   "paths": {
     "acceptanceTests": "tests/acceptance"
@@ -232,35 +403,28 @@ address so qa-tester can never be pointed at a shared deployment.
 }
 ```
 
-### Analysis without extra tools
+### Distribution and releases
 
-Each analysis uses either the engine itself or the toolchain the project already
-has, so no linter has to be installed. Go is parsed natively; TypeScript and
-Python are parsed by two small helpers of ours (a JS file and a stdlib Python
-script) because a correct TS or Python parser in Go would be a large source of
-bugs. The helpers only run on projects that have that runtime by definition.
-
-| | Go | TypeScript | Python |
-|---|---|---|---|
-| Parser | `go/ast` in the engine | TypeScript compiler API, via a small JS helper run with the project's own `typescript` | `ast`, via a stdlib-only helper run with the project's Python |
-| Format / vet / types | `gofmt`, `go vet` | `tsc --noEmit` with verified strict flags | optional mypy (`"typeCheck": "mypy" \| "off"`); when on, a missing mypy blocks |
-| Coverage | `go test -cover` | Node's built-in test coverage | own `sys.monitoring` helper on 3.12+; coverage.py (vetted) below 3.12, blocking with an install hint when absent |
-
-On top of the parsers, the engine implements, with one definition across all
-languages:
-
-- layer and import boundaries (convention packs),
-- cognitive complexity, function length, nesting depth,
-- banned APIs per language (`eval`, `shell=True`, `InsecureSkipVerify`, string-built
-  `exec`, ...),
-- `any` / untyped boundaries,
-- suppression comments, TODOs without a linked follow-up,
-- high-confidence secret patterns.
-
-Initial limits come from `server-scripts`: a function fits on one screen
-(about 50 lines), nests at most three levels, and stays under cognitive
-complexity 15. Packs and projects can tighten them but not loosen them past a
-floor.
+- Reproducible release builds (`CGO_ENABLED=0`, `-trimpath`, pinned Go version)
+  for linux/darwin/windows on amd64/arm64, from this repository; no separate
+  release repository.
+- The engine has its own tags (`engine/v0.1.0`), so a plugin release does not
+  force an engine release.
+- The shipped plugin carries a lock file with the engine version and the
+  SHA-256 of each platform's binary. A launcher script detects the OS and
+  architecture itself (users never pick a build), downloads the matching
+  release binary into `${CLAUDE_PLUGIN_DATA}` on first use, and refuses
+  anything whose hash does not match.
+- Hashes first, then the release: a reviewed PR records the new version and
+  hashes; the tag is pushed; the release workflow rebuilds from the tag and
+  fails if any binary's hash differs from the committed one, which also proves
+  every release was built from the reviewed source.
+- The release workflow has minimal permissions (write only in the publishing
+  job), actions pinned to full commit SHAs, and tag protection on `engine/v*`;
+  build-provenance attestation is optional.
+- Users with Go installed can build from source instead.
+- Binaries stay out of the plugin's top-level `bin/`, which claude.ai and Cowork
+  refuse to install; skills reference the launcher through `${CLAUDE_PLUGIN_ROOT}`.
 
 ## Convention packs
 
@@ -287,6 +451,11 @@ v1 packs:
   Logic lives in plain modules and hooks with unit tests; components stay thin.
   Feature-Sliced Design is a candidate for a later pack.
 
+A project can also have its own pack that extends a shipped one. For
+`server-scripts`, several prose rules become gated checks that way: the HTTP
+delivery package is named `web`, every `http.Server` sets timeouts, bearer
+tokens are compared with `ConstantTimeCompare`, no barrel `index.ts` files.
+
 Future packs (hexagonal, feature-sliced, a test-first testing profile) are new
 folders, not engine changes.
 
@@ -299,10 +468,11 @@ folders, not engine changes.
   not enforced (`"testing": "tests-required"`).
 - **Test quality (reviewed).** qa-engineer `correctness-review`, see Roles.
 - **Acceptance tests.** qa-tester writes black-box regression tests in the
-  developed project's `tests/acceptance/`, committed and run in that project's
-  CI. The engineer cannot change them (agent hook + merge-time diff check).
-  API and CLI acceptance tests use the language's built-in runner; browser
-  end-to-end tests need Playwright and are opt-in under the dependency policy.
+  developed project's `tests/acceptance/`, committed with the project and part
+  of its test suite. The engineer cannot change them (agent hook + merge-time
+  diff check). API and CLI acceptance tests use the language's built-in runner;
+  browser end-to-end tests need Playwright and are opt-in under the dependency
+  policy.
 - **Built-in runners first:** `go test`, `node:test`, `unittest`.
 
 ## Supply chain
@@ -314,8 +484,7 @@ procedure. Turned into gates or added:
 
 - **Approval records.** Any manifest change blocks unless
   `.millennium/deps/` holds a vetting record for that exact name and version.
-  Agents draft records; approving one is a human action (protected path,
-  CODEOWNERS in CI).
+  Agents draft records; approving one goes through `config apply`.
 - **Lockfile diff.** New or changed transitive packages are reported and need
   approval too.
 - **Release-age cooldown for every ecosystem.** Publish times come from
@@ -326,45 +495,34 @@ procedure. Turned into gates or added:
   (no scanner to install); an unreachable OSV is a block at the final gate.
 - **Integrity.** `npm audit signatures`; Go with `GOFLAGS=-mod=readonly` and the
   checksum database on.
-- **CI hardening.** Actions pinned to full commit SHAs, minimal `permissions:`,
-  no `pull_request_target`, update bots configured with a cooldown.
 - **The plugin practises what it preaches.** The engine is stdlib-only Go and the
   helpers are stdlib-only; the plugin itself has no third-party dependencies.
-
-## CI providers
-
-The core command is provider-agnostic (`millennium gate --all`). Each provider
-is a thin template set under `ci/<provider>/`, selected by `"ci"` in the config.
-v1 ships `github-actions`; others are new template folders.
-
-## Installing into a project
-
-`/millennium:init` writes, after showing the user what it will change:
-
-- `.millennium/config.json` (asks for languages, conventions, run recipe),
-- an engineering-standards section in `AGENTS.md`, plus a `CLAUDE.md` that
-  imports it when the project already has one,
-- sandbox and permission rules protecting the paths above,
-- git hooks and the CI template for the chosen provider,
-- `CODEOWNERS` entries for protected paths.
 
 ## Repository layout
 
 ```
-millennium-hq/                   repo root = plugin root
-  .claude-plugin/plugin.json     Claude Code adapter
-  agents/                        thin agent definitions that preload skills
-  hooks/hooks.json               hook wiring, all calling the engine
-  skills/                        portable core (Agent Skills format)
-  conventions/                   convention packs
-  ci/<provider>/                 CI templates
-  templates/                     AGENTS.md, CODEOWNERS, config skeleton
+millennium-hq/
+  plugin/                        what users install (planned; see below)
+    .claude-plugin/plugin.json   Claude Code adapter
+    agents/                      thin agent definitions that preload skills
+    hooks/hooks.json             hook wiring, all calling the engine
+    skills/                      portable core (Agent Skills format)
+    conventions/                 convention packs
+    helpers/                     stdlib-only TS and Python analysis helpers
+    launcher, engine lock        download and verify the engine binary
   engine/                        Go source of the gate engine (stdlib only)
-  helpers/                       stdlib-only TS and Python analysis helpers
-  scripts/                       launcher, release, checksum tooling
+  schema/                        JSON Schema of the project config
+  templates/                     AGENTS.md section, config skeleton
+  scripts/                       verify, release and checksum tooling
   docs/
   AGENTS.md                      rules for developing this plugin
 ```
+
+The shipped plugin lives in `plugin/` rather than at the repo root, so users
+install only what runs, and the repo's own `CLAUDE.md` (which imports
+`AGENTS.md`, because a `CLAUDE.md` above the repo disables the `AGENTS.md`
+fallback) does not trigger `claude plugin validate`'s warning about a
+`CLAUDE.md` at the plugin root.
 
 ## Lessons from server-scripts
 
@@ -378,24 +536,31 @@ What the v1 gates fix in the earlier hooks:
   never checked. v1 checks the diff.
 - Only gofmt, go vet and tsc run automatically; the function-size, nesting and
   complexity limits are prose.
+- `stop-check.sh` calls `git diff` and `git ls-files` without disabling
+  `core.fsmonitor`, so a repository config could make the hook run a program
+  outside the sandbox.
 - `to_posix` maps `D:\x` to the Git Bash form `/d/x`, which is wrong on WSL.
+
+## Open decisions
+
+1. **Components** for monorepos, with the most specific path winning.
+2. **The rule for existing code:** new code meets the limits; modified functions
+   must not get worse.
+3. **Shell support** (server-scripts is largely bash): v1 or later.
+4. **Local mode**, **`/millennium:adopt`**, and **disabling a check needs a
+   reason**: designed above, not yet confirmed.
 
 ## To verify before building
 
-- Exact sandbox settings keys for write-deny, and whether `/millennium:init` may
-  write them into project settings.
+- Exact sandbox settings keys for write-deny, and that `config apply` may write
+  them into the project's `.claude/settings.json`.
 - That hooks run outside the Bash tool's sandbox, so hook-owned state in
   `${CLAUDE_PLUGIN_DATA}` is out of the agents' reach.
+- Whether commands run with Claude Code's `!` prefix are sandboxed, which
+  decides whether the user can run `config apply` without leaving the session.
 - Hook behaviour on native Windows (Git Bash or PowerShell) for the launcher.
 - Bootstrap timing: no plugin install hook is documented, so the launcher
   fetches the binary lazily (first hook call or a SessionStart hook).
-- `claude plugin validate` warns about a `CLAUDE.md` at the plugin root, and
-  this repo needs one (it imports `AGENTS.md`, because a `CLAUDE.md` above the
-  repo disables the `AGENTS.md` fallback). Either accept the warning or move
-  the shipped plugin into a subdirectory, which would also keep engine source
-  and docs out of what users install.
-- The Python tool name: `python3` on Linux and macOS, often `python` or `py` on
-  native Windows.
 
 ## Build order
 
@@ -405,9 +570,11 @@ model, fail-closed plumbing).
 
 1. `AGENTS.md` for this repo, config schema, engine skeleton with the diff,
    config-integrity and fail-closed plumbing.
-2. clean-architecture pack for Go (engine-native parsing), then TypeScript and
-   Python helpers.
-3. Hooks and protection layers; the tests-required gate.
+2. clean-architecture pack for Go (engine-native parsing), components and the
+   existing-code rule once decided, then TypeScript and Python helpers.
+3. Hooks and protection layers; `config apply`; the tests-required gate.
 4. Supply-chain gates.
 5. Agents, skills, and the tech-lead playbook.
-6. react-feature-based pack, qa-tester, CI templates, `/millennium:init`.
+6. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
+   local mode.
+7. `plugin/` layout, launcher and engine lock, release workflow.
