@@ -20,6 +20,17 @@ func NewCode(analyzers map[domain.Language]port.Analyzer, source port.SourceRead
 	return &Code{analyzers: analyzers, source: source}
 }
 
+// Rules lists the rules the gate reports.
+func (*Code) Rules() []port.Rule {
+	return []port.Rule{
+		{Name: "secret", Disableable: true},
+		{Name: "banned-construct", Disableable: true},
+		{Name: "suppression-without-reason", Disableable: true},
+		{Name: "todo-without-link", Disableable: true},
+		{Name: "scan-failed", Disableable: false},
+	}
+}
+
 // Name identifies the gate in findings.
 func (*Code) Name() string { return "code" }
 

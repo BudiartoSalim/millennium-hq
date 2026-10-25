@@ -20,6 +20,9 @@ type Report struct {
 	Enabled      bool
 	ChangedFiles int
 	Results      []GateResult
+	// Disabled lists the checks the config switched off, with the findings
+	// each hid, so nothing is ever silently off.
+	Disabled []DisabledResult
 }
 
 // Passed reports whether the run lets the change through. A repository that

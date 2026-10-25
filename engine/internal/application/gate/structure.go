@@ -26,6 +26,20 @@ func NewStructure(analyzers map[domain.Language]port.Analyzer, packs port.PackSo
 	return &Structure{analyzers: analyzers, packs: packs, source: source, limits: domain.DefaultLimits()}
 }
 
+// Rules lists the rules the gate reports.
+func (*Structure) Rules() []port.Rule {
+	return []port.Rule{
+		{Name: "function-length", Disableable: true},
+		{Name: "nesting-depth", Disableable: true},
+		{Name: "cognitive-complexity", Disableable: true},
+		{Name: "layer-import", Disableable: true},
+		{Name: "analysis-failed", Disableable: false},
+		{Name: "component-ambiguous", Disableable: false},
+		{Name: "analysis-unavailable", Disableable: false},
+		{Name: "convention-unavailable", Disableable: false},
+	}
+}
+
 // Name identifies the gate in findings.
 func (*Structure) Name() string { return "structure" }
 

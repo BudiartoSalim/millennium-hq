@@ -102,6 +102,20 @@
       "items": { "type": "string" },
       "default": []
     },
+    "disable": {
+      "type": "array",
+      "description": "Rules switched off for this project, each with a reason that every report shows. Rules that report a check failing to run cannot be disabled.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "reason"],
+        "properties": {
+          "check": { "type": "string", "pattern": "^[a-z][a-z-]*/[a-z][a-z-]*$", "description": "gate/rule, such as structure/function-length" },
+          "reason": { "type": "string", "minLength": 10 }
+        }
+      },
+      "default": []
+    },
     "testing": {
       "description": "Testing discipline the gates enforce.",
       "enum": ["tests-required"],

@@ -13,6 +13,7 @@ type configDTO struct {
 	Components       []componentDTO `json:"components"`
 	Test             *testDTO       `json:"test"`
 	Exclude          []string       `json:"exclude"`
+	Disable          []disableDTO   `json:"disable"`
 	Testing          *string        `json:"testing"`
 	DependencyPolicy *string        `json:"dependencyPolicy"`
 	Python           *pythonDTO     `json:"python"`
@@ -28,6 +29,11 @@ type componentDTO struct {
 	Layers      map[string][]string `json:"layers"`
 	Reason      string              `json:"reason"`
 	Test        *testDTO            `json:"test"`
+}
+
+type disableDTO struct {
+	Check  string `json:"check"`
+	Reason string `json:"reason"`
 }
 
 type testDTO struct {
@@ -59,6 +65,14 @@ type runDTO struct {
 	HealthURL string `json:"healthUrl"`
 }
 
+func disabledChecks(in []disableDTO) []domain.DisabledCheck {
+	out := make([]domain.DisabledCheck, len(in))
+	for i, d := range in {
+		out[i] = domain.DisabledCheck(d)
+	}
+	return out
+}
+
 func (d configDTO) toInput() domain.ConfigInput {
 	in := domain.ConfigInput{
 		Version:          d.Version,
@@ -66,6 +80,7 @@ func (d configDTO) toInput() domain.ConfigInput {
 		Conventions:      d.Conventions,
 		Exclude:          d.Exclude,
 		Test:             d.Test.toDomain(),
+		Disable:          disabledChecks(d.Disable),
 		Testing:          d.Testing,
 		DependencyPolicy: d.DependencyPolicy,
 	}

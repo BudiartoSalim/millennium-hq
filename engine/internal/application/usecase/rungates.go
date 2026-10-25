@@ -58,7 +58,7 @@ func (u *RunGates) Execute(ctx context.Context, in RunGatesInput) (domain.Report
 		return domain.Report{}, fmt.Errorf("detect changes: %w", err)
 	}
 	changes.Files = withoutExcluded(cfg, changes.Files)
-	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)}), nil
+	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)})
 }
 
 // tierOrFull defaults an unset tier to the thorough one.
@@ -69,13 +69,18 @@ func tierOrFull(tier domain.Tier) domain.Tier {
 	return tier
 }
 
-// runAll runs each gate in order and collects their results.
-func runAll(ctx context.Context, gates []port.Gate, in port.GateInput) domain.Report {
+// runAll runs each gate in order, collects their results, and sets aside
+// the findings of checks the config disabled.
+func runAll(ctx context.Context, gates []port.Gate, in port.GateInput) (domain.Report, error) {
+	if err := checkDisabled(in.Config, gates); err != nil {
+		return domain.Report{}, err
+	}
 	report := domain.Report{Enabled: true, ChangedFiles: len(in.Changes.Files)}
 	for _, g := range gates {
 		report.Results = append(report.Results, runGate(ctx, g, in))
 	}
-	return report
+	applyDisabled(&report, in.Config.Disabled)
+	return report, nil
 }
 
 func withoutExcluded(cfg domain.Config, files []domain.ChangedFile) []domain.ChangedFile {
@@ -101,7 +106,21 @@ func runGate(ctx context.Context, g port.Gate, in port.GateInput) (result domain
 	if err != nil {
 		return gateFailed(name, err.Error())
 	}
+	if rule, ok := undeclaredRule(g, findings); ok {
+		return gateFailed(name, fmt.Sprintf("it reported the undeclared rule %q, an engine bug", rule))
+	}
 	return domain.GateResult{Gate: name, Findings: findings}
+}
+
+// undeclaredRule finds a finding whose rule the gate does not list; the list
+// is what the config's disable entries are checked against.
+func undeclaredRule(g port.Gate, findings []domain.Finding) (string, bool) {
+	for _, f := range findings {
+		if _, ok := findRule([]port.Gate{g}, g.Name(), f.Rule); !ok {
+			return f.Rule, true
+		}
+	}
+	return "", false
 }
 
 func gateFailed(gate, reason string) domain.GateResult {

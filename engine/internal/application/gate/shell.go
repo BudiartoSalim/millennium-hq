@@ -24,6 +24,16 @@ func NewShell(source port.SourceReader, tools port.ShellChecker) *Shell {
 	return &Shell{source: source, tools: tools}
 }
 
+// Rules lists the rules the gate reports.
+func (*Shell) Rules() []port.Rule {
+	return []port.Rule{
+		{Name: "syntax-error", Disableable: false},
+		{Name: "strict-mode", Disableable: true},
+		{Name: "shellcheck", Disableable: true},
+		{Name: "analysis-failed", Disableable: false},
+	}
+}
+
 // Name identifies the gate in findings.
 func (*Shell) Name() string { return "shell" }
 

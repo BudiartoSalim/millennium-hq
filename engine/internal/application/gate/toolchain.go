@@ -23,6 +23,13 @@ func NewToolchain(tools port.ToolLocator) *Toolchain {
 	return &Toolchain{tools: tools}
 }
 
+// Rules lists the rules the gate reports.
+func (*Toolchain) Rules() []port.Rule {
+	return []port.Rule{
+		{Name: "tool-missing", Disableable: false},
+	}
+}
+
 // Name identifies the gate in findings.
 func (*Toolchain) Name() string { return "toolchain" }
 

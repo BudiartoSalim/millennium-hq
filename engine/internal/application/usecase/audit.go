@@ -55,5 +55,5 @@ func (u *RunAudit) Execute(ctx context.Context, in AuditInput) (domain.Report, e
 		}
 	}
 	changes.Files = withoutExcluded(cfg, changes.Files)
-	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)}), nil
+	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)})
 }

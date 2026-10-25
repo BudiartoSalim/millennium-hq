@@ -130,9 +130,20 @@ type GateInput struct {
 	Tier domain.Tier
 }
 
+// Rule is one kind of finding a gate reports.
+type Rule struct {
+	Name string
+	// Disableable rules may be switched off in the config with a reason.
+	// Rules that report a check failing to run never are: disabling them
+	// would let unchecked code pass.
+	Disableable bool
+}
+
 // Gate is one check. Run returns the findings it found; an error means the
 // gate could not decide, which the caller turns into a blocking finding.
 type Gate interface {
 	Name() string
+	// Rules lists every rule the gate can report.
+	Rules() []Rule
 	Run(ctx context.Context, in GateInput) ([]domain.Finding, error)
 }

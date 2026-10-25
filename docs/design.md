@@ -222,7 +222,7 @@ it works from the user's own terminal (and possibly from Claude Code's `!`
 prefix, see To verify). Dependency approval records in `.millennium/deps/` use
 the same path.
 
-**Disabling a check needs a reason (Proposed).** A config may switch a check off
+**Disabling a check needs a reason (built).** A config may switch a check off
 only with a written reason, and every report lists the disabled checks with
 their reasons, so nothing is silently off:
 
@@ -597,8 +597,8 @@ or sh shebang (such as `bin/*`).
 
 ## Open decisions
 
-1. **`/millennium:adopt`** and **disabling a check needs a reason**: designed
-   above, not yet confirmed.
+1. **`/millennium:adopt`**: designed above, built as described unless you
+   change it. Disabling a check with a reason is built (step 4d).
 
 ## To verify before building
 
@@ -636,6 +636,9 @@ or sh shebang (such as `bin/*`).
    tests; the full tier runs the suites and requires every changed executable
    line to run), tiers (`--tier fast|full`), test recipes with lcov, and packs
    that declare the languages they govern.
+   **4d done:** `disable` entries (one gate/rule, a reason, listed on every
+   report; fail-closed rules cannot be disabled), gates that declare their
+   rules, and undeclared rules treated as an engine bug.
 5. Supply-chain gates.
 6. Agents, skills, and the tech-lead playbook.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,

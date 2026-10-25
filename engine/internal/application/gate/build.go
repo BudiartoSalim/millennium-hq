@@ -27,6 +27,18 @@ func NewBuild(tools port.BuildTools, finder port.FileFinder) *Build {
 	return &Build{tools: tools, finder: finder}
 }
 
+// Rules lists the rules the gate reports.
+func (*Build) Rules() []port.Rule {
+	return []port.Rule{
+		{Name: "gofmt", Disableable: true},
+		{Name: "vet", Disableable: true},
+		{Name: "type-error", Disableable: true},
+		{Name: "tsconfig-weakened", Disableable: true},
+		{Name: "tsconfig-missing", Disableable: false},
+		{Name: "tool-failed", Disableable: false},
+	}
+}
+
 // Name identifies the gate in findings.
 func (*Build) Name() string { return "build" }
 

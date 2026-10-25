@@ -139,3 +139,31 @@ func TestTestRecipes(t *testing.T) {
 	both.Test = recipe
 	assertConfigError(t, both, "belong inside each component")
 }
+
+func TestDisableValidation(t *testing.T) {
+	ok := minimalInput()
+	ok.Disable = []DisabledCheck{{Check: "structure/function-length", Reason: "upstream style keeps long handlers"}}
+	cfg, err := NewConfig(ok)
+	if err != nil || len(cfg.Disabled) != 1 {
+		t.Fatalf("NewConfig: %+v, %v", cfg.Disabled, err)
+	}
+	tests := []struct {
+		name  string
+		check DisabledCheck
+		want  string
+	}{
+		{"whole gate", DisabledCheck{Check: "structure", Reason: "a long enough reason"}, "must name one rule as gate/rule"},
+		{"no reason", DisabledCheck{Check: "code/secret", Reason: "temp"}, "needs a reason"},
+		{"bad name", DisabledCheck{Check: "Code/Secret", Reason: "a long enough reason"}, "must name one rule"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := minimalInput()
+			in.Disable = []DisabledCheck{tt.check}
+			assertConfigError(t, in, tt.want)
+		})
+	}
+	twice := minimalInput()
+	twice.Disable = []DisabledCheck{ok.Disable[0], ok.Disable[0]}
+	assertConfigError(t, twice, "listed more than once")
+}

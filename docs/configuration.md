@@ -85,6 +85,7 @@ apply to any file.
 | `components` | monorepo form | | See above. |
 | `exclude` | no | `[]` | Paths no check reads. `**` matches any number of segments; a directory excludes everything inside it. |
 | `test` | no | | Single-project form: the test recipe (below). |
+| `disable` | no | `[]` | Rules switched off, each with a reason (below). |
 | `testing` | no | `tests-required` | Changed production code needs tests. |
 | `dependencyPolicy` | no | `strict` | Every new dependency needs a vetting record. |
 | `python.typeCheck` | no | `off` | `mypy` turns on Python type checking; a missing mypy then blocks. |
@@ -102,6 +103,34 @@ Component fields:
 | `layers` | no | Overrides a convention's layer paths, relative to the component root, for layouts that differ from the pack's default. |
 | `reason` | no | Why the component is an exception; shown by `config explain`. |
 | `test` | no | The component's test recipe (below). |
+
+### Disabling a check
+
+A project can switch off one rule of one gate when it does not fit, but only
+with a reason, and every report lists it:
+
+```json
+"disable": [
+  { "check": "structure/function-length", "reason": "upstream style keeps 80-line handlers" }
+]
+```
+
+```
+millennium: passed (gates: 6, changed files: 4)
+  disabled: structure/function-length (hid 3 findings): upstream style keeps 80-line handlers
+```
+
+- `check` is `gate/rule`, as findings print it; a whole gate cannot be
+  disabled. A name that is not a rule of any gate is a config error, so a typo
+  never leaves a rule running while you believe it off.
+- `reason` needs at least ten letters.
+- Rules that report a check failing to run cannot be disabled, because that
+  would let unchecked code pass: `toolchain/tool-missing`, and every
+  `analysis-failed`, `analysis-unavailable`, `convention-unavailable`,
+  `component-ambiguous`, `syntax-error`, `scan-failed`, `tool-failed`,
+  `tsconfig-missing` and `tests-unconfigured` rule.
+- For one line rather than a whole project, use a
+  [waiver](checks.md#waivers) instead.
 
 ### Test recipes
 

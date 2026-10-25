@@ -57,12 +57,22 @@ func writeText(w io.Writer, r domain.Report, filesLabel string) {
 		fmt.Fprintln(w, "millennium: BLOCKED: no gate ran; the engine is miswired, report this as a bug")
 	case r.Passed():
 		fmt.Fprintf(w, "millennium: passed (gates: %d, %s: %d)\n", len(r.Results), filesLabel, r.ChangedFiles)
+		writeDisabled(w, r.Disabled)
 	default:
 		fmt.Fprintf(w, "millennium: BLOCKED (findings: %d, %s: %d)\n", r.FindingCount(), filesLabel, r.ChangedFiles)
+		writeDisabled(w, r.Disabled)
 		fmt.Fprintf(w, "  by rule: %s\n", ruleCounts(r.Findings()))
 		for _, f := range r.Findings() {
 			fmt.Fprintf(w, "  [%s/%s] %s%s\n", f.Gate, f.Rule, location(f), f.Message)
 		}
+	}
+}
+
+// writeDisabled lists the checks the config switched off on every report,
+// so a disabled check is never forgotten.
+func writeDisabled(w io.Writer, disabled []domain.DisabledResult) {
+	for _, d := range disabled {
+		fmt.Fprintf(w, "  disabled: %s (hid %d findings): %s\n", d.Check, d.Suppressed, d.Reason)
 	}
 }
 
@@ -145,11 +155,18 @@ func describeLayer(layer usecase.LayerAssignment) string {
 // jsonReport is the machine-readable report. Status is one of pass, blocked,
 // not-enabled or error.
 type jsonReport struct {
-	Status   string        `json:"status"`
-	Files    int           `json:"files"`
-	Gates    []string      `json:"gates"`
-	Findings []jsonFinding `json:"findings"`
-	Error    string        `json:"error,omitempty"`
+	Status   string         `json:"status"`
+	Files    int            `json:"files"`
+	Gates    []string       `json:"gates"`
+	Findings []jsonFinding  `json:"findings"`
+	Disabled []jsonDisabled `json:"disabled"`
+	Error    string         `json:"error,omitempty"`
+}
+
+type jsonDisabled struct {
+	Check      string `json:"check"`
+	Reason     string `json:"reason"`
+	Suppressed int    `json:"suppressed"`
 }
 
 type jsonFinding struct {
@@ -161,7 +178,10 @@ type jsonFinding struct {
 }
 
 func toJSON(r domain.Report) jsonReport {
-	out := jsonReport{Status: jsonStatus(r), Files: r.ChangedFiles, Gates: []string{}, Findings: []jsonFinding{}}
+	out := jsonReport{Status: jsonStatus(r), Files: r.ChangedFiles, Gates: []string{}, Findings: []jsonFinding{}, Disabled: []jsonDisabled{}}
+	for _, d := range r.Disabled {
+		out.Disabled = append(out.Disabled, jsonDisabled{Check: d.Check, Reason: d.Reason, Suppressed: d.Suppressed})
+	}
 	for _, result := range r.Results {
 		out.Gates = append(out.Gates, result.Gate)
 	}

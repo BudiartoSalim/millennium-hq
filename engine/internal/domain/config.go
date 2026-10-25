@@ -107,9 +107,12 @@ const (
 // root, so the rest of the engine only ever sees components.
 type Config struct {
 	// Languages is every language any component uses.
-	Languages        []Language
-	Components       []Component
-	Exclude          []Pattern
+	Languages  []Language
+	Components []Component
+	Exclude    []Pattern
+	// Disabled are the checks the project switched off, each with its
+	// reason; every report lists them.
+	Disabled         []DisabledCheck
 	Testing          TestingProfile
 	DependencyPolicy DependencyPolicy
 	PythonTypeCheck  PythonTypeCheck
@@ -135,6 +138,7 @@ type ConfigInput struct {
 	Components       []ComponentInput
 	Test             *TestRecipe
 	Exclude          []string
+	Disable          []DisabledCheck
 	Testing          *string
 	DependencyPolicy *string
 	PythonTypeCheck  *string
@@ -167,6 +171,7 @@ func NewConfig(in ConfigInput) (Config, error) {
 		Languages:        languagesOf(components),
 		Components:       components,
 		Exclude:          v.patterns("exclude", in.Exclude, RecursivePattern),
+		Disabled:         v.disabled(in.Disable),
 		Testing:          parseChoice(v, "testing", in.Testing, TestingProfiles(), DefaultTesting),
 		DependencyPolicy: parseChoice(v, "dependencyPolicy", in.DependencyPolicy, DependencyPolicies(), DefaultDependencyPolicy),
 		PythonTypeCheck:  parseChoice(v, "python.typeCheck", in.PythonTypeCheck, PythonTypeChecks(), DefaultPythonTypeCheck),

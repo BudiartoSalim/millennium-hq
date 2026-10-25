@@ -45,6 +45,10 @@ type fakeGate struct {
 
 func (f *fakeGate) Name() string { return f.name }
 
+func (f *fakeGate) Rules() []port.Rule {
+	return []port.Rule{{Name: "r", Disableable: true}, {Name: "broken", Disableable: false}}
+}
+
 func (f *fakeGate) Run(_ context.Context, in port.GateInput) ([]domain.Finding, error) {
 	f.got = in
 	if f.panicked {

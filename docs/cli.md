@@ -109,5 +109,7 @@ With `--format json`, `gate` and `audit` write one JSON object to stdout:
 ```
 
 `status` is `pass`, `blocked`, `not-enabled` or `error`; an `error` report
-carries an `error` message instead of findings. `file` and `line` are left out
+carries an `error` message instead of findings. `disabled` lists the checks
+the config switched off, each with its `reason` and the number of findings it
+`suppressed`. `file` and `line` are left out
 when a finding is not about one place.

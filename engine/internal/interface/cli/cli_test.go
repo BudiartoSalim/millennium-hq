@@ -287,3 +287,18 @@ func TestConfigExplain(t *testing.T) {
 		t.Fatalf("exit %d stderr %q", code, failing.stderr.String())
 	}
 }
+
+func TestDisabledChecksAreAlwaysShown(t *testing.T) {
+	report := passing
+	report.Disabled = []domain.DisabledResult{{DisabledCheck: domain.DisabledCheck{Check: "structure/function-length", Reason: "upstream style"}, Suppressed: 3}}
+	h := &harness{gates: &fakeGates{report: report}}
+	if code := h.run(t, "gate"); code != 0 || !strings.Contains(h.stderr.String(), "disabled: structure/function-length (hid 3 findings): upstream style") {
+		t.Fatalf("exit %d stderr %q", code, h.stderr.String())
+	}
+	h = &harness{gates: &fakeGates{report: report}}
+	h.run(t, "gate", "--format", "json")
+	var out jsonReport
+	if err := json.Unmarshal(h.stdout.Bytes(), &out); err != nil || len(out.Disabled) != 1 || out.Disabled[0].Suppressed != 3 {
+		t.Fatalf("json disabled = %+v, %v", out.Disabled, err)
+	}
+}

@@ -27,6 +27,17 @@ func NewTests(analyzers map[domain.Language]port.Analyzer, packs port.PackSource
 	return &Tests{analyzers: analyzers, packs: packs, source: source, runner: runner, finder: finder}
 }
 
+// Rules lists the rules the gate reports.
+func (*Tests) Rules() []port.Rule {
+	return []port.Rule{
+		{Name: "tests-missing", Disableable: true},
+		{Name: "tests-failed", Disableable: true},
+		{Name: "uncovered-change", Disableable: true},
+		{Name: "tests-unconfigured", Disableable: false},
+		{Name: "tool-failed", Disableable: false},
+	}
+}
+
 // Name identifies the gate in findings.
 func (*Tests) Name() string { return "tests" }
 
