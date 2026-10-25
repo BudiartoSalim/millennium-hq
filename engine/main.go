@@ -16,6 +16,7 @@ import (
 	"millennium/internal/application/usecase"
 	"millennium/internal/domain"
 	"millennium/internal/infrastructure/analysiscache"
+	"millennium/internal/infrastructure/buildtools"
 	"millennium/internal/infrastructure/configfile"
 	"millennium/internal/infrastructure/gitrepo"
 	"millennium/internal/infrastructure/goanalyzer"
@@ -52,7 +53,8 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 	}
 	configPath := filepath.Join(repo.Root(), filepath.FromSlash(domain.ConfigPath))
 	loadConfig := usecase.NewLoadConfig(configfile.NewLoader(configPath), repo)
-	typeScript := helperanalyzer.TypeScript(repo.Root(), toolpath.Find("node"))
+	node := toolpath.Find("node")
+	typeScript := helperanalyzer.TypeScript(repo.Root(), node)
 	python := helperanalyzer.Python(repo.Root(), toolpath.Python())
 	// Several gates read the same files; the cache parses each version once.
 	analyzers := map[domain.Language]port.Analyzer{
@@ -66,6 +68,7 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 		gate.NewStructure(analyzers, builtinPacks, repo),
 		gate.NewShell(repo, shelltools.New(repo.Root())),
 		gate.NewCode(analyzers, repo),
+		gate.NewBuild(buildtools.New(repo.Root(), node), repo),
 	}
 	return cli.Deps{
 		Gates:    usecase.NewRunGates(loadConfig, repo, gates),

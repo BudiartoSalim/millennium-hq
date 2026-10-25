@@ -15,9 +15,9 @@ engine/                       gate engine, Go standard library only
                               rules, limits, facts, verdict
   internal/application/
     port/                     interfaces the core needs
-    gate/                     the checks (toolchain, structure, shell, code); each reports findings
+    gate/                     the checks (toolchain, structure, shell, code, build); each reports findings
     usecase/                  load config, run gates, audit, explain
-  internal/infrastructure/    analysiscache, configfile, gitrepo, goanalyzer, helperanalyzer
+  internal/infrastructure/    analysiscache, buildtools, configfile, gitrepo, goanalyzer, helperanalyzer
                               (TypeScript and Python helpers, embedded), packs
                               (embedded convention packs), shellanalyzer,
                               shelltools (bash -n, shellcheck), toolpath

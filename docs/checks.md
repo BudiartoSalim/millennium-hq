@@ -3,10 +3,10 @@
 Every finding blocks. A finding is printed as `[gate/rule] file:line: message`.
 This page lists each rule, what it enforces, and how to fix it.
 
-**What runs today:** the `toolchain`, `structure`, `shell` and `code` gates,
-for Go, TypeScript, Python and shell. The other checks in
-[design.md](design.md#checks) (format and types, tests required, coverage,
-supply chain) are being built.
+**What runs today:** the `toolchain`, `structure`, `shell`, `code` and
+`build` gates, for Go, TypeScript, Python and shell. The other checks in
+[design.md](design.md#checks) (tests required, coverage, supply chain) are
+being built.
 
 How each language is read:
 
@@ -147,6 +147,23 @@ EXAMPLE_KEY = "AKIAIOSFODNN7EXAMPLE"
 
 Waivers apply to `secret` and `banned-construct`. A waiver needs a reason of
 at least ten letters, or it waives nothing.
+
+## `build`
+
+Runs each language's own tools on the modules and projects a change touches.
+
+| Rule | Fires when | Fix |
+|---|---|---|
+| `gofmt` | A changed Go file is not gofmt-formatted. | Run `gofmt -w` on it. |
+| `vet` | `go vet ./...` reports a problem, or a compile error, anywhere in a touched module. | Fix it. Compile errors outside the changed files still block: the change may be what broke them. |
+| `type-error` | The project's own `tsc --noEmit` reports an error in a touched TypeScript project, or mypy (when `"python": {"typeCheck": "mypy"}`) reports one in the changed Python files. | Fix the type error. |
+| `tsconfig-weakened` | The effective tsconfig, with `extends` resolved by `tsc --showConfig`, does not set `"strict": true`, or switches an option of the strict family (`strictNullChecks`, `noImplicitAny`, ...) back off. | Restore strict mode. |
+| `tsconfig-missing` | A TypeScript file has no `tsconfig.json` at or above it inside its component. | Add one. |
+| `tool-failed` | A tool could not run or failed without output the engine can read. | The message carries the tool's own output. |
+
+TypeScript is checked with the project's own compiler from its `node_modules`,
+or a parent's in a workspace that hoists it; `go vet` runs with
+`GOFLAGS=-mod=readonly`, so it cannot change `go.mod`.
 
 ## Gate failures
 

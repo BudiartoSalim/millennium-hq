@@ -149,3 +149,26 @@ func TestParseHunks(t *testing.T) {
 		t.Fatal("a malformed hunk header must be an error")
 	}
 }
+
+func TestNearestUp(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "go.mod", "module root")
+	write(t, dir, "services/game/api/go.mod", "module game")
+	write(t, dir, "services/game/api/internal/domain/a.go", "package domain")
+	repo := open(t, dir)
+	tests := []struct {
+		from, within, want string
+		ok                 bool
+	}{
+		{"services/game/api/internal/domain", "", "services/game/api", true},
+		{"services/game/api", "services/game/api", "services/game/api", true},
+		{"services/other", "", "", true},
+		{"services/other", "services/other", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := repo.NearestUp(tt.from, "go.mod", tt.within)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("NearestUp(%q, within %q) = %q, %v; want %q, %v", tt.from, tt.within, got, ok, tt.want, tt.ok)
+		}
+	}
+}

@@ -629,6 +629,9 @@ or sh shebang (such as `bin/*`).
    **4a done:** the `code` gate (secrets in any text file, banned constructs,
    suppressions without a reason, TODOs without a link, `millennium:allow`
    waivers), with an analysis cache so each file version is parsed once.
+   **4b done:** the `build` gate (gofmt and go vet per touched module, the
+   project's own tsc, tsconfig strictness through `tsc --showConfig`,
+   optional mypy).
 5. Supply-chain gates.
 6. Agents, skills, and the tech-lead playbook.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,

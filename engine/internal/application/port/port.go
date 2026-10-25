@@ -60,6 +60,31 @@ type ShellChecker interface {
 	Lint(ctx context.Context, path, dialect string) ([]domain.LintIssue, error)
 }
 
+// BuildTools runs each language's own compiler, formatter and type checker.
+// Directories and files are repository-relative; issues name
+// repository-relative files.
+type BuildTools interface {
+	// Gofmt returns the files that are not gofmt-formatted.
+	Gofmt(ctx context.Context, files []string) ([]string, error)
+	// GoVet runs go vet on every package of the module in dir.
+	GoVet(ctx context.Context, dir string) ([]domain.LintIssue, error)
+	// TypeCheck runs the project's own tsc --noEmit for the tsconfig in dir.
+	TypeCheck(ctx context.Context, dir string) ([]domain.LintIssue, error)
+	// TSConfig returns the effective tsconfig of dir, extends resolved, as
+	// tsc --showConfig prints it.
+	TSConfig(ctx context.Context, dir string) ([]byte, error)
+	// Mypy type-checks files, run from dir so the project's mypy config
+	// applies.
+	Mypy(ctx context.Context, dir string, files []string) ([]domain.LintIssue, error)
+}
+
+// FileFinder looks for marker files such as go.mod in the working tree.
+type FileFinder interface {
+	// NearestUp returns the closest directory at or above from, and inside
+	// within, that contains marker.
+	NearestUp(from, marker, within string) (string, bool)
+}
+
 // Analyzer extracts facts from source files of one language.
 type Analyzer interface {
 	Analyze(ctx context.Context, path string, content []byte) (domain.FileFacts, error)

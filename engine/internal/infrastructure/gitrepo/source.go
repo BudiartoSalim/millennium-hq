@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -230,4 +231,26 @@ func hunkAdded(header string) (domain.LineRange, bool) {
 		}
 	}
 	return domain.LineRange{First: start, Last: start + count - 1}, true
+}
+
+// NearestUp returns the closest directory at or above from, and inside
+// within, holding a regular file named marker.
+func (r *Repository) NearestUp(from, marker, within string) (string, bool) {
+	for dir := from; domain.Within(dir, within); dir = parentDir(dir) {
+		info, err := os.Lstat(r.abs(path.Join(dir, marker)))
+		if err == nil && info.Mode().IsRegular() {
+			return dir, true
+		}
+		if dir == "" || dir == within {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+func parentDir(dir string) string {
+	if p := path.Dir(dir); p != "." {
+		return p
+	}
+	return ""
 }

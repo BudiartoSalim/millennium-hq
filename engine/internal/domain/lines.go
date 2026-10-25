@@ -15,8 +15,11 @@ type LineSet struct {
 	Ranges []LineRange
 }
 
-// LintIssue is one problem an external checker reported for a file.
+// LintIssue is one problem an external checker reported. File is the
+// repository-relative path when the checker reports on several files, and
+// empty when it ran on one.
 type LintIssue struct {
+	File    string
 	Line    int
 	Code    string
 	Message string
