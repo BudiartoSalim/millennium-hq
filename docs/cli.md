@@ -7,6 +7,8 @@ millennium scope --base REV --allow PATTERN [--allow PATTERN ...] [--format text
 millennium hook
 millennium config validate
 millennium config explain PATH
+millennium config apply [--local] [--confirm DIGEST] [PROPOSAL]
+millennium config export [--local]
 millennium version
 ```
 
@@ -96,6 +98,21 @@ decide, which blocks.
 
 Validates `.millennium/config.json` and reports every problem at once. Exit
 status 2 when the config is invalid or missing.
+
+## `millennium config apply`
+
+Applies a proposal (default `millennium.proposal.json` at the repository
+root) after showing what it writes and what it loosens; see
+[Configuration](configuration.md#changing-the-config-proposals-and-config-apply).
+
+| Flag | Meaning |
+|---|---|
+| `--local` | Apply as this machine's local config, outside the repository. |
+| `--confirm DIGEST` | Confirm without a terminal, with the digest a previous run printed. A digest that does not match the proposal is refused. |
+
+## `millennium config export`
+
+Prints the config (`--local`: the local config) as a proposal on stdout.
 
 ## `millennium config explain PATH`
 

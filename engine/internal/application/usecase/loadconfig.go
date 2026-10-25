@@ -18,15 +18,24 @@ var (
 )
 
 // LoadConfig reads the project config and decides whether the repository is
-// opted in.
+// opted in: by its committed config or, for a repository the user does not
+// own, by a local config kept outside it.
 type LoadConfig struct {
 	source port.ConfigSource
+	local  port.ConfigSource
 	repo   port.Repository
 }
 
-// NewLoadConfig returns the load-config use-case.
+// NewLoadConfig returns the load-config use-case for the committed config.
 func NewLoadConfig(source port.ConfigSource, repo port.Repository) *LoadConfig {
 	return &LoadConfig{source: source, repo: repo}
+}
+
+// WithLocal adds a local config, used when the repository has none of its
+// own. A committed config always wins.
+func (u *LoadConfig) WithLocal(local port.ConfigSource) *LoadConfig {
+	u.local = local
+	return u
 }
 
 // Execute returns the config and true when the repository is opted in, or a
@@ -48,5 +57,19 @@ func (u *LoadConfig) Execute(ctx context.Context) (domain.Config, bool, error) {
 	if tracked {
 		return domain.Config{}, false, ErrConfigRemoved
 	}
-	return domain.Config{}, false, nil
+	return u.loadLocal()
+}
+
+func (u *LoadConfig) loadLocal() (domain.Config, bool, error) {
+	if u.local == nil {
+		return domain.Config{}, false, nil
+	}
+	cfg, err := u.local.Load()
+	if errors.Is(err, port.ErrConfigNotFound) {
+		return domain.Config{}, false, nil
+	}
+	if err != nil {
+		return domain.Config{}, false, fmt.Errorf("load the local config: %w", err)
+	}
+	return cfg, true, nil
 }

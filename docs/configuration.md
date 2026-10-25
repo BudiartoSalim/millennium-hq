@@ -169,6 +169,65 @@ The engine rejects, with a message naming each problem:
 - a config that is a symlink, a directory, or larger than 64 KiB;
 - paths with `.` or `..` segments, absolute paths, or backslashes.
 
+## Changing the config: proposals and `config apply`
+
+No agent can change the rules it is checked against. Agents write a
+**proposal**, `millennium.proposal.json` at the repository root:
+
+```json
+{
+  "version": 1,
+  "config": { "version": 1, "languages": ["go"], "conventions": ["clean-architecture"] }
+}
+```
+
+You apply it:
+
+```
+millennium config apply
+```
+
+It validates the proposal as strictly as a config, shows every file it will
+write, lists every way it **loosens** the rules compared with the current
+config (a language, component or convention dropped, a path excluded, a check
+disabled, mypy or shellcheck switched off, component or acceptance-test paths
+moved), and asks you to type `yes`. Without a terminal, for example from
+Claude Code's `!` prefix, it prints a digest instead; re-run with
+`--confirm <digest>` after reading the summary. Piped input is refused.
+
+For a config in the repository, it writes:
+
+- `.millennium/config.json`;
+- `.claude/settings.json`, merged with what is there: the plugin enabled for
+  the project, the sandbox on with unsandboxed commands off, writes to
+  `.millennium` denied for every command, and `Edit` on it denied for every
+  agent;
+- a managed section in `AGENTS.md` describing the gates to every agent, plus an
+  `@AGENTS.md` import in `CLAUDE.md` when the repository has one;
+- `millennium.proposal.json` in `.gitignore`.
+
+The applied default proposal is removed. Inside an agent's sandbox the command
+cannot write `.millennium`, and the hooks deny agents from running it at all.
+
+## Local mode: a config outside the repository
+
+For a repository you do not own, such as an open-source project you contribute
+to, keep the config on your machine instead:
+
+```
+millennium config apply --local my-proposal.json
+```
+
+The config goes to `<user config dir>/millennium/projects/<id>/config.json`
+(set `MILLENNIUM_LOCAL_DIR` to move it), where `<id>` comes from the clone's
+git directory, so every worktree of it uses the same config. Nothing in the
+repository changes. A committed config always wins over a local one. Sandboxed
+agents cannot write there, and the hooks deny their file tools.
+
+`millennium config export --local` prints the local config as a proposal, to
+back it up or apply it on another machine. A local config is lost when the
+directory is removed; it is not tied to the plugin's data directory.
+
 ## Removing the config
 
 Deleting `.millennium/config.json` does not switch the checks off while the

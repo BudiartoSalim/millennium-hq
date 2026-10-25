@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"millennium/internal/application/usecase"
 	"millennium/internal/domain"
@@ -78,6 +79,9 @@ func readHookInput(r io.Reader) (hookInput, error) {
 
 func (a *App) preToolUse(ctx context.Context, deps Deps, in hookInput) error {
 	call := domain.ToolCall{Tool: in.ToolName, Role: domain.RoleOf(in.AgentType), Command: stringField(in.ToolInput, "command")}
+	if domain.IsWriteTool(call.Tool) && writesLocalConfig(deps.LocalConfigDir, toolPaths(in)) {
+		return a.deny("millennium: local configs are protected: agents never change the rules they are checked against; the user changes them with `millennium config apply --local`")
+	}
 	for _, raw := range toolPaths(in) {
 		if p, err := deps.RepoPath(raw); err == nil {
 			call.Paths = append(call.Paths, p)
@@ -87,9 +91,27 @@ func (a *App) preToolUse(ctx context.Context, deps Deps, in hookInput) error {
 	if !decision.Deny {
 		return nil
 	}
+	return a.deny(decision.Reason)
+}
+
+func (a *App) deny(reason string) error {
 	return a.writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{
-		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": decision.Reason,
+		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
 	}})
+}
+
+// writesLocalConfig reports whether any path is inside the local config
+// directory, which lies outside the repository the guard's rules cover.
+func writesLocalConfig(dir string, paths []string) bool {
+	if dir == "" {
+		return false
+	}
+	for _, p := range paths {
+		if rel, err := filepath.Rel(dir, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return true
+		}
+	}
+	return false
 }
 
 // toolPaths lists the paths a tool call names, absolute or relative to the

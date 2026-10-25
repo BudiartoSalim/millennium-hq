@@ -265,15 +265,16 @@ refactoring: the tech lead turns the report into work packages for parallel
 engineers, and the existing-code rule keeps each improvement from slipping
 back. Hooks never run it.
 
-**Local mode, for projects the user does not own (agreed for v1).** The config lives on the
+**Local mode, for projects the user does not own (built).** The config lives on the
 user's machine at
-`${CLAUDE_PLUGIN_DATA}/projects/<repo-key>/config.json`, not in the repo.
+`<user config dir>/millennium/projects/<repo-key>/config.json`, not in the repo
+(not the plugin's data directory, which an uninstall deletes).
 `<repo-key>` derives from git's common directory, so every worktree of a repo
 (including parallel engineers') resolves to the same config. A committed config
-always wins over a local one, and the report says the local one was ignored.
-Agents cannot write there; only the user creates or changes it. Local mode is
-not shared across machines and is deleted on uninstall unless the plugin is
-removed with `--keep-data`, so it needs export and import commands.
+always wins over a local one. Agents cannot write there; only the user creates
+or changes it, with `millennium config apply --local`. Local mode is not
+shared across machines; `millennium config export --local` and applying the
+export elsewhere move it.
 
 ## Monorepos: components (built)
 
@@ -647,6 +648,13 @@ or sh shebang (such as `bin/*`).
    Verified: hooks run outside the sandbox, the sandbox already protects
    `.git/config` and `.git/hooks`, `!` commands are unsandboxed, and Stop
    hooks cannot block when they fail to run.
+   **4f done:** `millennium config apply` (strict proposal parsing, the
+   loosenings listed, confirmation by a typed yes at a terminal or a
+   matching `--confirm` digest, piped input refused; writes the config,
+   merged project settings, the AGENTS.md section and .gitignore) and
+   `config export`. Local mode is built with it: local configs under the user
+   config directory, keyed by git's common directory, used when nothing is
+   committed, protected by the hooks.
 5. Supply-chain gates.
 6. Agents, skills, and the tech-lead playbook.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,

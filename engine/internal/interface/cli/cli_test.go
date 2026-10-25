@@ -71,6 +71,10 @@ type harness struct {
 	guard          *fakeGuard
 	stop           *fakeStop
 	scope          *fakeScope
+	applier        *fakeApplier
+	root           string
+	localDir       string
+	terminal       bool
 	config         fakeConfig
 	depsErr        error
 	gotDir         string
@@ -98,12 +102,17 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	if h.scope == nil {
 		h.scope = &fakeScope{}
 	}
+	if h.applier == nil {
+		h.applier = &fakeApplier{}
+	}
 	deps := func(_ context.Context, dir string) (Deps, error) {
 		h.gotDir = dir
 		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
-			Stop: h.stop, Scope: h.scope, RepoPath: repoPath}, h.depsErr
+			Stop: h.stop, Scope: h.scope, Apply: h.applier, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath}, h.depsErr
 	}
-	return New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps).Run(t.Context(), args)
+	app := New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps)
+	app.terminal = func() bool { return h.terminal }
+	return app.Run(t.Context(), args)
 }
 
 var (

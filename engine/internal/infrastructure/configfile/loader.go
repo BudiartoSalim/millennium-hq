@@ -30,6 +30,10 @@ func NewLoader(path string) *Loader {
 	return &Loader{path: path}
 }
 
+// Raw returns the config file's bytes as they are, read as strictly as Load
+// reads them.
+func (l *Loader) Raw() ([]byte, error) { return readRegularFile(l.path) }
+
 // Load reads, decodes and validates the config. It returns
 // port.ErrConfigNotFound only when the file does not exist.
 func (l *Loader) Load() (domain.Config, error) {

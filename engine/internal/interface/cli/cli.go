@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 
 	"millennium/internal/application/usecase"
@@ -39,6 +40,11 @@ Usage:
       Handle a Claude Code hook event read from stdin (the plugin's hooks).
   millennium config validate
       Validate .millennium/config.json.
+  millennium config apply [--local] [--confirm DIGEST] [PROPOSAL]
+      Apply a proposal (default millennium.proposal.json) after showing what it
+      changes and loosens. Only you run it: it asks you to confirm.
+  millennium config export [--local]
+      Print the config as a proposal, to back it up or move it.
   millennium config explain PATH
       Show which component, layers and limits apply to PATH.
   millennium version
@@ -86,6 +92,14 @@ type ScopeChecker interface {
 	Execute(ctx context.Context, in usecase.ScopeInput) (domain.Report, error)
 }
 
+// ConfigApplier validates, applies and exports configs; usecase.ApplyConfig
+// implements it.
+type ConfigApplier interface {
+	Prepare(proposal []byte, target usecase.ApplyTarget) (usecase.ApplyPlan, error)
+	Apply(plan usecase.ApplyPlan) error
+	Export(target usecase.ApplyTarget) ([]byte, error)
+}
+
 // ErrNoRepository is what a DepsFactory returns outside a git repository;
 // hooks then do nothing, since nothing there is opted in.
 var ErrNoRepository = errors.New("not inside a git repository")
@@ -99,6 +113,11 @@ type Deps struct {
 	Guard   ToolGuard
 	Stop    StopChecker
 	Scope   ScopeChecker
+	Apply   ConfigApplier
+	// Root is the repository's absolute path.
+	Root string
+	// LocalConfigDir holds the local configs; no agent may write there.
+	LocalConfigDir string
 	// RepoPath turns a command-line path, relative to the current
 	// directory, into a repository-relative one.
 	RepoPath func(arg string) (string, error)
@@ -136,12 +155,26 @@ type App struct {
 	stdout  io.Writer
 	stderr  io.Writer
 	deps    DepsFactory
+	// terminal reports whether stdin is an interactive terminal, where
+	// `config apply` may ask for confirmation.
+	terminal func() bool
 }
 
 // New returns the application. Text reports go to stderr, where Claude Code
 // hooks pick them up; JSON reports go to stdout; hook events arrive on stdin.
 func New(version string, stdin io.Reader, stdout, stderr io.Writer, deps DepsFactory) *App {
-	return &App{version: version, stdin: stdin, stdout: stdout, stderr: stderr, deps: deps}
+	return &App{version: version, stdin: stdin, stdout: stdout, stderr: stderr, deps: deps, terminal: func() bool { return isTerminal(stdin) }}
+}
+
+// isTerminal reports whether r is a character device, such as a terminal.
+// /dev/null is one too, but a confirmation read from it gets no "yes".
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // Run executes the command in args and returns the exit status.
@@ -263,6 +296,10 @@ func (a *App) config(ctx context.Context, args []string) int {
 		return a.validateConfig(ctx)
 	case len(args) == 2 && args[0] == "explain":
 		return a.explain(ctx, args[1])
+	case len(args) >= 1 && args[0] == "apply":
+		return a.applyConfig(ctx, args[1:])
+	case len(args) >= 1 && args[0] == "export":
+		return a.exportConfig(ctx, args[1:])
 	}
 	fmt.Fprint(a.stderr, usageText)
 	return exitBlocked

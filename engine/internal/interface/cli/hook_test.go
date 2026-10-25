@@ -208,3 +208,20 @@ func TestScopeCommand(t *testing.T) {
 		t.Fatal("patternFlags.String")
 	}
 }
+
+func TestPreToolUseDeniesWritesToLocalConfigs(t *testing.T) {
+	h := &harness{localDir: "/home/u/.config/millennium/projects"}
+	code, out := runHook(t, h, map[string]any{
+		"hook_event_name": "PreToolUse", "cwd": "/r", "tool_name": "Write",
+		"tool_input": map[string]any{"file_path": "/home/u/.config/millennium/projects/ab/config.json"},
+	})
+	specific, _ := out["hookSpecificOutput"].(map[string]any)
+	if code != 0 || specific["permissionDecision"] != "deny" || !strings.Contains(fmt.Sprint(specific["permissionDecisionReason"]), "local configs are protected") {
+		t.Fatalf("exit %d, output %v", code, out)
+	}
+	read := &harness{localDir: "/home/u/.config/millennium/projects"}
+	if code, out := runHook(t, read, map[string]any{"hook_event_name": "PreToolUse", "cwd": "/r", "tool_name": "Read",
+		"tool_input": map[string]any{"file_path": "/home/u/.config/millennium/projects/ab/config.json"}}); code != 0 || out != nil {
+		t.Fatalf("reading a local config is fine: exit %d, output %v", code, out)
+	}
+}

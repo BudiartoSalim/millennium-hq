@@ -172,3 +172,19 @@ func TestNearestUp(t *testing.T) {
 		}
 	}
 }
+
+func TestIdentityIsSharedByWorktrees(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "a.go", "package a")
+	commitAll(t, dir, "base")
+	worktree := filepath.Join(t.TempDir(), "wt")
+	gitT(t, dir, "worktree", "add", "-q", "-b", "engineer", worktree)
+	main, err := open(t, dir).Identity(t.Context())
+	if err != nil {
+		t.Fatalf("Identity: %v", err)
+	}
+	other, err := open(t, worktree).Identity(t.Context())
+	if err != nil || other != main {
+		t.Fatalf("worktree identity %q, %v; want the clone's %q", other, err, main)
+	}
+}

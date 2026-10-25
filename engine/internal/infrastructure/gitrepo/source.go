@@ -254,3 +254,21 @@ func parentDir(dir string) string {
 	}
 	return ""
 }
+
+// Identity names the repository stably across its worktrees: the resolved
+// path of git's common directory, which every worktree of a clone shares.
+func (r *Repository) Identity(ctx context.Context) (string, error) {
+	out, err := r.git(ctx, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("find the git directory: %w", err)
+	}
+	dir := trimLine(out)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(r.root, dir)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve the git directory: %w", err)
+	}
+	return resolved, nil
+}

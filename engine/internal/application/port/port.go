@@ -23,6 +23,30 @@ type ConfigSource interface {
 	Load() (domain.Config, error)
 }
 
+// ConfigFile is a config source backed by a file, which can also return the
+// file as it is, for export.
+type ConfigFile interface {
+	ConfigSource
+	Raw() ([]byte, error)
+}
+
+// ProposalCodec reads proposals and formats configs as proposals.
+type ProposalCodec interface {
+	// ParseProposal validates a proposal and returns its config with the
+	// config's canonical JSON.
+	ParseProposal(data []byte) (domain.Config, []byte, error)
+	FormatProposal(config []byte) ([]byte, error)
+}
+
+// ProjectWriter writes the files `config apply` manages.
+type ProjectWriter interface {
+	// WriteFile writes data to an absolute path.
+	WriteFile(target string, data []byte) error
+	MergeSettings(pluginID string) error
+	SetAgentsSection(section string) error
+	Ignore(pattern string) error
+}
+
 // Repository reads change sets and history from version control.
 type Repository interface {
 	// Changes lists files that differ between base and the working tree,

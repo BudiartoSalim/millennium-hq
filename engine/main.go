@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -23,6 +25,7 @@ import (
 	"millennium/internal/infrastructure/goanalyzer"
 	"millennium/internal/infrastructure/helperanalyzer"
 	"millennium/internal/infrastructure/packs"
+	"millennium/internal/infrastructure/projectfiles"
 	"millennium/internal/infrastructure/shellanalyzer"
 	"millennium/internal/infrastructure/shelltools"
 	"millennium/internal/infrastructure/statestore"
@@ -51,7 +54,12 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 		return cli.Deps{}, fmt.Errorf("load the builtin convention packs (an engine bug): %w", err)
 	}
 	configPath := filepath.Join(repo.Root(), filepath.FromSlash(domain.ConfigPath))
-	loadConfig := usecase.NewLoadConfig(configfile.NewLoader(configPath), repo)
+	localDir, localPath, err := localConfig(ctx, repo)
+	if err != nil {
+		return cli.Deps{}, err
+	}
+	committed, local := configfile.NewLoader(configPath), configfile.NewLoader(localPath)
+	loadConfig := usecase.NewLoadConfig(committed, repo).WithLocal(local)
 	node := toolpath.Find("node")
 	typeScript := helperanalyzer.TypeScript(repo.Root(), node)
 	python := helperanalyzer.Python(repo.Root(), toolpath.Python())
@@ -64,14 +72,19 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 	}
 	runGates := usecase.NewRunGates(loadConfig, repo, gates(repo, node, analyzers, builtinPacks))
 	return cli.Deps{
-		Gates:    runGates,
-		Audit:    usecase.NewRunAudit(loadConfig, repo, gates(repo, node, analyzers, builtinPacks)),
-		Config:   loadConfig,
-		Explain:  usecase.NewExplainFile(loadConfig, builtinPacks),
-		Guard:    usecase.NewGuardToolCall(loadConfig),
-		Stop:     usecase.NewStopCheck(runGates, statestore.New(stateDir())),
-		Scope:    usecase.NewCheckScope(loadConfig, repo),
-		RepoPath: repo.RepoPath,
+		Gates:   runGates,
+		Audit:   usecase.NewRunAudit(loadConfig, repo, gates(repo, node, analyzers, builtinPacks)),
+		Config:  loadConfig,
+		Explain: usecase.NewExplainFile(loadConfig, builtinPacks),
+		Guard:   usecase.NewGuardToolCall(loadConfig),
+		Stop:    usecase.NewStopCheck(runGates, statestore.New(stateDir())),
+		Scope:   usecase.NewCheckScope(loadConfig, repo),
+		Apply: usecase.NewApplyConfig(configfile.Codec{}, usecase.ConfigFiles{
+			Committed: committed, CommittedPath: configPath, Local: local, LocalPath: localPath,
+		}, projectfiles.New(repo.Root())),
+		Root:           repo.Root(),
+		LocalConfigDir: localDir,
+		RepoPath:       repo.RepoPath,
 		Close: func() {
 			typeScript.Close()
 			python.Close()
@@ -107,6 +120,28 @@ func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]
 		gate.NewBuild(buildtools.New(repo.Root(), node), repo),
 		gate.NewTests(analyzers, builtinPacks, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
 	}
+}
+
+// localConfig is where this repository's local config lives: a directory
+// per clone, named after the hash of git's common directory so every
+// worktree finds the same one, under MILLENNIUM_LOCAL_DIR or the user
+// config directory. Sandboxed agents cannot write there, and the hooks deny
+// their file tools too.
+func localConfig(ctx context.Context, repo *gitrepo.Repository) (base, file string, err error) {
+	identity, err := repo.Identity(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	base = os.Getenv("MILLENNIUM_LOCAL_DIR")
+	if base == "" {
+		configDir, err := os.UserConfigDir()
+		if err != nil {
+			return "", "", fmt.Errorf("find the user config directory for local configs: %w", err)
+		}
+		base = filepath.Join(configDir, "millennium", "projects")
+	}
+	sum := sha256.Sum256([]byte(identity))
+	return base, filepath.Join(base, hex.EncodeToString(sum[:8]), "config.json"), nil
 }
 
 // stateDir is where the hooks keep their counters: MILLENNIUM_STATE_DIR when
