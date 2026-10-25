@@ -3,8 +3,7 @@
 Select it with `"conventions": ["clean-architecture"]`, for a single project
 or per component.
 
-**Status:** enforced for Go. TypeScript and Python components that select it
-block with `convention-unavailable` until their analyzers ship.
+**Status:** enforced for Go, TypeScript and Python.
 
 ## Layers
 
@@ -43,6 +42,40 @@ internal/
 A package outside these directories is in no layer. The layer rules do not
 restrict it, but layered code may not import it either; give it a layer or
 move it.
+
+## Default layout for TypeScript
+
+```
+src/main.ts, src/index.ts   composition root
+src/domain/                 domain
+src/application/            application
+src/infrastructure/         infrastructure
+src/interface/              interface (http/, controllers, dto, ...)
+```
+
+Imports are resolved the way the TypeScript compiler resolves them, so
+`tsconfig.json` `paths` aliases such as `@/domain/user` count as imports of
+that file. Node built-ins (`node:fs`, `path`) are the standard library; any
+package from `node_modules` is third-party.
+
+## Default layout for Python
+
+Python services are often laid out as one package of modules, so the default
+accepts both directories and single modules, relative to the component root:
+
+```
+<package>/main.py, __main__.py         composition root
+<package>/domain/ or domain.py         domain
+<package>/application/, service.py,
+          services/                    application
+<package>/infrastructure/              infrastructure
+<package>/interface/, http_api.py      interface
+```
+
+Other modules of the package (adapters such as `engine.py`) are in no layer.
+Modules from the standard library (`sys.stdlib_module_names`) are standard; a
+top-level package found in the component, or under its `src/`, is project
+code; anything else is third-party.
 
 ## Mapping a different layout
 

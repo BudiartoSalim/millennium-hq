@@ -72,11 +72,26 @@ type Deps struct {
 	// RepoPath turns a command-line path, relative to the current
 	// directory, into a repository-relative one.
 	RepoPath func(arg string) (string, error)
+	// Close releases what the dependencies hold, such as analyzer
+	// processes; nil when there is nothing to release.
+	Close func()
 }
 
 // DepsFactory builds Deps on demand, so commands such as version work
 // outside a git repository.
 type DepsFactory func(ctx context.Context) (Deps, error)
+
+// withDeps builds the dependencies, runs use, and releases them.
+func (a *App) withDeps(ctx context.Context, use func(Deps) error) error {
+	deps, err := a.deps(ctx)
+	if deps.Close != nil {
+		defer deps.Close()
+	}
+	if err != nil {
+		return err
+	}
+	return use(deps)
+}
 
 // App is the command-line application.
 type App struct {
@@ -129,11 +144,11 @@ func (a *App) gate(ctx context.Context, args []string) int {
 	if *requireConfig {
 		in.Config = usecase.ConfigRequired
 	}
-	deps, err := a.deps(ctx)
-	if err != nil {
-		return render.fail(err)
-	}
-	report, err := deps.Gates.Execute(ctx, in)
+	var report domain.Report
+	err := a.withDeps(ctx, func(deps Deps) (err error) {
+		report, err = deps.Gates.Execute(ctx, in)
+		return err
+	})
 	return render.outcome(report, err)
 }
 
@@ -145,17 +160,17 @@ func (a *App) audit(ctx context.Context, args []string) int {
 	if !ok {
 		return exitBlocked
 	}
-	deps, err := a.deps(ctx)
-	if err != nil {
-		return render.fail(err)
-	}
-	in := usecase.AuditInput{}
-	if *pathArg != "" {
-		if in.Path, err = deps.RepoPath(*pathArg); err != nil {
-			return render.fail(err)
+	var report domain.Report
+	err := a.withDeps(ctx, func(deps Deps) (err error) {
+		in := usecase.AuditInput{}
+		if *pathArg != "" {
+			if in.Path, err = deps.RepoPath(*pathArg); err != nil {
+				return err
+			}
 		}
-	}
-	report, err := deps.Audit.Execute(ctx, in)
+		report, err = deps.Audit.Execute(ctx, in)
+		return err
+	})
 	return render.outcome(report, err)
 }
 
@@ -194,17 +209,13 @@ func (a *App) config(ctx context.Context, args []string) int {
 }
 
 func (a *App) validateConfig(ctx context.Context) int {
-	err := func() error {
-		deps, err := a.deps(ctx)
-		if err != nil {
-			return err
-		}
+	err := a.withDeps(ctx, func(deps Deps) error {
 		_, enabled, err := deps.Config.Execute(ctx)
 		if err == nil && !enabled {
 			err = errors.New("no " + domain.ConfigPath + " in this repository")
 		}
 		return err
-	}()
+	})
 	if err != nil {
 		fmt.Fprintf(a.stderr, "millennium: %v\n", err)
 		return exitBlocked
@@ -214,17 +225,15 @@ func (a *App) validateConfig(ctx context.Context) int {
 }
 
 func (a *App) explain(ctx context.Context, arg string) int {
-	explanation, err := func() (usecase.Explanation, error) {
-		deps, err := a.deps(ctx)
-		if err != nil {
-			return usecase.Explanation{}, err
-		}
+	var explanation usecase.Explanation
+	err := a.withDeps(ctx, func(deps Deps) error {
 		path, err := deps.RepoPath(arg)
 		if err != nil {
-			return usecase.Explanation{}, err
+			return err
 		}
-		return deps.Explain.Execute(ctx, path)
-	}()
+		explanation, err = deps.Explain.Execute(ctx, path)
+		return err
+	})
 	if err != nil {
 		fmt.Fprintf(a.stderr, "millennium: %v\n", err)
 		return exitBlocked

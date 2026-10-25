@@ -34,6 +34,53 @@ type FunctionFacts struct {
 	Cognitive int
 }
 
+// Comment is one comment, with the line it starts on. Text includes the
+// comment markers ("// ...", "# ...").
+type Comment struct {
+	Line int
+	Text string
+}
+
+// ConstructKind names a risky language construct, independent of language.
+type ConstructKind string
+
+// Construct kinds the analyzers report.
+const (
+	// ConstructDynamicCode runs code built at run time: eval, new Function,
+	// Python exec.
+	ConstructDynamicCode ConstructKind = "dynamic-code"
+	// ConstructShellCommand runs a command through a shell, where an
+	// interpolated value can become a command.
+	ConstructShellCommand ConstructKind = "shell-command"
+	// ConstructTLSVerifyOff disables certificate verification.
+	ConstructTLSVerifyOff ConstructKind = "tls-verify-off"
+	// ConstructUnsafeDeserialization decodes data into arbitrary objects:
+	// pickle, yaml.load without a safe loader.
+	ConstructUnsafeDeserialization ConstructKind = "unsafe-deserialization"
+	// ConstructHTMLInjection writes raw HTML: innerHTML,
+	// dangerouslySetInnerHTML.
+	ConstructHTMLInjection ConstructKind = "html-injection"
+	// ConstructExplicitAny is a TypeScript `any`, which switches the type
+	// checker off for that value.
+	ConstructExplicitAny ConstructKind = "explicit-any"
+)
+
+// ConstructKinds lists every construct kind in a stable order.
+func ConstructKinds() []ConstructKind {
+	return []ConstructKind{
+		ConstructDynamicCode, ConstructShellCommand, ConstructTLSVerifyOff,
+		ConstructUnsafeDeserialization, ConstructHTMLInjection, ConstructExplicitAny,
+	}
+}
+
+// Construct is one risky construct found in a file.
+type Construct struct {
+	Kind ConstructKind
+	Line int
+	// Detail is what was found, for the message: "eval", "shell=True".
+	Detail string
+}
+
 // FileFacts is what a language analyzer extracts from one source file. Every
 // language produces the same facts, so the rules are written once.
 type FileFacts struct {
@@ -41,7 +88,9 @@ type FileFacts struct {
 	// Generated marks machine-written code, which the limits skip.
 	Generated bool
 	// Test marks test code, which the function-length limit skips.
-	Test      bool
-	Imports   []Import
-	Functions []FunctionFacts
+	Test       bool
+	Imports    []Import
+	Functions  []FunctionFacts
+	Comments   []Comment
+	Constructs []Construct
 }

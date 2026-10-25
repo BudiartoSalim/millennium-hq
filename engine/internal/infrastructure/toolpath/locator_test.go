@@ -11,3 +11,17 @@ func TestLocate(t *testing.T) {
 		t.Fatal("want an error for a missing tool")
 	}
 }
+
+func TestFindAndPython(t *testing.T) {
+	if Find("go") == "" {
+		t.Fatal("go runs these tests, so Find must locate it")
+	}
+	if Find("millennium-no-such-tool") != "" {
+		t.Fatal("a missing tool must yield an empty path")
+	}
+	// The value of Python depends on the machine; it must be nil or a
+	// runnable command, never an empty program name.
+	if cmd := Python(); cmd != nil && cmd[0] == "" {
+		t.Fatalf("Python() = %q", cmd)
+	}
+}

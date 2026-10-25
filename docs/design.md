@@ -577,6 +577,24 @@ or sh shebang (such as `bin/*`).
   Go shell parser is a third-party module, so they wait for a tokenizer of our
   own after v1. Until then the maintainability reviewer covers them.
 
+## Known limitations
+
+- **TypeScript 7.** The TypeScript analyzer parses with the project's own
+  `typescript` package through the classic compiler API. TypeScript 7 (the
+  native port, July 2026) no longer ships that API; projects on it block with
+  a message saying so. Supporting them means moving to TypeScript 7's AST API
+  once it is stable, or letting a project point the helper at a TypeScript 6
+  install.
+
+## Pending your approval
+
+- **TypeScript test fixture.** The TypeScript analyzer's tests need a
+  TypeScript compiler, so `typescript@6.0.3` is a test-only fixture pinned in
+  `scripts/fixtures/typescript/package-lock.json` (Microsoft, Apache-2.0, no
+  dependencies, no install scripts, published 2026-04-16). It is installed
+  outside the repository by `scripts/setup-fixtures.sh` and never shipped.
+  AGENTS.md requires approval for any dependency, so this needs a yes.
+
 ## Open decisions
 
 1. **`/millennium:adopt`** and **disabling a check needs a reason**: designed
@@ -599,12 +617,11 @@ or sh shebang (such as `bin/*`).
 1. **Done:** this repo's `AGENTS.md`, the config schema, and the engine
    skeleton (config loading, change detection, the toolchain gate, the report
    model, fail-closed plumbing).
-2. **Go part done:** components, `config explain`, the Go analyzer, the
-   clean-architecture pack for Go (embedded in the engine), function limits
-   with the existing-code rule, `millennium audit`, and the user docs in
-   `docs/`. The engine audits its own source in `scripts/verify.sh`.
-   **Remaining:** the TypeScript and Python analyzer helpers and their
-   clean-architecture paths.
+2. **Done:** components, `config explain`, the Go analyzer, the TypeScript
+   and Python analyzer helpers, the clean-architecture pack for all three
+   (embedded in the engine), function limits with the existing-code rule,
+   `millennium audit`, and the user docs in `docs/`. The engine audits its own
+   source, and its Python helper, in `scripts/verify.sh`.
 3. Shell support.
 4. Hooks and protection layers; `config apply`; the tests-required gate.
 5. Supply-chain gates.

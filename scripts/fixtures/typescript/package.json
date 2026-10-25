@@ -1,0 +1,8 @@
+{
+  "name": "millennium-typescript-fixture",
+  "private": true,
+  "description": "Test-only fixture: the TypeScript compiler the TypeScript analyzer's tests parse with. Never shipped, never a runtime dependency.",
+  "dependencies": {
+    "typescript": "6.0.3"
+  }
+}

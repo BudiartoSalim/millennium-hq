@@ -18,6 +18,7 @@ import (
 	"millennium/internal/infrastructure/configfile"
 	"millennium/internal/infrastructure/gitrepo"
 	"millennium/internal/infrastructure/goanalyzer"
+	"millennium/internal/infrastructure/helperanalyzer"
 	"millennium/internal/infrastructure/packs"
 	"millennium/internal/infrastructure/toolpath"
 	"millennium/internal/interface/cli"
@@ -48,8 +49,12 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 	}
 	configPath := filepath.Join(repo.Root(), filepath.FromSlash(domain.ConfigPath))
 	loadConfig := usecase.NewLoadConfig(configfile.NewLoader(configPath), repo)
+	typeScript := helperanalyzer.TypeScript(repo.Root(), toolpath.Find("node"))
+	python := helperanalyzer.Python(repo.Root(), toolpath.Python())
 	analyzers := map[domain.Language]port.Analyzer{
-		domain.LanguageGo: goanalyzer.New(repo.Root()),
+		domain.LanguageGo:         goanalyzer.New(repo.Root()),
+		domain.LanguageTypeScript: typeScript,
+		domain.LanguagePython:     python,
 	}
 	gates := []port.Gate{
 		gate.NewToolchain(toolpath.Locator{}),
@@ -61,5 +66,9 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 		Config:   loadConfig,
 		Explain:  usecase.NewExplainFile(loadConfig, builtinPacks),
 		RepoPath: repo.RepoPath,
+		Close: func() {
+			typeScript.Close()
+			python.Close()
+		},
 	}, nil
 }

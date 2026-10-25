@@ -134,3 +134,35 @@ func TestAnalyzeFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestCommentsAndConstructs(t *testing.T) {
+	root := repoWith(t, map[string]string{"go.mod": "module m\n"})
+	src := `package a
+
+import (
+	"crypto/tls"
+	"os/exec"
+)
+
+// Run does things. TODO(#12): more
+func Run(ctx context.Context, cmd string) {
+	_ = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test server only
+	_ = exec.Command("sh", "-c", cmd)
+	_ = exec.CommandContext(ctx, "bash", "-c", cmd)
+	_ = exec.Command("ls", "-c")
+	_ = exec.Command("git", "status")
+}
+`
+	facts := analyze(t, root, "a.go", src)
+	if len(facts.Comments) != 2 || facts.Comments[0].Line != 8 || !strings.Contains(facts.Comments[1].Text, "nolint") {
+		t.Fatalf("comments = %+v", facts.Comments)
+	}
+	want := []domain.Construct{
+		{Kind: domain.ConstructTLSVerifyOff, Line: 10, Detail: "InsecureSkipVerify: true"},
+		{Kind: domain.ConstructShellCommand, Line: 11, Detail: `exec.Command("sh", "-c", ...)`},
+		{Kind: domain.ConstructShellCommand, Line: 12, Detail: `exec.CommandContext("bash", "-c", ...)`},
+	}
+	if !slices.Equal(facts.Constructs, want) {
+		t.Fatalf("constructs = %+v\nwant         %+v", facts.Constructs, want)
+	}
+}

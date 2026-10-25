@@ -17,8 +17,9 @@ engine/                       gate engine, Go standard library only
     port/                     interfaces the core needs
     gate/                     the checks (toolchain, structure); each reports findings
     usecase/                  load config, run gates, audit, explain
-  internal/infrastructure/    configfile, gitrepo, goanalyzer, packs (embedded
-                              convention packs), toolpath adapters
+  internal/infrastructure/    configfile, gitrepo, goanalyzer, helperanalyzer
+                              (TypeScript and Python helpers, embedded), packs
+                              (embedded convention packs), toolpath adapters
   internal/interface/cli/     argument parsing, rendering, exit codes
 schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
 .millennium/config.json       this repository's own config: the engine audits itself
@@ -99,8 +100,14 @@ user's global and system config isolated.
 ## Verify before you say "done"
 
 ```
+eval "$(bash scripts/setup-fixtures.sh)"   # once per shell: the TypeScript test fixture
 bash scripts/verify.sh
 ```
+
+The TypeScript analyzer's tests need a TypeScript compiler. It is a test-only
+fixture pinned by `scripts/fixtures/typescript/package-lock.json`, installed
+outside the repository with install scripts disabled; `verify.sh` refuses to
+run without it rather than report skipped tests as passed.
 
 It runs gofmt, go vet for linux, darwin and windows, the full test suite, and
 the engine auditing its own source against `.millennium/config.json`: a rule

@@ -24,7 +24,9 @@ order in [design.md](design.md).
 ## Getting started
 
 You need git and Go 1.25 or newer to build the engine. Release binaries, which
-need no Go, are planned.
+need no Go, are planned. Checking TypeScript needs `node` and the project's
+dependencies installed (TypeScript 6 or older); checking Python needs Python
+3.10 or newer.
 
 1. **Build the engine** from a clone of this repository:
 

@@ -1,6 +1,7 @@
 // Package goanalyzer turns Go source into domain.FileFacts with the standard
-// library parser: imports classified against the file's module, and every
-// function's length, nesting depth and cognitive complexity.
+// library parser: imports classified against the file's module, every
+// function's length, nesting depth and cognitive complexity, comments, and
+// risky constructs.
 package goanalyzer
 
 import (
@@ -37,11 +38,13 @@ func (a *Analyzer) Analyze(_ context.Context, path string, content []byte) (doma
 		return domain.FileFacts{}, err
 	}
 	facts := domain.FileFacts{
-		Path:      path,
-		Generated: ast.IsGenerated(file),
-		Test:      strings.HasSuffix(path, "_test.go"),
-		Imports:   imports(fset, file, mod),
-		Functions: functions(fset, file),
+		Path:       path,
+		Generated:  ast.IsGenerated(file),
+		Test:       strings.HasSuffix(path, "_test.go"),
+		Imports:    imports(fset, file, mod),
+		Functions:  functions(fset, file),
+		Comments:   comments(fset, file),
+		Constructs: constructs(fset, file),
 	}
 	return facts, nil
 }
