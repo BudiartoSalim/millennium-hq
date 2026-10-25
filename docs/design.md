@@ -626,6 +626,9 @@ or sh shebang (such as `bin/*`).
    lines (`--norc`), shebang detection for extensionless scripts, and a
    line-based shell analyzer for comments and risky constructs.
 4. Hooks and protection layers; `config apply`; the tests-required gate.
+   **4a done:** the `code` gate (secrets in any text file, banned constructs,
+   suppressions without a reason, TODOs without a link, `millennium:allow`
+   waivers), with an analysis cache so each file version is parsed once.
 5. Supply-chain gates.
 6. Agents, skills, and the tech-lead playbook.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,

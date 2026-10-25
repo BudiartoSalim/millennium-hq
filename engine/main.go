@@ -15,6 +15,7 @@ import (
 	"millennium/internal/application/port"
 	"millennium/internal/application/usecase"
 	"millennium/internal/domain"
+	"millennium/internal/infrastructure/analysiscache"
 	"millennium/internal/infrastructure/configfile"
 	"millennium/internal/infrastructure/gitrepo"
 	"millennium/internal/infrastructure/goanalyzer"
@@ -53,16 +54,18 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 	loadConfig := usecase.NewLoadConfig(configfile.NewLoader(configPath), repo)
 	typeScript := helperanalyzer.TypeScript(repo.Root(), toolpath.Find("node"))
 	python := helperanalyzer.Python(repo.Root(), toolpath.Python())
+	// Several gates read the same files; the cache parses each version once.
 	analyzers := map[domain.Language]port.Analyzer{
-		domain.LanguageGo:         goanalyzer.New(repo.Root()),
-		domain.LanguageTypeScript: typeScript,
-		domain.LanguagePython:     python,
-		domain.LanguageShell:      shellanalyzer.Analyzer{},
+		domain.LanguageGo:         analysiscache.Wrap(goanalyzer.New(repo.Root())),
+		domain.LanguageTypeScript: analysiscache.Wrap(typeScript),
+		domain.LanguagePython:     analysiscache.Wrap(python),
+		domain.LanguageShell:      analysiscache.Wrap(shellanalyzer.Analyzer{}),
 	}
 	gates := []port.Gate{
 		gate.NewToolchain(toolpath.Locator{}),
 		gate.NewStructure(analyzers, builtinPacks, repo),
 		gate.NewShell(repo, shelltools.New(repo.Root())),
+		gate.NewCode(analyzers, repo),
 	}
 	return cli.Deps{
 		Gates:    usecase.NewRunGates(loadConfig, repo, gates),

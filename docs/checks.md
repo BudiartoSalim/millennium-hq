@@ -3,10 +3,10 @@
 Every finding blocks. A finding is printed as `[gate/rule] file:line: message`.
 This page lists each rule, what it enforces, and how to fix it.
 
-**What runs today:** the `toolchain`, `structure` and `shell` gates, for Go,
-TypeScript, Python and shell. The other checks in
-[design.md](design.md#checks) (format and types, banned APIs, suppressions,
-secrets, tests required, coverage, supply chain) are being built.
+**What runs today:** the `toolchain`, `structure`, `shell` and `code` gates,
+for Go, TypeScript, Python and shell. The other checks in
+[design.md](design.md#checks) (format and types, tests required, coverage,
+supply chain) are being built.
 
 How each language is read:
 
@@ -120,6 +120,33 @@ edited; `millennium audit` lists it. shellcheck runs with `--norc`, so a
 --source-path=SCRIPTDIR`, so `# shellcheck source=` paths resolve relative to
 the script. A library without a shebang or `# shellcheck shell=` directive is
 linted as bash.
+
+## `code`
+
+Runs on the lines a change touched (every line, for a new file or an audit).
+
+| Rule | Fires when | Fix |
+|---|---|---|
+| `secret` | Any text file, in a component or not, holds something shaped like a credential: AWS, GitHub, Slack, Google, Stripe, Anthropic and OpenAI keys, private keys, JSON Web Tokens, or a random-looking quoted value assigned to a name such as `password`, `token` or `api_key`. Placeholders (`changeme`, `${VAR}`, `<your-key>`, `example`) are ignored. | Load it from the environment or a secret store, and rotate it if it was real. A deliberate fixture can be waived (below). |
+| `banned-construct` | Analysed code uses something that is a common security hole: `eval`, `new Function`, Python `exec`; a command run through a shell (`shell=True`, `os.system`, `exec.Command("sh", "-c", ...)`, `child_process.exec`, `curl ... \| sh`); TLS verification off (`InsecureSkipVerify`, `verify=False`, `rejectUnauthorized: false`); unsafe deserialisation (`pickle.loads`, `yaml.load` without a safe loader); raw HTML (`innerHTML`, `dangerouslySetInnerHTML`); a TypeScript `any`. | Use the safe form the message names. If the construct is truly needed, waive it with a reason. |
+| `suppression-without-reason` | A directive switches a checker off without saying why: `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `//nolint`, `#nosec`, `# noqa`, `# type: ignore`, `# pragma: no cover`, `# shellcheck disable=`, coverage ignores. | Add the reason after ` -- ` or a second comment marker, or as a comment on the line above: `//nolint:gosec // the hash is a cache key, not a secret`. A reason has at least ten letters. |
+| `todo-without-link` | A `TODO`, `FIXME`, `XXX` or `HACK` marker has no issue reference. | Link one (`#123`, `PROJ-45` or a URL), or do the work now. |
+| `scan-failed` | A file cannot be read or analysed, so it could hold anything. | Fix the cause; exclude large generated or vendored files in the config. |
+
+Binary files (a NUL byte in the first 8000 bytes, as git decides) are skipped.
+
+### Waivers
+
+`millennium:allow <rule> -- <reason>` on the line itself or the line directly
+above waives that rule there, in any file and any comment syntax:
+
+```python
+# millennium:allow secret -- the AWS documentation's example key, used as test input
+EXAMPLE_KEY = "AKIAIOSFODNN7EXAMPLE"
+```
+
+Waivers apply to `secret` and `banned-construct`. A waiver needs a reason of
+at least ten letters, or it waives nothing.
 
 ## Gate failures
 
