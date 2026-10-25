@@ -11,7 +11,7 @@ import (
 func TestEveryGateDeclaresItsRules(t *testing.T) {
 	gates := []port.Gate{
 		NewToolchain(nil), NewStructure(nil, nil, nil), NewShell(nil, nil),
-		NewCode(nil, nil), NewBuild(nil, nil), NewTests(nil, nil, nil, nil, nil),
+		NewCode(nil, nil), NewBuild(nil, nil), NewTests(nil, nil, nil, nil, nil), NewDeps(nil, nil, nil, nil, nil, nil),
 	}
 	for _, g := range gates {
 		rules := g.Rules()

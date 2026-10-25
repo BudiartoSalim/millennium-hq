@@ -21,25 +21,44 @@ type fakeConfigFile struct {
 func (f fakeConfigFile) Load() (domain.Config, error) { return f.cfg, f.err }
 func (f fakeConfigFile) Raw() ([]byte, error)         { return f.raw, f.rawErr }
 
-// jsonCodec parses {"config": {"languages": [...]}} proposals.
+// jsonCodec parses {"config": {"languages": [...]}, "approve": ["name@version"]}
+// proposals.
 type jsonCodec struct{}
 
-func (jsonCodec) ParseProposal(data []byte) (domain.Config, []byte, error) {
+func (jsonCodec) ParseProposal(data []byte) (port.Proposal, error) {
 	var p struct {
-		Config struct {
+		Config *struct {
 			Languages []string `json:"languages"`
 		} `json:"config"`
+		Approve []string `json:"approve"`
 	}
 	if err := json.Unmarshal(data, &p); err != nil {
-		return domain.Config{}, nil, err
+		return port.Proposal{}, err
 	}
-	cfg, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: p.Config.Languages})
-	return cfg, []byte(strings.Join(p.Config.Languages, ",")), err
+	var out port.Proposal
+	if p.Config != nil {
+		cfg, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: p.Config.Languages})
+		if err != nil {
+			return port.Proposal{}, err
+		}
+		out.Config, out.Canonical = &cfg, []byte(strings.Join(p.Config.Languages, ","))
+	}
+	for _, key := range p.Approve {
+		name, version, _ := domain.SplitKey(key)
+		a, err := domain.NewApproval(domain.ApprovalInput{Ecosystem: "npm", Name: name, Version: version, Decision: "approved", Reason: "vetted in the test", Checked: "2026-10-01"})
+		if err != nil {
+			return port.Proposal{}, err
+		}
+		out.Approvals = append(out.Approvals, a)
+	}
+	return out, nil
 }
 
 func (jsonCodec) FormatProposal(config []byte) ([]byte, error) {
 	return append([]byte("proposal:"), config...), nil
 }
+
+func (jsonCodec) FormatApproval(a domain.Approval) ([]byte, error) { return []byte(a.Key()), nil }
 
 type recordingWriter struct {
 	calls []string
@@ -66,7 +85,8 @@ func (w *recordingWriter) Ignore(p string) error {
 func applyFixture(t *testing.T, committed, local fakeConfigFile) (*ApplyConfig, *recordingWriter) {
 	t.Helper()
 	w := &recordingWriter{}
-	files := ConfigFiles{Committed: committed, CommittedPath: "/repo/.millennium/config.json", Local: local, LocalPath: "/home/u/.config/millennium/projects/k/config.json"}
+	files := ConfigFiles{Committed: committed, CommittedPath: "/repo/.millennium/config.json", Local: local, LocalPath: "/home/u/.config/millennium/projects/k/config.json",
+		CommittedApprovals: "/repo/.millennium/deps", LocalApprovals: "/home/u/.config/millennium/projects/k/deps"}
 	return NewApplyConfig(jsonCodec{}, files, w), w
 }
 
@@ -177,5 +197,49 @@ func TestLoadConfigFallsBackToTheLocalConfig(t *testing.T) {
 				t.Fatalf("cfg %v enabled %v err %v", cfg.Languages, enabled, err)
 			}
 		})
+	}
+}
+
+func TestApplyApprovals(t *testing.T) {
+	uc, w := applyFixture(t, fakeConfigFile{err: port.ErrConfigNotFound}, fakeConfigFile{err: port.ErrConfigNotFound})
+	plan, err := uc.Prepare([]byte(`{"approve":["express@4.21.2"]}`), ApplyCommitted)
+	if err != nil || plan.Config != nil || len(plan.Writes) != 1 || !strings.Contains(plan.Writes[0], "approves npm express@4.21.2 (vetted in the test)") {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	if err := uc.Apply(plan); err != nil || !slices.Equal(w.calls, []string{"write /repo/.millennium/deps/npm/express@4.21.2.json express@4.21.2"}) {
+		t.Fatalf("writes = %q, %v", w.calls, err)
+	}
+	local, lw := applyFixture(t, fakeConfigFile{}, fakeConfigFile{err: port.ErrConfigNotFound})
+	plan, err = local.Prepare([]byte(`{"config":{"languages":["go"]},"approve":["ms@2.0.0"]}`), ApplyLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := local.Apply(plan); err != nil || !slices.Equal(lw.calls, []string{
+		"write /home/u/.config/millennium/projects/k/deps/npm/ms@2.0.0.json ms@2.0.0",
+		"write /home/u/.config/millennium/projects/k/config.json go",
+	}) {
+		t.Fatalf("writes = %q, %v", lw.calls, err)
+	}
+	w.err = errors.New("read-only")
+	if err := uc.Apply(ApplyPlan{Approvals: plan.Approvals}); err == nil {
+		t.Fatal("a failed approval write must stop the apply")
+	}
+}
+
+type failingFormat struct{ jsonCodec }
+
+func (failingFormat) FormatApproval(domain.Approval) ([]byte, error) {
+	return nil, errors.New("format failed")
+}
+
+func TestApplyStopsWhenARecordCannotBeFormatted(t *testing.T) {
+	w := &recordingWriter{}
+	uc := NewApplyConfig(failingFormat{}, ConfigFiles{CommittedApprovals: "/d"}, w)
+	plan, err := uc.Prepare([]byte(`{"approve":["x@1.0.0"]}`), ApplyCommitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uc.Apply(plan); err == nil || len(w.calls) != 0 {
+		t.Fatalf("err = %v, writes %q", err, w.calls)
 	}
 }

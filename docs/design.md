@@ -502,8 +502,8 @@ lockfiles, `npm ci` with `ignore-scripts`, `min-release-age`, hash-pinned Python
 requirements without sdists, digest-pinned images, the `/vet-dependency`
 procedure. Turned into gates or added:
 
-- **Approval records.** Any manifest change blocks unless
-  `.millennium/deps/` holds a vetting record for that exact name and version.
+- **Approval records (built).** A lockfile change blocks unless
+  `.millennium/deps/` holds a vetting record for each new name and version.
   Agents draft records; approving one goes through `config apply`.
 - **Lockfile diff.** New or changed transitive packages are reported and need
   approval too.
@@ -655,7 +655,14 @@ or sh shebang (such as `bin/*`).
    `config export`. Local mode is built with it: local configs under the user
    config directory, keyed by git's common directory, used when nothing is
    committed, protected by the hooks.
-5. Supply-chain gates.
+5. Supply-chain gates. **Done:** the `deps` gate (approval records, one
+   file per package version, covering transitive packages; install scripts;
+   pinning of package.json, requirements, `.npmrc`, workflow actions and
+   container images on touched lines; in the full tier the release-age
+   cooldown from npm, the Go proxy and PyPI, OSV for every locked package,
+   `go env` integrity and `npm audit signatures`); approvals carried in
+   proposals and written by `config apply`. A failing registry blocks.
+   `go.sum` `/go.mod`-only lines need no approval (they never build).
 6. Agents, skills, and the tech-lead playbook.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
    local mode.

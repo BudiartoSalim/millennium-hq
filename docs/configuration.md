@@ -181,7 +181,8 @@ No agent can change the rules it is checked against. Agents write a
 }
 ```
 
-You apply it:
+It may instead (or also) carry dependency approvals, see
+[Approving a dependency](#approving-a-dependency). You apply it:
 
 ```
 millennium config apply
@@ -208,6 +209,54 @@ For a config in the repository, it writes:
 
 The applied default proposal is removed. Inside an agent's sandbox the command
 cannot write `.millennium`, and the hooks deny agents from running it at all.
+
+## Approving a dependency
+
+Every package version a lockfile adds needs an approval record (the `deps`
+gate's `unapproved-dependency`, see [Checks](checks.md#deps)). A record is
+one file per package under `.millennium/deps/<ecosystem>/`, named
+`<name>@<version>.json` with any `/` in the name written as `__`:
+
+```
+.millennium/deps/npm/express@4.21.2.json
+.millennium/deps/npm/@types__node@22.10.1.json
+.millennium/deps/go/github.com__redis__go-redis__v9@v9.7.0.json
+.millennium/deps/pypi/numpy@2.1.0.json
+```
+
+Records are protected like the config: agents draft them into a proposal and
+you apply it.
+
+```json
+{
+  "version": 1,
+  "approvals": [
+    {
+      "ecosystem": "npm",
+      "name": "express",
+      "version": "4.21.2",
+      "decision": "approved",
+      "reason": "HTTP routing for the identity API; no stdlib equivalent",
+      "checked": "2026-10-20",
+      "transitive": ["body-parser@1.20.3", "ms@2.0.0"]
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `ecosystem` | `npm`, `go` or `pypi`. |
+| `name`, `version` | The exact package version. A new version needs a new record. |
+| `decision` | Always `approved`; a rejected package is simply not recorded. |
+| `reason` | Why it is needed and what vetting found, at least 10 letters. |
+| `checked` | The date it was vetted, `YYYY-MM-DD`. |
+| `transitive` | Optional: the `name@version` of packages it brings in, approved with it. |
+| `securityPatch` | Optional: the advisory this release fixes. It lets a release younger than the 7-day cooldown through. |
+
+`config apply` lists each record it writes, with its reason. With `--local`
+the records go to `deps/` beside the local config instead. A record whose
+file name does not match what it approves is refused (`invalid-approval`).
 
 ## Local mode: a config outside the repository
 

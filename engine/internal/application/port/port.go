@@ -6,6 +6,7 @@ package port
 import (
 	"context"
 	"errors"
+	"time"
 
 	"millennium/internal/domain"
 )
@@ -30,12 +31,21 @@ type ConfigFile interface {
 	Raw() ([]byte, error)
 }
 
-// ProposalCodec reads proposals and formats configs as proposals.
+// Proposal is a validated change an agent drafted for the user to apply: a
+// new config, dependency approvals, or both.
+type Proposal struct {
+	// Config is nil when the proposal only approves dependencies.
+	Config *domain.Config
+	// Canonical is the config's indented JSON, as it will be written.
+	Canonical []byte
+	Approvals []domain.Approval
+}
+
+// ProposalCodec reads proposals and formats what `config apply` writes.
 type ProposalCodec interface {
-	// ParseProposal validates a proposal and returns its config with the
-	// config's canonical JSON.
-	ParseProposal(data []byte) (domain.Config, []byte, error)
+	ParseProposal(data []byte) (Proposal, error)
 	FormatProposal(config []byte) ([]byte, error)
+	FormatApproval(a domain.Approval) ([]byte, error)
 }
 
 // ProjectWriter writes the files `config apply` manages.
@@ -120,6 +130,47 @@ type TestRunner interface {
 	// Command runs a component's own test recipe from dir and reads its
 	// lcov report.
 	Command(ctx context.Context, dir string, recipe domain.TestRecipe) (TestResult, error)
+}
+
+// ManifestFacts is what a dependency manifest says.
+type ManifestFacts struct {
+	// Lockfile marks a file that pins the full dependency set; its packages
+	// are what approvals and registry checks apply to.
+	Lockfile bool
+	Packages []domain.LockedPackage
+	// Issues are pinning problems; Code is the rule name.
+	Issues []domain.LintIssue
+}
+
+// ManifestReader reads dependency manifests and lockfiles.
+type ManifestReader interface {
+	// Read returns the facts of the manifest at path, or false when the
+	// file is not a manifest.
+	Read(path string, content []byte) (ManifestFacts, bool, error)
+}
+
+// ApprovalSource provides the dependency approvals in force.
+type ApprovalSource interface {
+	Approvals() (domain.Approvals, error)
+}
+
+// Registry answers questions about published packages over the network.
+type Registry interface {
+	// PublishedAt is when a version was released.
+	PublishedAt(ctx context.Context, p domain.Package) (time.Time, error)
+	// Vulnerabilities maps each package with known advisories, by its
+	// String form, to the advisory ids.
+	Vulnerabilities(ctx context.Context, packages []domain.Package) (map[string][]string, error)
+}
+
+// IntegrityTools checks the package managers' own integrity settings.
+type IntegrityTools interface {
+	// GoEnv returns the go environment of the module in dir.
+	GoEnv(ctx context.Context, dir string) (map[string]string, error)
+	// NpmAuditSignatures verifies registry signatures of the installed
+	// packages of the project in dir; with nothing installed there is
+	// nothing to verify.
+	NpmAuditSignatures(ctx context.Context, dir string) error
 }
 
 // FileFinder looks for marker files such as go.mod in the working tree.

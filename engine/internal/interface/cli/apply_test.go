@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"millennium/internal/application/usecase"
+	"millennium/internal/domain"
 )
 
 type fakeApplier struct {
@@ -44,7 +45,7 @@ func applyHarness(t *testing.T, plan usecase.ApplyPlan, terminal bool) (*harness
 	return h, root
 }
 
-var loosening = usecase.ApplyPlan{Digest: "abc123def456", Writes: []string{".millennium/config.json"}, Loosenings: []string{"language python is no longer checked"}, Canonical: []byte("{}\n")}
+var loosening = usecase.ApplyPlan{Digest: "abc123def456", Writes: []string{".millennium/config.json"}, Loosenings: []string{"language python is no longer checked"}, Canonical: []byte("{}\n"), Config: &domain.Config{}}
 
 func TestApplyNeedsConfirmation(t *testing.T) {
 	h, root := applyHarness(t, loosening, false)

@@ -102,8 +102,10 @@ status 2 when the config is invalid or missing.
 ## `millennium config apply`
 
 Applies a proposal (default `millennium.proposal.json` at the repository
-root) after showing what it writes and what it loosens; see
-[Configuration](configuration.md#changing-the-config-proposals-and-config-apply).
+root), a new config, dependency approvals or both, after showing what it
+writes and what it loosens; see
+[Configuration](configuration.md#changing-the-config-proposals-and-config-apply)
+and [Approving a dependency](configuration.md#approving-a-dependency).
 
 | Flag | Meaning |
 |---|---|

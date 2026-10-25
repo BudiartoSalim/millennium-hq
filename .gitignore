@@ -2,3 +2,6 @@
 /engine/millennium
 /engine/millennium.exe
 /dist/
+
+# Proposals are drafts for `millennium config apply`, never committed.
+millennium.proposal.json

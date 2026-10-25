@@ -3,14 +3,15 @@
 Every finding blocks. A finding is printed as `[gate/rule] file:line: message`.
 This page lists each rule, what it enforces, and how to fix it.
 
-**What runs today:** the `toolchain`, `structure`, `shell`, `code`, `build`
-and `tests` gates, for Go, TypeScript, Python and shell. The supply-chain
-checks in [design.md](design.md#supply-chain) are being built.
+**What runs today:** the `toolchain`, `structure`, `shell`, `code`, `build`,
+`tests` and `deps` gates, for Go, TypeScript, Python and shell.
 
-**Tiers.** Every gate runs in both tiers except the test runs: the **fast**
-tier (what hooks run on every agent turn) checks that changed logic comes with
-changed tests; the **full** tier, the default for `gate` and `audit`, also runs
-the test suites and measures coverage.
+**Tiers.** The **fast** tier is what hooks run on every agent turn; the
+**full** tier is the default for `gate` and `audit`. They differ in two
+places: the fast tier checks that changed logic comes with changed tests, and
+the full tier also runs the test suites and measures coverage; and the
+supply-chain checks that need the network (release age, vulnerabilities,
+registry signatures) run in the full tier only.
 
 How each language is read:
 
@@ -194,6 +195,39 @@ How each language's suite runs:
 
 When a suite fails, its files' coverage is not reported on top: the failure
 already blocks.
+
+## `deps`
+
+The supply chain of a change. It reads the manifests and lockfiles the change
+touches, in any directory, whatever languages the config governs.
+
+| Rule | Tier | Fires when | Fix |
+|---|---|---|---|
+| `unapproved-dependency` | both | A changed lockfile locks a package version that was not locked before and no approval record covers it. Transitive packages count. | Vet it (the `vet-dependency` skill drafts the record into a proposal) and have the user apply it, see [Approving a dependency](configuration.md#approving-a-dependency). |
+| `install-script` | both | A newly locked npm package has an install script (`hasInstallScript` in `package-lock.json`). | Pick another package. With `ignore-scripts` on it will not work; with it off it can run anything at install. |
+| `unpinned` | both | A touched `package.json` dependency is not an exact version (`^`, `~`, ranges, tags), or a touched requirements line is not pinned with `==`. Local `file:`, `workspace:` and `link:` specs and `peerDependencies` are allowed. | Pin it. Set `save-exact=true` in `.npmrc`. |
+| `unhashed` | both | A touched line of `requirements*.txt` has no `--hash`. (`requirements*.in` is the input to a resolver and needs no hashes.) | Compile it with hashes (`pip-compile --generate-hashes`, `uv pip compile --generate-hashes`) and install with `--require-hashes`. |
+| `unpinned-action` | both | A touched `uses:` in `.github/workflows/*.yml` is not pinned to a full 40-character commit SHA. Local `./` actions and `docker://` are skipped. | Pin the SHA, with the tag in a comment: `uses: actions/checkout@<sha> # v4.2.2`. |
+| `unpinned-image` | both | A touched `FROM` in a Dockerfile, or `image:` in a compose file, has no `@sha256:` digest. Earlier build stages, `scratch` and `$VARIABLE` images are skipped. | Pin the digest: `FROM node:22@sha256:…`. |
+| `npmrc-unsafe` | both | A changed npm project has no `.npmrc` beside its `package.json`, or it does not set `ignore-scripts=true` and `save-exact=true`. | Add them to the project's `.npmrc`. |
+| `too-new` | full | A newly locked version was published less than 7 days ago, by the npm registry, the Go module proxy or PyPI. | Wait, or, for a release that fixes a vulnerability, record the advisory as `securityPatch` in its approval. |
+| `known-vulnerability` | full | OSV lists an advisory for any package the changed lockfiles lock, new or not. | Upgrade to a fixed version. |
+| `integrity-weakened` | full | A changed Go module's `go env` turns off checksum verification: `GOSUMDB=off`, `GONOSUMCHECK`, `GONOSUMDB=*`, `GOINSECURE`, or `GOFLAGS` with `-insecure` or `-mod=mod`. | Unset it. |
+| `signatures-failed` | full | `npm audit signatures` fails for a changed npm project with packages installed. With nothing installed there is nothing to verify; `npm ci` checks the lockfile's integrity hashes when it installs. | Reinstall from the lockfile with `npm ci`; find the package that fails. |
+
+These block because the check could not run, and cannot be disabled:
+
+| Rule | Fires when |
+|---|---|
+| `manifest-unreadable` | A changed manifest cannot be parsed, or `package-lock.json` is lockfile version 1 (regenerate it with npm 7 or newer). |
+| `invalid-approval` | An approval record cannot be read, is invalid, or its file name does not match what it approves. |
+| `registry-failed` | A registry, OSV, or `go env` could not answer. A supply-chain check never passes because the network was down. |
+
+What counts as a lockfile: `package-lock.json` (v2 and v3), `go.sum` (the
+modules with a code hash; `/go.mod`-only lines are module-graph metadata and
+never build), and `requirements*.txt`. `pnpm-lock.yaml`, `yarn.lock`,
+`uv.lock`, `poetry.lock` and `Pipfile.lock` are not read yet; a project that
+uses them gets the pinning checks but not the approvals.
 
 ## Gate failures
 

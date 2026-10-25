@@ -13,19 +13,23 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"millennium/internal/application/gate"
 	"millennium/internal/application/port"
 	"millennium/internal/application/usecase"
 	"millennium/internal/domain"
 	"millennium/internal/infrastructure/analysiscache"
+	"millennium/internal/infrastructure/approvals"
 	"millennium/internal/infrastructure/buildtools"
 	"millennium/internal/infrastructure/configfile"
 	"millennium/internal/infrastructure/gitrepo"
 	"millennium/internal/infrastructure/goanalyzer"
 	"millennium/internal/infrastructure/helperanalyzer"
+	"millennium/internal/infrastructure/manifests"
 	"millennium/internal/infrastructure/packs"
 	"millennium/internal/infrastructure/projectfiles"
+	"millennium/internal/infrastructure/registry"
 	"millennium/internal/infrastructure/shellanalyzer"
 	"millennium/internal/infrastructure/shelltools"
 	"millennium/internal/infrastructure/statestore"
@@ -61,35 +65,46 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 	committed, local := configfile.NewLoader(configPath), configfile.NewLoader(localPath)
 	loadConfig := usecase.NewLoadConfig(committed, repo).WithLocal(local)
 	node := toolpath.Find("node")
-	typeScript := helperanalyzer.TypeScript(repo.Root(), node)
-	python := helperanalyzer.Python(repo.Root(), toolpath.Python())
-	// Several gates read the same files; the cache parses each version once.
+	analyzers, closeAnalyzers := newAnalyzers(repo.Root(), node)
+	files := usecase.ConfigFiles{
+		Committed: committed, CommittedPath: configPath, Local: local, LocalPath: localPath,
+		CommittedApprovals: filepath.Join(repo.Root(), filepath.FromSlash(domain.ApprovalsDir)),
+		LocalApprovals:     filepath.Join(filepath.Dir(localPath), "deps"),
+	}
+	g := gates(repo, node, analyzers, builtinPacks, approvals.New(files.CommittedApprovals, files.LocalApprovals))
+	runGates := usecase.NewRunGates(loadConfig, repo, g)
+	return cli.Deps{
+		Gates:          runGates,
+		Audit:          usecase.NewRunAudit(loadConfig, repo, g),
+		Config:         loadConfig,
+		Explain:        usecase.NewExplainFile(loadConfig, builtinPacks),
+		Guard:          usecase.NewGuardToolCall(loadConfig),
+		Stop:           usecase.NewStopCheck(runGates, statestore.New(stateDir())),
+		Scope:          usecase.NewCheckScope(loadConfig, repo),
+		Apply:          usecase.NewApplyConfig(configfile.Codec{}, files, projectfiles.New(repo.Root())),
+		Root:           repo.Root(),
+		LocalConfigDir: localDir,
+		RepoPath:       repo.RepoPath,
+		Close:          closeAnalyzers,
+	}, nil
+}
+
+// newAnalyzers builds one analyzer per language and the function that stops
+// the helper processes. Several gates read the same files; the cache parses
+// each version once.
+func newAnalyzers(root, node string) (map[domain.Language]port.Analyzer, func()) {
+	typeScript := helperanalyzer.TypeScript(root, node)
+	python := helperanalyzer.Python(root, toolpath.Python())
 	analyzers := map[domain.Language]port.Analyzer{
-		domain.LanguageGo:         analysiscache.Wrap(goanalyzer.New(repo.Root())),
+		domain.LanguageGo:         analysiscache.Wrap(goanalyzer.New(root)),
 		domain.LanguageTypeScript: analysiscache.Wrap(typeScript),
 		domain.LanguagePython:     analysiscache.Wrap(python),
 		domain.LanguageShell:      analysiscache.Wrap(shellanalyzer.Analyzer{}),
 	}
-	runGates := usecase.NewRunGates(loadConfig, repo, gates(repo, node, analyzers, builtinPacks))
-	return cli.Deps{
-		Gates:   runGates,
-		Audit:   usecase.NewRunAudit(loadConfig, repo, gates(repo, node, analyzers, builtinPacks)),
-		Config:  loadConfig,
-		Explain: usecase.NewExplainFile(loadConfig, builtinPacks),
-		Guard:   usecase.NewGuardToolCall(loadConfig),
-		Stop:    usecase.NewStopCheck(runGates, statestore.New(stateDir())),
-		Scope:   usecase.NewCheckScope(loadConfig, repo),
-		Apply: usecase.NewApplyConfig(configfile.Codec{}, usecase.ConfigFiles{
-			Committed: committed, CommittedPath: configPath, Local: local, LocalPath: localPath,
-		}, projectfiles.New(repo.Root())),
-		Root:           repo.Root(),
-		LocalConfigDir: localDir,
-		RepoPath:       repo.RepoPath,
-		Close: func() {
-			typeScript.Close()
-			python.Close()
-		},
-	}, nil
+	return analyzers, func() {
+		typeScript.Close()
+		python.Close()
+	}
 }
 
 // openRepository opens the repository containing dir, the current directory
@@ -111,14 +126,16 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 }
 
 // gates lists every gate in the order reports show them.
-func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]port.Analyzer, builtinPacks *packs.Source) []port.Gate {
+func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]port.Analyzer, builtinPacks *packs.Source, approved port.ApprovalSource) []port.Gate {
+	tools := buildtools.New(repo.Root(), node)
 	return []port.Gate{
 		gate.NewToolchain(toolpath.Locator{}),
 		gate.NewStructure(analyzers, builtinPacks, repo),
 		gate.NewShell(repo, shelltools.New(repo.Root())),
 		gate.NewCode(analyzers, repo),
-		gate.NewBuild(buildtools.New(repo.Root(), node), repo),
+		gate.NewBuild(tools, repo),
 		gate.NewTests(analyzers, builtinPacks, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
+		gate.NewDeps(repo, manifests.Reader{}, approved, registry.New(registry.Public()), tools, time.Now),
 	}
 }
 

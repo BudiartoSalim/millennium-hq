@@ -6,6 +6,7 @@ package buildtools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -234,4 +235,33 @@ func lines(text string) []string {
 func atoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
+}
+
+// GoEnv returns the settings that decide how the go command fetches and
+// verifies modules, for the module in dir.
+func (t *Tools) GoEnv(ctx context.Context, dir string) (map[string]string, error) {
+	out, err := t.run(ctx, dir, nil, "go", "env", "-json", "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOINSECURE", "GOFLAGS")
+	if err != nil || out.exitCode != 0 {
+		return nil, toolFailure("go env", out, err)
+	}
+	env := map[string]string{}
+	if err := json.Unmarshal([]byte(out.stdout), &env); err != nil {
+		return nil, fmt.Errorf("read go env: %w", err)
+	}
+	return env, nil
+}
+
+// NpmAuditSignatures verifies the registry signatures and provenance of the
+// installed packages of the project in dir. A project with nothing installed
+// has nothing to verify yet; npm ci checks the lockfile's integrity hashes
+// when it installs.
+func (t *Tools) NpmAuditSignatures(ctx context.Context, dir string) error {
+	if info, err := os.Stat(filepath.Join(t.abs(dir), "node_modules")); err != nil || !info.IsDir() {
+		return nil
+	}
+	out, err := t.run(ctx, dir, nil, "npm", "audit", "signatures")
+	if err != nil || out.exitCode != 0 {
+		return toolFailure("npm audit signatures", out, err)
+	}
+	return nil
 }

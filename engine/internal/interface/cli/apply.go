@@ -86,7 +86,9 @@ func (a *App) describePlan(path string, plan usecase.ApplyPlan) {
 			fmt.Fprintf(a.stderr, "  - %s\n", l)
 		}
 	}
-	fmt.Fprintf(a.stderr, "\nThe config it applies:\n%s\n", plan.Canonical)
+	if plan.Config != nil {
+		fmt.Fprintf(a.stderr, "\nThe config it applies:\n%s\n", plan.Canonical)
+	}
 }
 
 // confirmPlan accepts the digest from a previous run, or a typed "yes" at a

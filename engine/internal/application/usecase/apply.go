@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"millennium/internal/application/port"
@@ -31,9 +32,11 @@ const (
 
 // ApplyPlan is a validated proposal, ready for the user to confirm.
 type ApplyPlan struct {
-	Target     ApplyTarget
-	Config     domain.Config
+	Target ApplyTarget
+	// Config is nil when the proposal only approves dependencies.
+	Config     *domain.Config
 	Canonical  []byte
+	Approvals  []domain.Approval
 	Loosenings []string
 	// Warning is set when the current config could not be read, so its
 	// loosenings could not be listed.
@@ -43,12 +46,16 @@ type ApplyPlan struct {
 	Writes []string
 }
 
-// ConfigFiles are the two places a config can live.
+// ConfigFiles are the two places a config, and its dependency approvals,
+// can live.
 type ConfigFiles struct {
 	Committed     port.ConfigFile
 	CommittedPath string
 	Local         port.ConfigFile
 	LocalPath     string
+	// CommittedApprovals and LocalApprovals are the approval directories.
+	CommittedApprovals string
+	LocalApprovals     string
 }
 
 // ApplyConfig is the only way the rules change: it validates a proposal,
@@ -66,21 +73,39 @@ func NewApplyConfig(codec port.ProposalCodec, files ConfigFiles, writer port.Pro
 
 // Prepare validates a proposal and compares it with the current config.
 func (u *ApplyConfig) Prepare(proposal []byte, target ApplyTarget) (ApplyPlan, error) {
-	cfg, canonical, err := u.codec.ParseProposal(proposal)
+	p, err := u.codec.ParseProposal(proposal)
 	if err != nil {
 		return ApplyPlan{}, err
 	}
-	sum := sha256.Sum256(canonical)
-	plan := ApplyPlan{Target: target, Config: cfg, Canonical: canonical, Digest: hex.EncodeToString(sum[:6])}
-	current, err := u.file(target).Load()
+	sum := sha256.Sum256(proposal)
+	plan := ApplyPlan{Target: target, Config: p.Config, Canonical: p.Canonical, Approvals: p.Approvals, Digest: hex.EncodeToString(sum[:6])}
+	if p.Config != nil {
+		u.compare(&plan)
+		plan.Writes = u.writes(target)
+	}
+	for _, a := range p.Approvals {
+		plan.Writes = append(plan.Writes, fmt.Sprintf("%s: approves %s (%s)", u.approvalPath(target, a), a, a.Reason))
+	}
+	return plan, nil
+}
+
+// compare lists what the proposed config loosens against the current one.
+func (u *ApplyConfig) compare(plan *ApplyPlan) {
+	current, err := u.file(plan.Target).Load()
 	switch {
 	case err == nil:
-		plan.Loosenings = domain.Loosenings(&current, cfg)
+		plan.Loosenings = domain.Loosenings(&current, *plan.Config)
 	case !errors.Is(err, port.ErrConfigNotFound):
 		plan.Warning = "the current config cannot be read, so what this proposal loosens cannot be listed: " + err.Error()
 	}
-	plan.Writes = u.writes(target)
-	return plan, nil
+}
+
+func (u *ApplyConfig) approvalPath(target ApplyTarget, a domain.Approval) string {
+	dir := u.files.CommittedApprovals
+	if target == ApplyLocal {
+		dir = u.files.LocalApprovals
+	}
+	return filepath.Join(dir, filepath.FromSlash(domain.ApprovalFile(a.Package)))
 }
 
 func (u *ApplyConfig) file(target ApplyTarget) port.ConfigFile {
@@ -102,15 +127,27 @@ func (u *ApplyConfig) writes(target ApplyTarget) []string {
 	}
 }
 
-// Apply writes a confirmed plan.
+// Apply writes a confirmed plan: the approval records, then the config.
 func (u *ApplyConfig) Apply(plan ApplyPlan) error {
+	for _, a := range plan.Approvals {
+		record, err := u.codec.FormatApproval(a)
+		if err != nil {
+			return err
+		}
+		if err := u.writer.WriteFile(u.approvalPath(plan.Target, a), record); err != nil {
+			return err
+		}
+	}
+	if plan.Config == nil {
+		return nil
+	}
 	if plan.Target == ApplyLocal {
 		return u.writer.WriteFile(u.files.LocalPath, plan.Canonical)
 	}
 	steps := []func() error{
 		func() error { return u.writer.WriteFile(u.files.CommittedPath, plan.Canonical) },
 		func() error { return u.writer.MergeSettings(PluginID) },
-		func() error { return u.writer.SetAgentsSection(AgentsSection(plan.Config)) },
+		func() error { return u.writer.SetAgentsSection(AgentsSection(*plan.Config)) },
 		func() error { return u.writer.Ignore(ProposalFile) },
 	}
 	for _, step := range steps {

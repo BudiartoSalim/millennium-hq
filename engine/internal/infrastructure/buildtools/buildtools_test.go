@@ -141,3 +141,28 @@ func TestParsers(t *testing.T) {
 		}
 	}
 }
+
+func TestGoEnv(t *testing.T) {
+	root := repoWith(t, map[string]string{"go.mod": "module m\n\ngo 1.25\n"})
+	t.Setenv("GOINSECURE", "example.com")
+	env, err := New(root, "").GoEnv(t.Context(), "")
+	if err != nil || env["GOINSECURE"] != "example.com" {
+		t.Fatalf("GoEnv = %v, %v", env, err)
+	}
+	if problems := domain.GoIntegrityProblems(env); len(problems) != 1 {
+		t.Fatalf("problems = %q", problems)
+	}
+}
+
+func TestNpmAuditSignatures(t *testing.T) {
+	if err := New(t.TempDir(), "").NpmAuditSignatures(t.Context(), ""); err != nil {
+		t.Fatalf("nothing installed means nothing to verify: %v", err)
+	}
+	if _, err := exec.LookPath("npm"); err != nil {
+		t.Skip("npm is not installed")
+	}
+	root := repoWith(t, map[string]string{"node_modules/.keep": ""})
+	if err := New(root, "").NpmAuditSignatures(t.Context(), ""); err == nil {
+		t.Fatal("npm audit signatures on a project without a lockfile must fail, not pass")
+	}
+}
