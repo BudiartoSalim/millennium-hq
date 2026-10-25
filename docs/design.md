@@ -129,7 +129,17 @@ layer runs the same gate engine so they cannot drift:
 Additional rules:
 
 - **Opt-in per repository.** Hooks do nothing in a repo without
-  `.millennium/config.json`; once it exists, everything fails closed.
+  `.millennium/config.json`; once it exists, everything fails closed. A config
+  missing from the working tree while still tracked at HEAD blocks, so deleting
+  it cannot switch the gates off; CI runs with `--require-config`.
+- **One exit-status contract.** The engine exits 0 only for a pass (or a repo
+  that is not opted in) and 2 for everything else, errors included. Claude
+  Code hooks block only on 2 and treat 1 as non-blocking, so 1 is never used.
+- **Git cannot be turned against the engine.** Hooks run outside the agents'
+  sandbox, and a repository's own config can name programs git runs
+  (`core.fsmonitor`). The engine disables fsmonitor on every git call and
+  refuses revisions that look like options; `/millennium:init` must also
+  write-protect `.git/config` and `.git/hooks`.
 - **Hook-owned state** (test-run records, attempt counters) lives in
   `${CLAUDE_PLUGIN_DATA}`, outside the sandboxed Bash tool's writable area.
 - **Config integrity.** The engine verifies that tool configs have not been
@@ -168,18 +178,24 @@ Go source natively (`go/parser`, `go/ast`). Distribution:
 
 ### Config: `.millennium/config.json`
 
-JSON because Go's standard library parses it; a published JSON Schema gives
-editors autocompletion and validation, which compensates for the lack of
-comments.
+JSON because Go's standard library parses it; the JSON Schema in
+`schema/millennium.schema.json` gives editors autocompletion and validation,
+which compensates for the lack of comments. The engine reads it strictly:
+unknown fields, duplicate keys (which would hide the effective value from a
+reviewer), trailing data, symlinks and oversized files are errors. Only
+`version` and `languages` are required; `run.healthUrl` must be a loopback
+address so qa-tester can never be pointed at a shared deployment.
 
 ```json
 {
   "$schema": "https://.../millennium.schema.json",
+  "version": 1,
   "languages": ["go", "typescript", "python"],
   "conventions": ["clean-architecture", "react-feature-based"],
   "testing": "tdd-strict",
   "dependencyPolicy": "strict",
   "ci": "github-actions",
+  "python": { "typeCheck": "off" },
   "paths": {
     "acceptanceTests": "tests/acceptance"
   },
@@ -347,8 +363,19 @@ What the v1 gates fix in the earlier hooks:
 - Hook behaviour on native Windows (Git Bash or PowerShell) for the launcher.
 - Bootstrap timing: no plugin install hook is documented, so the launcher
   fetches the binary lazily (first hook call or a SessionStart hook).
+- `claude plugin validate` warns about a `CLAUDE.md` at the plugin root, and
+  this repo needs one (it imports `AGENTS.md`, because a `CLAUDE.md` above the
+  repo disables the `AGENTS.md` fallback). Either accept the warning or move
+  the shipped plugin into a subdirectory, which would also keep engine source
+  and docs out of what users install.
+- The Python tool name: `python3` on Linux and macOS, often `python` or `py` on
+  native Windows.
 
 ## Build order
+
+Step 1 is done: this repo's `AGENTS.md`, the config schema, and the engine
+skeleton (config loading, change detection, the toolchain gate, the report
+model, fail-closed plumbing).
 
 1. `AGENTS.md` for this repo, config schema, engine skeleton with the diff,
    config-integrity and fail-closed plumbing.

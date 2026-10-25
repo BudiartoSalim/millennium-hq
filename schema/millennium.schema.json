@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "millennium project config",
+  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, react-feature-based needs typescript, mypy needs python). engine/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "languages"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional link to this schema for editors."
+    },
+    "version": {
+      "const": 1,
+      "description": "Config format version."
+    },
+    "languages": {
+      "type": "array",
+      "description": "Languages whose checks run. At least one.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["go", "typescript", "python"] }
+    },
+    "conventions": {
+      "type": "array",
+      "description": "Convention packs to enforce.",
+      "uniqueItems": true,
+      "items": { "enum": ["clean-architecture", "react-feature-based"] },
+      "default": []
+    },
+    "testing": {
+      "description": "Testing discipline the gates enforce.",
+      "enum": ["tdd-strict"],
+      "default": "tdd-strict"
+    },
+    "dependencyPolicy": {
+      "description": "How strictly new dependencies are gated.",
+      "enum": ["strict"],
+      "default": "strict"
+    },
+    "ci": {
+      "description": "CI provider whose templates the project uses.",
+      "enum": ["github-actions", "none"],
+      "default": "github-actions"
+    },
+    "python": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "typeCheck": {
+          "description": "Python type checker. When set to mypy, a missing mypy blocks.",
+          "enum": ["off", "mypy"],
+          "default": "off"
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "acceptanceTests": {
+          "description": "Directory of qa-tester's black-box regression tests, relative to the repository root. The engineer agent cannot change it.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+          "default": "tests/acceptance"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "description": "How qa-tester starts the software under test.",
+      "additionalProperties": false,
+      "required": ["start", "healthUrl"],
+      "properties": {
+        "start": {
+          "description": "Command that starts the software.",
+          "type": "string",
+          "minLength": 1
+        },
+        "healthUrl": {
+          "description": "Health endpoint to wait for. Must be on localhost or a loopback address.",
+          "type": "string",
+          "pattern": "^https?://(localhost|127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|\\[::1\\])(:[0-9]{1,5})?(/.*)?$"
+        }
+      }
+    }
+  }
+}
