@@ -32,6 +32,9 @@ done
 echo "== go test"
 go test -count=1 ./...
 
+echo "== launcher"
+bash "$root/scripts/test-launcher.sh"
+
 # The plugin practises what it enforces: the engine audits its own source
 # against .millennium/config.json, so a rule it would block in a user's
 # repository fails this repository too.

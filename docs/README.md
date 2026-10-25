@@ -5,77 +5,86 @@ development. Rules that can be checked mechanically are enforced by a gate
 engine the agents cannot talk their way past; judgement calls go to
 fresh-context reviewer agents.
 
-**Status: early development.** The gate engine, the hooks, `config apply`,
-and the agents and skills exist; release binaries and the marketplace
-install are not done yet, so for now you build the engine yourself. See the
-build order in [design.md](design.md).
+**Status: early development.** Everything described here is built: the
+gate engine, the hooks, `config apply`, the agents and skills, and the
+release pipeline. The first engine release (`engine/v0.1.0`) has not been
+published yet; until it is, build the engine yourself (step 2 below).
 
 ## Guides
 
 | Document | What it covers |
 |---|---|
-| [Getting started](#getting-started) | Build the engine and check a repository |
+| [Getting started](#getting-started) | Install the plugin and opt a repository in |
 | [Configuration](configuration.md) | Every setting of `.millennium/config.json`, single projects and monorepos |
-| [Commands](cli.md) | `gate`, `audit`, `config validate`, `config explain`, exit codes, output formats |
+| [Commands](cli.md) | `gate`, `audit`, `discover`, `scope`, `config apply` and the rest, exit codes, output formats |
 | [Checks](checks.md) | What each check enforces, and how to fix its findings |
 | [Clean Architecture](conventions/clean-architecture.md) | The layers, their import rules, and how to map an existing layout |
 | [Feature-based React](conventions/react-feature-based.md) | Shared code, isolated features and the app layer, and how to map an existing layout |
 | [Hooks](hooks.md) | What the plugin's hooks enforce in every session, and their limits |
 | [Agents and skills](agents.md) | The tech-lead workflow, each agent and skill, and the reviewer report format |
+| [Releasing](releasing.md) | How engine releases are built, locked and published |
 | [Design](design.md) | Why things are the way they are, and what is planned |
 
 ## Getting started
 
-You need git and Go 1.25 or newer to build the engine. Release binaries, which
-need no Go, are planned. Checking TypeScript needs `node` and the project's
-dependencies installed (TypeScript 6 or older); checking Python needs Python
-3.10 or newer.
+You need Claude Code, git, `curl` or `wget`, and `sha256sum` or `shasum`,
+plus the toolchains of the languages you use: Go; `node` and the project's
+dependencies for TypeScript (TypeScript 6 or older); Python 3.10 or newer;
+`bash` and `shellcheck` for shell (or `"shell": {"lint": "off"}`). On Windows,
+install Git for Windows: the hooks run through Git Bash.
 
-1. **Build the engine** from a clone of this repository:
-
-   ```
-   cd engine
-   go build -o millennium .
-   ```
-
-   Put the resulting `millennium` binary somewhere on your `PATH`.
-
-2. **Opt a repository in** by adding `.millennium/config.json` at its root. The
-   smallest config for a Go service:
-
-   ```json
-   {
-     "version": 1,
-     "languages": ["go"],
-     "conventions": ["clean-architecture"]
-   }
-   ```
-
-   Check it with `millennium config validate`. For a monorepo, see
-   [Configuration: monorepos](configuration.md#monorepos-components).
-
-3. **Check your changes** before committing:
+1. **Install the plugin** in Claude Code:
 
    ```
-   millennium gate
+   /plugin marketplace add BudiartoSalim/millennium-hq
+   /plugin install millennium@millennium-hq
    ```
 
-   It compares the working tree with `HEAD` (staged, unstaged and untracked
-   files alike) and exits 0 when everything passes, 2 when anything blocks.
-
-4. **Audit existing code** to see what a refactor would need to fix:
+2. **The engine.** Once a release exists, the plugin's launcher downloads the
+   engine for your platform on first use and refuses it unless its SHA-256
+   matches the plugin's `engine.lock`; nothing to do. Before the first
+   release, build it from a clone of this repository (Go 1.25 or newer):
 
    ```
-   millennium audit
+   cd engine && go build -o millennium .
+   ```
+
+   and start Claude Code with `MILLENNIUM_ENGINE` set to the binary's
+   absolute path. Without an engine every hook blocks with a message saying
+   so.
+
+3. **Opt a repository in.** In the repository, run `/millennium:adopt` for
+   existing code or `/millennium:init` for a new project. The agent looks at
+   the project, drafts `millennium.proposal.json` with you, and shows what the
+   rules would find today. Then you apply it yourself, with the command the
+   agent gives you (Claude Code's `!` prefix works):
+
+   ```
+   ! "<plugin>/scripts/millennium" config apply
+   ```
+
+   It shows every file it writes and every way it loosens the rules, and asks
+   you to confirm. Agents cannot run it. A new session picks up the gates.
+
+4. **Work.** Every session in the repository is now checked: the hooks guard
+   tool calls and send an agent back while its work fails the gates. To run
+   a change through the full workflow (spec, parallel engineers, reviewers,
+   QA, final gate):
+
+   ```
+   /millennium:lead add a cart total endpoint that applies the active discount
+   ```
+
+   See [Agents and skills](agents.md).
+
+5. **From your terminal**, the same engine checks changes and audits code
+   (put a built binary on your `PATH`, or use the launcher's full path):
+
+   ```
+   millennium gate                     # this change, against HEAD
+   millennium gate --base main         # a whole branch
    millennium audit --path services/game-control
-   ```
-
-5. **When a finding surprises you**, ask which rules apply to the file:
-
-   ```
    millennium config explain services/game-control/api/internal/domain/server.go
    ```
 
-Until the plugin exists, nothing runs these automatically. Run `millennium gate`
-yourself, or from your own git hook or CI if you want enforcement there; both
-are outside what millennium ships.
+   See [Commands](cli.md) and [Checks](checks.md).

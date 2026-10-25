@@ -1,0 +1,5 @@
+# The engine release the launcher downloads, and the SHA-256 of each
+# platform's binary. Only a reviewed change updates it, written by
+# scripts/release-build.sh VERSION --lock; the release workflow rebuilds the
+# tag and refuses to publish binaries whose hashes differ from these.
+version unreleased

@@ -3,8 +3,8 @@
 Status: agreed in planning on 2026-10-25. Items marked proposed are designed
 but not yet confirmed; they are listed again under
 [Open decisions](#open-decisions). User documentation for what is built lives
-in [docs/README.md](README.md). Platform details still to confirm are under
-[To verify before building](#to-verify-before-building).
+in [docs/README.md](README.md). Platform details that shaped the design are under
+[Verified platform details](#verified-platform-details).
 
 ## Purpose
 
@@ -218,8 +218,7 @@ Agents can draft configuration but never make it effective.
 ```
 
 `config apply` writes protected paths, so it fails inside an agent's sandbox;
-it works from the user's own terminal (and possibly from Claude Code's `!`
-prefix, see To verify). Dependency approval records in `.millennium/deps/` use
+it works from the user's own terminal and from Claude Code's `!` prefix. Dependency approval records in `.millennium/deps/` use
 the same path.
 
 **Disabling a check needs a reason (built).** A config may switch a check off
@@ -524,18 +523,21 @@ procedure. Turned into gates or added:
 
 ```
 millennium-hq/
-  plugin/                        what users install (planned; see below)
+  .claude-plugin/marketplace.json  this repository as the millennium-hq marketplace
+  plugin/                        what users install
     .claude-plugin/plugin.json   Claude Code adapter
     agents/                      thin agent definitions that preload skills
-    hooks/hooks.json             hook wiring, all calling the engine
+    hooks/hooks.json             hook wiring, all calling the launcher
     skills/                      portable core (Agent Skills format)
-    conventions/                 convention packs
-    helpers/                     stdlib-only TS and Python analysis helpers
-    launcher, engine lock        download and verify the engine binary
-  engine/                        Go source of the gate engine (stdlib only)
+    scripts/millennium           launcher: verifies and runs the locked engine
+    engine.lock                  engine version and per-platform SHA-256
+  engine/                        Go source of the gate engine (stdlib only);
+                                 convention packs and the TS and Python helpers
+                                 are embedded in it, so they cannot be edited
+                                 on disk
   schema/                        JSON Schema of the project config
-  templates/                     AGENTS.md section, config skeleton
-  scripts/                       verify, release and checksum tooling
+  scripts/                       verify, launcher tests, reproducible release builds
+  .github/workflows/             the engine release workflow
   docs/
   AGENTS.md                      rules for developing this plugin
 ```
@@ -589,6 +591,17 @@ or sh shebang (such as `bin/*`).
   once it is stable, or letting a project point the helper at a TypeScript 6
   install.
 
+- **Windows** is supported through Git Bash (the hooks run in shell form, and
+  the launcher recognises Git Bash's `uname`), but has not been tried on a
+  real Windows machine. Without Git Bash, Claude Code runs shell-form hooks
+  in PowerShell and the launcher cannot start: the guard then blocks every
+  tool call (it fails closed), while stop hooks cannot block.
+- **Lockfiles read**: `package-lock.json` v2/v3, `go.sum` and
+  `requirements*.txt`. `pnpm-lock.yaml`, `yarn.lock`, `uv.lock`,
+  `poetry.lock` and `Pipfile.lock` get pinning checks only, no approvals.
+- **Shell scripts without an extension** are found by their shebang in the
+  gates, but `millennium discover` counts files by extension only.
+
 ## Pending your approval
 
 - **TypeScript test fixture.** The TypeScript analyzer's tests need a
@@ -596,24 +609,33 @@ or sh shebang (such as `bin/*`).
   `scripts/fixtures/typescript/package-lock.json` (Microsoft, Apache-2.0, no
   dependencies, no install scripts, published 2026-04-16). It is installed
   outside the repository by `scripts/setup-fixtures.sh` and never shipped.
-  AGENTS.md requires approval for any dependency, so this needs a yes.
+  The repository's own `deps` gate blocks on it (`deps/unapproved-dependency`)
+  until you apply the approval drafted in `millennium.proposal.json`:
+  `millennium config apply` from the repository root.
+- **The first engine release.** Run the steps in
+  [releasing.md](releasing.md) to publish `engine/v0.1.0`; until then users
+  set `MILLENNIUM_ENGINE`.
 
 ## Open decisions
 
 1. **License.** The plugin has no license yet; `claude plugin validate`
    notes that the plugin directory requires one. Your choice.
 
-## To verify before building
+## Verified platform details
 
-- Exact sandbox settings keys for write-deny, and that `config apply` may write
-  them into the project's `.claude/settings.json`.
-- That hooks run outside the Bash tool's sandbox, so hook-owned state in
-  `${CLAUDE_PLUGIN_DATA}` is out of the agents' reach.
-- Whether commands run with Claude Code's `!` prefix are sandboxed, which
-  decides whether the user can run `config apply` without leaving the session.
-- Hook behaviour on native Windows (Git Bash or PowerShell) for the launcher.
-- Bootstrap timing: no plugin install hook is documented, so the launcher
-  fetches the binary lazily (first hook call or a SessionStart hook).
+- The sandbox write-deny key is `sandbox.filesystem.denyWrite`, and network
+  hosts are allowed with `sandbox.network.allowedDomains`; `config apply`
+  writes both into the project's `.claude/settings.json`.
+- Hooks run outside the Bash tool's sandbox, so hook-owned state is out of
+  the agents' reach.
+- Commands run with Claude Code's `!` prefix are unsandboxed in most
+  sessions, so the user can run `config apply` without leaving the session.
+- Exec-form hooks need a real executable on Windows; shell-form hooks run
+  through Git Bash there, so the hooks use shell form.
+- No plugin install hook exists: the SessionStart hook downloads the engine
+  on the first session.
+- Subagent worktrees branch from the default branch unless
+  `worktree.baseRef` is `"head"`, which `config apply` sets.
 
 ## Build order
 
@@ -679,4 +701,11 @@ or sh shebang (such as `bin/*`).
    (features may not import each other, aliases included), `millennium
    discover`, `millennium audit --proposal` as a dry run, and the `init` and
    `adopt` skills. Local mode was built in step 4f, qa-tester in step 6.
-8. `plugin/` layout, launcher and engine lock, release workflow.
+8. `plugin/` layout, launcher and engine lock, release workflow. **Done:**
+   the marketplace file, the launcher (download, SHA-256 check on every run,
+   kept beside the plugin where sandboxed agents can run but not change it),
+   `engine.lock`, reproducible builds for six platforms
+   (`scripts/release-build.sh`, verified byte-identical across build caches
+   and checkout paths), and a release workflow without third-party actions
+   that publishes only binaries matching the reviewed lock. Hooks moved to
+   shell form for Windows (Git Bash).

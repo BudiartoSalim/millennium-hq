@@ -70,7 +70,19 @@ written by a command the hooks did not recognise:
 
 ## Finding the engine
 
-The hooks call `plugin/scripts/millennium`, a launcher. Until release binaries
-exist, set `MILLENNIUM_ENGINE` to a binary you built from `engine/` (see
-[Getting started](README.md#getting-started)); without it every hook blocks
-with a message saying so.
+Every hook runs `plugin/scripts/millennium`, the launcher, through the shell
+(Git Bash on Windows). It runs, in order:
+
+1. the binary named by `MILLENNIUM_ENGINE`, if set: one you built or vetted;
+2. the release named in the plugin's `engine.lock` for your platform, kept
+   in the plugin's `.engine/` directory (or the plugin's data directory),
+   after checking its SHA-256 against the lock, on every run;
+3. otherwise it downloads that release, refuses it unless the SHA-256
+   matches, and keeps it for next time.
+
+The first session after installing or updating the plugin downloads the
+engine in its SessionStart hook. Agents' sandboxed shells can read and run
+the kept binary but cannot change it. A binary that no longer matches the
+lock is refused, never replaced silently; delete it to download it again.
+Any failure blocks, with a message saying what to do. See
+[Releasing](releasing.md) for how the lock is made.

@@ -15,23 +15,29 @@ engine/                       gate engine, Go standard library only
                               rules, limits, facts, verdict
   internal/application/
     port/                     interfaces the core needs
-    gate/                     the checks (toolchain, structure, shell, code, build, tests); each reports findings
-    usecase/                  load config, run gates, audit, explain
-  internal/infrastructure/    analysiscache, buildtools, configfile, gitrepo, goanalyzer, helperanalyzer
-                              (TypeScript and Python helpers, embedded), packs
-                              (embedded convention packs), shellanalyzer,
-                              shelltools (bash -n, shellcheck), testrunner, toolpath
+    gate/                     the checks (toolchain, structure, shell, code, build, tests, deps); each reports findings
+    usecase/                  load config, run gates, audit, explain, guard, stop, scope, apply, discover
+  internal/infrastructure/    analysiscache, approvals, buildtools, configfile, gitrepo, goanalyzer,
+                              helperanalyzer (TypeScript and Python helpers, embedded), manifests,
+                              packs (embedded convention packs), projectfiles, registry,
+                              shellanalyzer, shelltools (bash -n, shellcheck), statestore,
+                              testrunner, toolpath
   internal/interface/cli/     argument parsing, rendering, exit codes
-plugin/                       what users install: hooks/hooks.json, scripts/millennium (launcher)
+plugin/                       what users install
+  .claude-plugin/plugin.json  the plugin manifest
+  agents/, skills/            the agents and the skills they preload (see docs/agents.md)
+  hooks/hooks.json            hook wiring; every hook runs the launcher
+  scripts/millennium          the launcher: verifies and runs the locked engine release
+  engine.lock                 engine version and per-platform SHA-256, written by release-build.sh
+.claude-plugin/marketplace.json  this repository as the millennium-hq marketplace
+.github/workflows/            the engine release workflow (docs/releasing.md)
 schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
 .millennium/config.json       this repository's own config: the engine audits itself
 scripts/verify.sh             the full local check
+scripts/release-build.sh      reproducible release builds and the engine lock
+scripts/test-launcher.sh      the launcher's tests (verify.sh runs them)
 docs/                         user documentation; docs/design.md is the design
 ```
-
-Plugin components (`agents/`, `skills/`, `hooks/`, `conventions/`, `ci/`,
-`templates/`, `helpers/`) arrive as the build order in `docs/design.md` reaches
-them.
 
 ## Non-negotiables
 
@@ -111,8 +117,8 @@ fixture pinned by `scripts/fixtures/typescript/package-lock.json`, installed
 outside the repository with install scripts disabled; `verify.sh` refuses to
 run without it rather than report skipped tests as passed.
 
-It runs gofmt, go vet for linux, darwin and windows, the full test suite, and
-the engine auditing its own source against `.millennium/config.json` in the
+It runs gofmt, go vet for linux, darwin and windows, the full test suite, the
+launcher's tests, and the engine auditing its own source against `.millennium/config.json` in the
 full tier, so every executable line of the engine's domain and application
 code must run in a test: a rule
 the engine would enforce on a user's code fails this repository too. Fix the
