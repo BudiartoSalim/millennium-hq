@@ -98,6 +98,7 @@ func TestSchemaPropertiesMatchDecoder(t *testing.T) {
 		{"python", child(t, root, "properties", "python"), reflect.TypeFor[pythonDTO]()},
 		{"paths", child(t, root, "properties", "paths"), reflect.TypeFor[pathsDTO]()},
 		{"run", child(t, root, "properties", "run"), reflect.TypeFor[runDTO]()},
+		{"component", child(t, root, "properties", "components", "items"), reflect.TypeFor[componentDTO]()},
 	}
 	for _, obj := range objects {
 		if got, want := propertyNames(t, obj.node), jsonTags(obj.dto); !slices.Equal(got, want) {
@@ -107,14 +108,15 @@ func TestSchemaPropertiesMatchDecoder(t *testing.T) {
 }
 
 func TestSchemaEnumsMatchDomain(t *testing.T) {
-	props := child(t, loadSchema(t), "properties")
+	root := loadSchema(t)
+	props := child(t, root, "properties")
 	enums := []struct {
 		name   string
 		node   schemaNode
 		domain []string
 	}{
-		{"languages", child(t, props, "languages", "items"), asStrings(domain.Languages())},
-		{"conventions", child(t, props, "conventions", "items"), asStrings(domain.Conventions())},
+		{"language", child(t, root, "$defs", "language"), asStrings(domain.Languages())},
+		{"convention", child(t, root, "$defs", "convention"), asStrings(domain.Conventions())},
 		{"testing", child(t, props, "testing"), asStrings(domain.TestingProfiles())},
 		{"dependencyPolicy", child(t, props, "dependencyPolicy"), asStrings(domain.DependencyPolicies())},
 		{"python.typeCheck", child(t, props, "python", "properties", "typeCheck"), asStrings(domain.PythonTypeChecks())},
@@ -147,10 +149,35 @@ func TestSchemaDefaultsAndRequiredMatchDomain(t *testing.T) {
 	if got := child(t, props, "version")["const"]; got != float64(domain.ConfigVersion) {
 		t.Errorf("version: schema const %v, domain %d", got, domain.ConfigVersion)
 	}
-	if got := stringArray(t, root, "required"); !slices.Equal(got, []string{"version", "languages"}) {
+	if got := stringArray(t, root, "required"); !slices.Equal(got, []string{"version"}) {
 		t.Errorf("root required = %q", got)
+	}
+	if got := stringArray(t, child(t, props, "components", "items"), "required"); !slices.Equal(got, []string{"paths", "languages"}) {
+		t.Errorf("component required = %q", got)
 	}
 	if got := stringArray(t, child(t, props, "run"), "required"); !slices.Equal(got, []string{"start", "healthUrl"}) {
 		t.Errorf("run required = %q", got)
+	}
+}
+
+// Every place that lists languages or conventions must point at the shared
+// definition, so a new enum value cannot be added in one place only.
+func TestSchemaEnumListsUseSharedDefinitions(t *testing.T) {
+	props := child(t, loadSchema(t), "properties")
+	component := child(t, props, "components", "items", "properties")
+	refs := []struct {
+		name string
+		node schemaNode
+		want string
+	}{
+		{"languages", child(t, props, "languages", "items"), "#/$defs/language"},
+		{"conventions", child(t, props, "conventions", "items"), "#/$defs/convention"},
+		{"components[].languages", child(t, component, "languages", "items"), "#/$defs/language"},
+		{"components[].conventions", child(t, component, "conventions", "items"), "#/$defs/convention"},
+	}
+	for _, r := range refs {
+		if got := r.node["$ref"]; got != r.want {
+			t.Errorf("%s: $ref %v, want %s", r.name, got, r.want)
+		}
 	}
 }

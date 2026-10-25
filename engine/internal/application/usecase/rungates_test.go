@@ -56,7 +56,7 @@ func TestRunGatesPassesChangesToEveryGate(t *testing.T) {
 		t.Fatalf("unexpected report %+v", report)
 	}
 	for _, g := range []*fakeGate{first, second} {
-		if len(g.got.Changes) != 1 || !g.got.Config.Has(domain.LanguageGo) {
+		if len(g.got.Changes.Files) != 1 || g.got.Changes.Base != "base-tree" || !g.got.Config.Has(domain.LanguageGo) {
 			t.Errorf("gate %s got input %+v", g.name, g.got)
 		}
 	}
@@ -106,3 +106,24 @@ func TestRunGatesFailsOnConfigError(t *testing.T) {
 		t.Fatalf("err = %v, want %v", err, ErrConfigRemoved)
 	}
 }
+
+func TestRunGatesDropsExcludedFiles(t *testing.T) {
+	cfg, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: []string{"go"}, Exclude: []string{"**/vendor/**"}})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	repo := &fakeRepo{changes: []domain.ChangedFile{
+		{Path: "main.go", Kind: domain.ChangeModified},
+		{Path: "lib/vendor/x/y.go", Kind: domain.ChangeAdded},
+	}}
+	gate := &fakeGate{name: "g"}
+	report, err := NewRunGates(NewLoadConfig(fakeSource{cfg: cfg}, repo), repo, []port.Gate{gate}).Execute(t.Context(), RunGatesInput{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if report.ChangedFiles != 1 || len(gate.got.Changes.Files) != 1 || gate.got.Changes.Files[0].Path != "main.go" {
+		t.Fatalf("excluded file reached the gates: %+v", gate.got.Changes)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

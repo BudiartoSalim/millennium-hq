@@ -22,6 +22,14 @@ type ChangedFile struct {
 	Kind ChangeKind
 }
 
+// ChangeSet is what the gates check: the files and the revision they are
+// compared against. An empty Base means there is no "before": an audit, which
+// holds every file to the full rules.
+type ChangeSet struct {
+	Base  string
+	Files []ChangedFile
+}
+
 // LanguageOf maps a path to the language whose checks apply to it.
 func LanguageOf(p string) (Language, bool) {
 	switch strings.ToLower(path.Ext(p)) {

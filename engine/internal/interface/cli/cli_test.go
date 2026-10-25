@@ -32,8 +32,42 @@ func (f fakeConfig) Execute(context.Context) (domain.Config, bool, error) {
 	return domain.Config{}, f.enabled, f.err
 }
 
+type fakeAudit struct {
+	report domain.Report
+	err    error
+	got    usecase.AuditInput
+}
+
+func (f *fakeAudit) Execute(_ context.Context, in usecase.AuditInput) (domain.Report, error) {
+	f.got = in
+	return f.report, f.err
+}
+
+type fakeExplain struct {
+	explanation usecase.Explanation
+	err         error
+	got         string
+}
+
+func (f *fakeExplain) Execute(_ context.Context, path string) (usecase.Explanation, error) {
+	f.got = path
+	f.explanation.Path = path
+	return f.explanation, f.err
+}
+
+// repoPath stands in for the real resolver: "sub/" plus the argument, and an
+// error for anything starting with "..".
+func repoPath(arg string) (string, error) {
+	if strings.HasPrefix(arg, "..") {
+		return "", errors.New(arg + " is outside the repository")
+	}
+	return "sub/" + arg, nil
+}
+
 type harness struct {
 	gates          *fakeGates
+	audit          *fakeAudit
+	explain        *fakeExplain
 	config         fakeConfig
 	depsErr        error
 	stdout, stderr bytes.Buffer
@@ -44,8 +78,14 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	if h.gates == nil {
 		h.gates = &fakeGates{}
 	}
+	if h.audit == nil {
+		h.audit = &fakeAudit{}
+	}
+	if h.explain == nil {
+		h.explain = &fakeExplain{}
+	}
 	deps := func(context.Context) (Deps, error) {
-		return Deps{Gates: h.gates, Config: h.config}, h.depsErr
+		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, RepoPath: repoPath}, h.depsErr
 	}
 	return New("1.2.3", &h.stdout, &h.stderr, deps).Run(t.Context(), args)
 }
@@ -69,6 +109,7 @@ func TestGateExitCodes(t *testing.T) {
 		{"pass", &fakeGates{report: passing}, nil, nil, 0, "passed (gates: 1, changed files: 2)"},
 		{"not enabled", &fakeGates{report: domain.Report{}}, nil, nil, 0, "not enabled"},
 		{"findings", &fakeGates{report: failing}, nil, nil, 2, "[toolchain/tool-missing] main.go:3: gofmt is required"},
+		{"findings summary", &fakeGates{report: failing}, nil, nil, 2, "by rule: toolchain/tool-missing 1"},
 		{"no gate ran", &fakeGates{report: domain.Report{Enabled: true}}, nil, nil, 2, "no gate ran"},
 		{"use-case error", &fakeGates{err: errors.New("config removed")}, nil, nil, 2, "BLOCKED: config removed"},
 		{"dependencies fail", nil, errors.New("not a git repository"), nil, 2, "not a git repository"},
@@ -181,5 +222,68 @@ func TestTopLevelCommands(t *testing.T) {
 				t.Fatalf("exit %d output %q; want exit %d containing %q", code, output, tt.wantCode, tt.want)
 			}
 		})
+	}
+}
+
+func TestAudit(t *testing.T) {
+	h := &harness{audit: &fakeAudit{report: passing}}
+	if code := h.run(t, "audit", "--path", "services"); code != 0 {
+		t.Fatalf("exit %d; stderr: %s", code, h.stderr.String())
+	}
+	if h.audit.got.Path != "sub/services" {
+		t.Fatalf("audit path = %q, want it resolved to sub/services", h.audit.got.Path)
+	}
+	if !strings.Contains(h.stderr.String(), "audited files: 2") {
+		t.Fatalf("stderr = %q", h.stderr.String())
+	}
+
+	blocked := &harness{audit: &fakeAudit{report: failing}}
+	if code := blocked.run(t, "audit"); code != 2 || blocked.audit.got.Path != "" {
+		t.Fatalf("exit %d, path %q; want 2 and the whole repository", code, blocked.audit.got.Path)
+	}
+	outside := &harness{}
+	if code := outside.run(t, "audit", "--path", "../x"); code != 2 || !strings.Contains(outside.stderr.String(), "outside the repository") {
+		t.Fatalf("exit %d stderr %q", code, outside.stderr.String())
+	}
+}
+
+func assertContainsAll(t *testing.T, output string, wants []string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(output, want) {
+			t.Errorf("output %q does not contain %q", output, want)
+		}
+	}
+}
+
+func TestConfigExplain(t *testing.T) {
+	component := domain.Component{Patterns: []domain.Pattern{domain.RootPattern()}, Languages: []domain.Language{domain.LanguageGo}}
+	tests := []struct {
+		name        string
+		explanation usecase.Explanation
+		want        []string
+	}{
+		{"layered file", usecase.Explanation{
+			Language:  domain.LanguageGo,
+			Component: &domain.ComponentMatch{Component: component, Root: ""},
+			Layers:    []usecase.LayerAssignment{{Convention: "clean-architecture", Layer: "domain"}, {Convention: "react-feature-based", Problem: "not available in this engine version"}},
+			Limits:    domain.DefaultLimits(),
+		}, []string{"sub/a.go", "language:  go", "component: . (root \"\")", "clean-architecture: layer domain",
+			"react-feature-based: cannot be checked: not available", "function length 50 lines"}},
+		{"no component", usecase.Explanation{Language: domain.LanguageGo}, []string{"component: none"}},
+		{"excluded", usecase.Explanation{Excluded: true}, []string{"excluded: yes"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &harness{explain: &fakeExplain{explanation: tt.explanation}}
+			if code := h.run(t, "config", "explain", "a.go"); code != 0 {
+				t.Fatalf("exit %d; stderr: %s", code, h.stderr.String())
+			}
+			assertContainsAll(t, h.stdout.String(), tt.want)
+		})
+	}
+	failing := &harness{explain: &fakeExplain{err: errors.New("config removed")}}
+	if code := failing.run(t, "config", "explain", "a.go"); code != 2 || !strings.Contains(failing.stderr.String(), "config removed") {
+		t.Fatalf("exit %d stderr %q", code, failing.stderr.String())
 	}
 }

@@ -18,16 +18,29 @@ func TestNewConfigAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
-	want := Config{
-		Languages:        []Language{LanguageGo},
-		Conventions:      []Convention{},
-		Testing:          DefaultTesting,
-		DependencyPolicy: DefaultDependencyPolicy,
-		PythonTypeCheck:  DefaultPythonTypeCheck,
-		AcceptanceTests:  DefaultAcceptanceTests,
+	if cfg.Testing != DefaultTesting || cfg.DependencyPolicy != DefaultDependencyPolicy ||
+		cfg.PythonTypeCheck != DefaultPythonTypeCheck || cfg.AcceptanceTests != DefaultAcceptanceTests ||
+		cfg.Run != nil || len(cfg.Exclude) != 0 {
+		t.Fatalf("defaults not applied: %+v", cfg)
 	}
-	if !equalConfig(cfg, want) {
-		t.Fatalf("got %+v, want %+v", cfg, want)
+	if !slices.Equal(cfg.Languages, []Language{LanguageGo}) {
+		t.Fatalf("languages = %v", cfg.Languages)
+	}
+}
+
+func TestNewConfigSingleProjectIsOneRootComponent(t *testing.T) {
+	in := minimalInput()
+	in.Conventions = []string{"clean-architecture"}
+	cfg, err := NewConfig(in)
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	if len(cfg.Components) != 1 {
+		t.Fatalf("want one component, got %+v", cfg.Components)
+	}
+	c := cfg.Components[0]
+	if c.Name() != "." || !c.Has(LanguageGo) || !slices.Equal(c.Conventions, []Convention{ConventionCleanArchitecture}) {
+		t.Fatalf("root component = %+v", c)
 	}
 }
 
@@ -69,6 +82,7 @@ func TestNewConfigRejects(t *testing.T) {
 		{"explicit empty testing", func(in *ConfigInput) { in.Testing = ptr("") }, `testing: "" is not one of`},
 		{"unknown dependency policy", func(in *ConfigInput) { in.DependencyPolicy = ptr("lax") }, `dependencyPolicy: "lax"`},
 		{"react without typescript", func(in *ConfigInput) { in.Conventions = []string{"react-feature-based"} }, `needs "typescript"`},
+		{"bad exclude pattern", func(in *ConfigInput) { in.Exclude = []string{"../x"} }, "exclude: pattern"},
 		{"mypy without python", func(in *ConfigInput) { in.PythonTypeCheck = ptr("mypy") }, `needs "python"`},
 		{"run without start", func(in *ConfigInput) {
 			in.Run = &RunRecipe{HealthURL: "http://localhost/health"}
@@ -146,14 +160,4 @@ func assertConfigError(t *testing.T, in ConfigInput, want string) {
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %q does not mention %q", err, want)
 	}
-}
-
-func equalConfig(a, b Config) bool {
-	return slices.Equal(a.Languages, b.Languages) &&
-		slices.Equal(a.Conventions, b.Conventions) &&
-		a.Testing == b.Testing &&
-		a.DependencyPolicy == b.DependencyPolicy &&
-		a.PythonTypeCheck == b.PythonTypeCheck &&
-		a.AcceptanceTests == b.AcceptanceTests &&
-		(a.Run == nil) == (b.Run == nil)
 }

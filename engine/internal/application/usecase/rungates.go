@@ -15,7 +15,8 @@ const (
 	// ConfigOptional treats a repository without a config as not opted in.
 	// Claude Code hooks use it, so the plugin stays out of other projects.
 	ConfigOptional ConfigRequirement = iota
-	// ConfigRequired blocks when the config is missing. CI uses it.
+	// ConfigRequired blocks when the config is missing; the tech lead's
+	// final, CI-equivalent run uses it.
 	ConfigRequired
 )
 
@@ -55,12 +56,27 @@ func (u *RunGates) Execute(ctx context.Context, in RunGatesInput) (domain.Report
 	if err != nil {
 		return domain.Report{}, fmt.Errorf("detect changes: %w", err)
 	}
-	gateInput := port.GateInput{Config: cfg, Changes: changes}
-	report := domain.Report{Enabled: true, ChangedFiles: len(changes)}
-	for _, g := range u.gates {
-		report.Results = append(report.Results, runGate(ctx, g, gateInput))
+	changes.Files = withoutExcluded(cfg, changes.Files)
+	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes}), nil
+}
+
+// runAll runs each gate in order and collects their results.
+func runAll(ctx context.Context, gates []port.Gate, in port.GateInput) domain.Report {
+	report := domain.Report{Enabled: true, ChangedFiles: len(in.Changes.Files)}
+	for _, g := range gates {
+		report.Results = append(report.Results, runGate(ctx, g, in))
 	}
-	return report, nil
+	return report
+}
+
+func withoutExcluded(cfg domain.Config, files []domain.ChangedFile) []domain.ChangedFile {
+	kept := make([]domain.ChangedFile, 0, len(files))
+	for _, f := range files {
+		if !cfg.Excluded(f.Path) {
+			kept = append(kept, f)
+		}
+	}
+	return kept
 }
 
 // runGate runs one gate and converts an error or a panic into a blocking

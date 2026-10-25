@@ -99,3 +99,30 @@ func TestLoadRejectsNonRegularFiles(t *testing.T) {
 		t.Fatalf("err = %v, want regular-file error for a directory", err)
 	}
 }
+
+func TestLoadMonorepoConfig(t *testing.T) {
+	path := writeConfig(t, `{
+		"version": 1,
+		"components": [
+			{"paths": ["services/*/api"], "languages": ["go"], "conventions": ["clean-architecture"]},
+			{"paths": ["services/tts/app"], "languages": ["python"], "conventions": ["clean-architecture"],
+			 "layers": {"domain": ["*/domain.py"]}, "reason": "file-based layers"}
+		],
+		"exclude": ["**/node_modules/**"]
+	}`)
+	cfg, err := NewLoader(path).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Components) != 2 || len(cfg.Exclude) != 1 || !cfg.Has(domain.LanguagePython) {
+		t.Fatalf("unexpected config %+v", cfg)
+	}
+	tts := cfg.Components[1]
+	if tts.Reason != "file-based layers" || len(tts.Layers["domain"]) != 1 {
+		t.Fatalf("component fields not decoded: %+v", tts)
+	}
+	if _, err := NewLoader(writeConfig(t, `{"version":1,"components":[{"paths":["a"],"languages":["go"],"layer":{}}]}`)).Load(); err == nil ||
+		!strings.Contains(err.Error(), `unknown field "layer"`) {
+		t.Fatalf("a misspelt component field must be rejected, got %v", err)
+	}
+}

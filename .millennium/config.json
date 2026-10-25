@@ -1,0 +1,11 @@
+{
+  "$schema": "../schema/millennium.schema.json",
+  "version": 1,
+  "components": [
+    {
+      "paths": ["engine"],
+      "languages": ["go"],
+      "conventions": ["clean-architecture"]
+    }
+  ]
+}

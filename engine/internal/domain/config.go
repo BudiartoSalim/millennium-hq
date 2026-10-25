@@ -88,9 +88,13 @@ const (
 )
 
 // Config is a validated project configuration. Build one with NewConfig.
+// A single-project config becomes one component rooted at the repository
+// root, so the rest of the engine only ever sees components.
 type Config struct {
+	// Languages is every language any component uses.
 	Languages        []Language
-	Conventions      []Convention
+	Components       []Component
+	Exclude          []Pattern
 	Testing          TestingProfile
 	DependencyPolicy DependencyPolicy
 	PythonTypeCheck  PythonTypeCheck
@@ -112,6 +116,8 @@ type ConfigInput struct {
 	Version          *int
 	Languages        []string
 	Conventions      []string
+	Components       []ComponentInput
+	Exclude          []string
 	Testing          *string
 	DependencyPolicy *string
 	PythonTypeCheck  *string
@@ -138,30 +144,51 @@ var repoDirPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
 func NewConfig(in ConfigInput) (Config, error) {
 	v := &validator{}
 	v.version(in.Version)
-	if len(in.Languages) == 0 {
-		v.add("languages: at least one language is required")
-	}
+	components := v.components(in)
 	cfg := Config{
-		Languages:        parseList(v, "languages", in.Languages, Languages()),
-		Conventions:      parseList(v, "conventions", in.Conventions, Conventions()),
+		Languages:        languagesOf(components),
+		Components:       components,
+		Exclude:          v.patterns("exclude", in.Exclude, RecursivePattern),
 		Testing:          parseChoice(v, "testing", in.Testing, TestingProfiles(), DefaultTesting),
 		DependencyPolicy: parseChoice(v, "dependencyPolicy", in.DependencyPolicy, DependencyPolicies(), DefaultDependencyPolicy),
 		PythonTypeCheck:  parseChoice(v, "python.typeCheck", in.PythonTypeCheck, PythonTypeChecks(), DefaultPythonTypeCheck),
 		AcceptanceTests:  v.repoDir("paths.acceptanceTests", in.AcceptanceTests, DefaultAcceptanceTests),
 		Run:              v.run(in.Run),
 	}
-	v.crossCheck(cfg)
+	if cfg.PythonTypeCheck == PythonTypeCheckMypy && !cfg.Has(LanguagePython) {
+		v.addf("python.typeCheck: %q needs %q in languages", PythonTypeCheckMypy, LanguagePython)
+	}
 	if len(v.problems) > 0 {
 		return Config{}, &ConfigError{Problems: v.problems}
 	}
 	return cfg, nil
 }
 
-// Has reports whether the config enables lang.
+// Has reports whether any component uses lang.
 func (c Config) Has(lang Language) bool { return slices.Contains(c.Languages, lang) }
 
-// Uses reports whether the config selects the convention.
-func (c Config) Uses(convention Convention) bool { return slices.Contains(c.Conventions, convention) }
+// Excluded reports whether an exclude pattern covers p.
+func (c Config) Excluded(p string) bool {
+	for _, pattern := range c.Exclude {
+		if pattern.Covers(p) {
+			return true
+		}
+	}
+	return false
+}
+
+func languagesOf(components []Component) []Language {
+	var all []Language
+	for _, lang := range Languages() {
+		for _, component := range components {
+			if component.Has(lang) {
+				all = append(all, lang)
+				break
+			}
+		}
+	}
+	return all
+}
 
 type validator struct {
 	problems []string
@@ -203,6 +230,19 @@ func parseList[T ~string](v *validator, field string, raw []string, allowed []T)
 		default:
 			out = append(out, choice)
 		}
+	}
+	return out
+}
+
+func (v *validator) patterns(field string, raw []string, use PatternUse) []Pattern {
+	out := make([]Pattern, 0, len(raw))
+	for _, item := range raw {
+		p, err := ParsePattern(item, use)
+		if err != nil {
+			v.addf("%s: %v", field, err)
+			continue
+		}
+		out = append(out, p)
 	}
 	return out
 }
@@ -256,17 +296,6 @@ func isLoopbackHTTP(raw string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
-}
-
-// crossCheck rejects settings that are individually valid but meaningless
-// together; silently ignoring them would hide a misconfiguration.
-func (v *validator) crossCheck(cfg Config) {
-	if cfg.Uses(ConventionReactFeatureBased) && !cfg.Has(LanguageTypeScript) {
-		v.addf("conventions: %q needs %q in languages", ConventionReactFeatureBased, LanguageTypeScript)
-	}
-	if cfg.PythonTypeCheck == PythonTypeCheckMypy && !cfg.Has(LanguagePython) {
-		v.addf("python.typeCheck: %q needs %q in languages", PythonTypeCheckMypy, LanguagePython)
-	}
 }
 
 func quoteAll[T ~string](values []T) string {

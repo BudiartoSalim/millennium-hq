@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
+	"millennium/internal/application/usecase"
 	"millennium/internal/domain"
 )
 
@@ -13,11 +16,11 @@ type renderer struct {
 	failure func(error)
 }
 
-func rendererFor(name string, stdout, stderr io.Writer) (renderer, error) {
+func rendererFor(name string, stdout, stderr io.Writer, filesLabel string) (renderer, error) {
 	switch name {
 	case "text":
 		return renderer{
-			report:  func(r domain.Report) { writeText(stderr, r) },
+			report:  func(r domain.Report) { writeText(stderr, r, filesLabel) },
 			failure: func(err error) { fmt.Fprintf(stderr, "millennium: BLOCKED: %v\n", err) },
 		}, nil
 	case "json":
@@ -29,20 +32,62 @@ func rendererFor(name string, stdout, stderr io.Writer) (renderer, error) {
 	return renderer{}, fmt.Errorf("unknown format %q: use text or json", name)
 }
 
-func writeText(w io.Writer, r domain.Report) {
+// outcome renders a use-case result and returns the exit status.
+func (r renderer) outcome(report domain.Report, err error) int {
+	if err != nil {
+		return r.fail(err)
+	}
+	r.report(report)
+	if report.Passed() {
+		return exitPass
+	}
+	return exitBlocked
+}
+
+func (r renderer) fail(err error) int {
+	r.failure(err)
+	return exitBlocked
+}
+
+func writeText(w io.Writer, r domain.Report, filesLabel string) {
 	switch {
 	case !r.Enabled:
 		fmt.Fprintf(w, "millennium: not enabled in this repository (no %s); nothing checked\n", domain.ConfigPath)
 	case len(r.Results) == 0:
 		fmt.Fprintln(w, "millennium: BLOCKED: no gate ran; the engine is miswired, report this as a bug")
 	case r.Passed():
-		fmt.Fprintf(w, "millennium: passed (gates: %d, changed files: %d)\n", len(r.Results), r.ChangedFiles)
+		fmt.Fprintf(w, "millennium: passed (gates: %d, %s: %d)\n", len(r.Results), filesLabel, r.ChangedFiles)
 	default:
-		fmt.Fprintf(w, "millennium: BLOCKED (findings: %d)\n", r.FindingCount())
+		fmt.Fprintf(w, "millennium: BLOCKED (findings: %d, %s: %d)\n", r.FindingCount(), filesLabel, r.ChangedFiles)
+		fmt.Fprintf(w, "  by rule: %s\n", ruleCounts(r.Findings()))
 		for _, f := range r.Findings() {
 			fmt.Fprintf(w, "  [%s/%s] %s%s\n", f.Gate, f.Rule, location(f), f.Message)
 		}
 	}
+}
+
+// ruleCounts summarises findings per rule, most frequent first, so a large
+// audit shows where the work is before the details.
+func ruleCounts(findings []domain.Finding) string {
+	counts := map[string]int{}
+	for _, f := range findings {
+		counts[f.Gate+"/"+f.Rule]++
+	}
+	rules := make([]string, 0, len(counts))
+	for rule := range counts {
+		rules = append(rules, rule)
+	}
+	sort.Slice(rules, func(i, j int) bool {
+		if counts[rules[i]] != counts[rules[j]] {
+			return counts[rules[i]] > counts[rules[j]]
+		}
+		return rules[i] < rules[j]
+	})
+	parts := make([]string, len(rules))
+	for i, rule := range rules {
+		parts[i] = fmt.Sprintf("%s %d", rule, counts[rule])
+	}
+	return strings.Join(parts, ", ")
 }
 
 func location(f domain.Finding) string {
@@ -55,14 +100,56 @@ func location(f domain.Finding) string {
 	return f.File + ": "
 }
 
+func writeExplanation(w io.Writer, e usecase.Explanation) {
+	fmt.Fprintf(w, "%s\n", e.Path)
+	if e.Excluded {
+		fmt.Fprintln(w, "  excluded: yes, no check reads this file")
+		return
+	}
+	language := string(e.Language)
+	if language == "" {
+		language = "none (only checks that apply to any file)"
+	}
+	fmt.Fprintf(w, "  language:  %s\n", language)
+	if e.Component == nil {
+		fmt.Fprintln(w, "  component: none; no convention or limit applies")
+		return
+	}
+	fmt.Fprintf(w, "  component: %s (root %q)\n", e.Component.Component.Name(), e.Component.Root)
+	if e.Component.Component.Reason != "" {
+		fmt.Fprintf(w, "  reason:    %s\n", e.Component.Component.Reason)
+	}
+	if e.Language == "" || !e.Component.Component.Has(e.Language) {
+		fmt.Fprintln(w, "  note:      the component does not list this file's language, so no code check reads it")
+		return
+	}
+	for _, layer := range e.Layers {
+		fmt.Fprintf(w, "  %s: %s\n", layer.Convention, describeLayer(layer))
+	}
+	fmt.Fprintf(w, "  limits:    function length %d lines (test files exempt), nesting depth %d, cognitive complexity %d\n",
+		e.Limits.FunctionLines, e.Limits.Nesting, e.Limits.Cognitive)
+}
+
+func describeLayer(layer usecase.LayerAssignment) string {
+	switch {
+	case layer.Problem != "":
+		return "cannot be checked: " + layer.Problem
+	case layer.Layer == "":
+		return "in no layer (layer rules do not restrict it)"
+	case layer.Layer == domain.CompositionRoot:
+		return "composition root (may import every layer)"
+	}
+	return "layer " + layer.Layer
+}
+
 // jsonReport is the machine-readable report. Status is one of pass, blocked,
 // not-enabled or error.
 type jsonReport struct {
-	Status       string        `json:"status"`
-	ChangedFiles int           `json:"changedFiles"`
-	Gates        []string      `json:"gates"`
-	Findings     []jsonFinding `json:"findings"`
-	Error        string        `json:"error,omitempty"`
+	Status   string        `json:"status"`
+	Files    int           `json:"files"`
+	Gates    []string      `json:"gates"`
+	Findings []jsonFinding `json:"findings"`
+	Error    string        `json:"error,omitempty"`
 }
 
 type jsonFinding struct {
@@ -74,7 +161,7 @@ type jsonFinding struct {
 }
 
 func toJSON(r domain.Report) jsonReport {
-	out := jsonReport{Status: jsonStatus(r), ChangedFiles: r.ChangedFiles, Gates: []string{}, Findings: []jsonFinding{}}
+	out := jsonReport{Status: jsonStatus(r), Files: r.ChangedFiles, Gates: []string{}, Findings: []jsonFinding{}}
 	for _, result := range r.Results {
 		out.Gates = append(out.Gates, result.Gate)
 	}

@@ -3,8 +3,8 @@
 //
 // Exit status is 0 only for a pass (or a repository that is not opted in).
 // Every other outcome, usage and internal errors included, exits 2: the code
-// Claude Code hooks treat as blocking, and non-zero for git hooks and CI. Exit
-// 1 is never used because Claude Code treats it as a non-blocking error.
+// Claude Code hooks treat as blocking, and non-zero for any other caller.
+// Exit 1 is never used because Claude Code treats it as a non-blocking error.
 package cli
 
 import (
@@ -27,16 +27,29 @@ const usageText = `millennium: the gate engine of the millennium plugin.
 
 Usage:
   millennium gate [--base REV] [--require-config] [--format text|json]
+      Check the changes against REV (default HEAD): what hooks and the tech
+      lead run.
+  millennium audit [--path PATH] [--format text|json]
+      Check all existing code, or only PATH, against the full rules.
   millennium config validate
+      Validate .millennium/config.json.
+  millennium config explain PATH
+      Show which component, layers and limits apply to PATH.
   millennium version
 
-Exit status is 0 only when the change passes or the repository is not opted
-in; every other outcome, errors included, exits 2.
+Paths are relative to the current directory. Exit status is 0 only when the
+check passes or the repository is not opted in; every other outcome, errors
+included, exits 2.
 `
 
-// GateRunner runs the gates; usecase.RunGates implements it.
+// GateRunner runs the gates over a change; usecase.RunGates implements it.
 type GateRunner interface {
 	Execute(ctx context.Context, in usecase.RunGatesInput) (domain.Report, error)
+}
+
+// AuditRunner runs the gates over existing code; usecase.RunAudit implements it.
+type AuditRunner interface {
+	Execute(ctx context.Context, in usecase.AuditInput) (domain.Report, error)
 }
 
 // ConfigLoader loads the project config; usecase.LoadConfig implements it.
@@ -44,10 +57,21 @@ type ConfigLoader interface {
 	Execute(ctx context.Context) (domain.Config, bool, error)
 }
 
-// Deps are the use-cases the commands call.
+// Explainer explains which rules apply to a file; usecase.ExplainFile
+// implements it.
+type Explainer interface {
+	Execute(ctx context.Context, path string) (usecase.Explanation, error)
+}
+
+// Deps are what the commands call.
 type Deps struct {
-	Gates  GateRunner
-	Config ConfigLoader
+	Gates   GateRunner
+	Audit   AuditRunner
+	Config  ConfigLoader
+	Explain Explainer
+	// RepoPath turns a command-line path, relative to the current
+	// directory, into a repository-relative one.
+	RepoPath func(arg string) (string, error)
 }
 
 // DepsFactory builds Deps on demand, so commands such as version work
@@ -77,6 +101,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	switch args[0] {
 	case "gate":
 		return a.gate(ctx, args[1:])
+	case "audit":
+		return a.audit(ctx, args[1:])
 	case "config":
 		return a.config(ctx, args[1:])
 	case "version":
@@ -91,53 +117,94 @@ func (a *App) Run(ctx context.Context, args []string) int {
 }
 
 func (a *App) gate(ctx context.Context, args []string) int {
-	flags := flag.NewFlagSet("gate", flag.ContinueOnError)
-	flags.SetOutput(a.stderr)
+	flags := a.flagSet("gate")
 	base := flags.String("base", "", "revision to compare the working tree against (default HEAD)")
-	requireConfig := flags.Bool("require-config", false, "block when the repository has no config; use in CI")
+	requireConfig := flags.Bool("require-config", false, "block when the repository has no config")
 	formatName := flags.String("format", "text", "report format: text or json")
-	if err := flags.Parse(args); err != nil {
-		return exitBlocked
-	}
-	if flags.NArg() > 0 {
-		fmt.Fprintf(a.stderr, "millennium: unexpected argument %q\n", flags.Arg(0))
-		return exitBlocked
-	}
-	render, err := rendererFor(*formatName, a.stdout, a.stderr)
-	if err != nil {
-		fmt.Fprintf(a.stderr, "millennium: %v\n", err)
+	render, ok := a.parse(flags, args, formatName, "changed files")
+	if !ok {
 		return exitBlocked
 	}
 	in := usecase.RunGatesInput{Base: *base, Config: usecase.ConfigOptional}
 	if *requireConfig {
 		in.Config = usecase.ConfigRequired
 	}
-	report, err := a.runGates(ctx, in)
-	if err != nil {
-		render.failure(err)
-		return exitBlocked
-	}
-	render.report(report)
-	if report.Passed() {
-		return exitPass
-	}
-	return exitBlocked
-}
-
-func (a *App) runGates(ctx context.Context, in usecase.RunGatesInput) (domain.Report, error) {
 	deps, err := a.deps(ctx)
 	if err != nil {
-		return domain.Report{}, err
+		return render.fail(err)
 	}
-	return deps.Gates.Execute(ctx, in)
+	report, err := deps.Gates.Execute(ctx, in)
+	return render.outcome(report, err)
+}
+
+func (a *App) audit(ctx context.Context, args []string) int {
+	flags := a.flagSet("audit")
+	pathArg := flags.String("path", "", "directory or file to audit, relative to the current directory (default: everything)")
+	formatName := flags.String("format", "text", "report format: text or json")
+	render, ok := a.parse(flags, args, formatName, "audited files")
+	if !ok {
+		return exitBlocked
+	}
+	deps, err := a.deps(ctx)
+	if err != nil {
+		return render.fail(err)
+	}
+	in := usecase.AuditInput{}
+	if *pathArg != "" {
+		if in.Path, err = deps.RepoPath(*pathArg); err != nil {
+			return render.fail(err)
+		}
+	}
+	report, err := deps.Audit.Execute(ctx, in)
+	return render.outcome(report, err)
+}
+
+func (a *App) flagSet(name string) *flag.FlagSet {
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	return flags
+}
+
+// parse reads the flags, refuses stray arguments and picks the renderer.
+func (a *App) parse(flags *flag.FlagSet, args []string, formatName *string, filesLabel string) (renderer, bool) {
+	if err := flags.Parse(args); err != nil {
+		return renderer{}, false
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(a.stderr, "millennium: unexpected argument %q\n", flags.Arg(0))
+		return renderer{}, false
+	}
+	render, err := rendererFor(*formatName, a.stdout, a.stderr, filesLabel)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "millennium: %v\n", err)
+		return renderer{}, false
+	}
+	return render, true
 }
 
 func (a *App) config(ctx context.Context, args []string) int {
-	if len(args) != 1 || args[0] != "validate" {
-		fmt.Fprint(a.stderr, usageText)
-		return exitBlocked
+	switch {
+	case len(args) == 1 && args[0] == "validate":
+		return a.validateConfig(ctx)
+	case len(args) == 2 && args[0] == "explain":
+		return a.explain(ctx, args[1])
 	}
-	err := a.validateConfig(ctx)
+	fmt.Fprint(a.stderr, usageText)
+	return exitBlocked
+}
+
+func (a *App) validateConfig(ctx context.Context) int {
+	err := func() error {
+		deps, err := a.deps(ctx)
+		if err != nil {
+			return err
+		}
+		_, enabled, err := deps.Config.Execute(ctx)
+		if err == nil && !enabled {
+			err = errors.New("no " + domain.ConfigPath + " in this repository")
+		}
+		return err
+	}()
 	if err != nil {
 		fmt.Fprintf(a.stderr, "millennium: %v\n", err)
 		return exitBlocked
@@ -146,17 +213,22 @@ func (a *App) config(ctx context.Context, args []string) int {
 	return exitPass
 }
 
-func (a *App) validateConfig(ctx context.Context) error {
-	deps, err := a.deps(ctx)
+func (a *App) explain(ctx context.Context, arg string) int {
+	explanation, err := func() (usecase.Explanation, error) {
+		deps, err := a.deps(ctx)
+		if err != nil {
+			return usecase.Explanation{}, err
+		}
+		path, err := deps.RepoPath(arg)
+		if err != nil {
+			return usecase.Explanation{}, err
+		}
+		return deps.Explain.Execute(ctx, path)
+	}()
 	if err != nil {
-		return err
+		fmt.Fprintf(a.stderr, "millennium: %v\n", err)
+		return exitBlocked
 	}
-	_, enabled, err := deps.Config.Execute(ctx)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return errors.New("no " + domain.ConfigPath + " in this repository")
-	}
-	return nil
+	writeExplanation(a.stdout, explanation)
+	return exitPass
 }

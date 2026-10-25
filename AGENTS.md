@@ -11,16 +11,19 @@ moves.
 ```
 engine/                       gate engine, Go standard library only
   main.go                     composition root ONLY
-  internal/domain/            config, change set, toolchain policy, verdict
+  internal/domain/            config, components, patterns, packs and layer
+                              rules, limits, facts, verdict
   internal/application/
-    port/                     interfaces the core needs (config, repo, tools, gate)
-    gate/                     the checks; each reports findings
-    usecase/                  load config, run gates
-  internal/infrastructure/    configfile, gitrepo, toolpath adapters
+    port/                     interfaces the core needs
+    gate/                     the checks (toolchain, structure); each reports findings
+    usecase/                  load config, run gates, audit, explain
+  internal/infrastructure/    configfile, gitrepo, goanalyzer, packs (embedded
+                              convention packs), toolpath adapters
   internal/interface/cli/     argument parsing, rendering, exit codes
 schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
+.millennium/config.json       this repository's own config: the engine audits itself
 scripts/verify.sh             the full local check
-docs/design.md                the design
+docs/                         user documentation; docs/design.md is the design
 ```
 
 Plugin components (`agents/`, `skills/`, `hooks/`, `conventions/`, `ci/`,
@@ -73,9 +76,14 @@ per-caller special cases.
   every other outcome exits 2. Claude Code hooks block only on 2 and treat 1 as
   a non-blocking error, so the engine never exits 1.
 - Text reports go to stderr (where hooks read them), JSON to stdout.
-- Config changes touch three places in one change: the domain, the DTO in
-  `infrastructure/configfile`, and `schema/millennium.schema.json`.
-  `schema_sync_test.go` fails when they drift.
+- Config changes touch four places in one change: the domain, the DTO in
+  `infrastructure/configfile`, `schema/millennium.schema.json`, and
+  `docs/configuration.md`. `schema_sync_test.go` fails when the first three
+  drift.
+- **Every user-facing change updates `docs/` in the same change**: a new
+  command or flag in `docs/cli.md`, a new check or rule in `docs/checks.md`, a
+  convention in `docs/conventions/`. A user must be able to learn every
+  feature from the docs alone.
 - Doc comments on every package and exported identifier.
 
 ## Testing
@@ -94,7 +102,10 @@ user's global and system config isolated.
 bash scripts/verify.sh
 ```
 
-It runs gofmt, go vet for linux, darwin and windows, and the full test suite.
+It runs gofmt, go vet for linux, darwin and windows, the full test suite, and
+the engine auditing its own source against `.millennium/config.json`: a rule
+the engine would enforce on a user's code fails this repository too. Fix the
+code, never the config, when the self-audit blocks.
 Inside Claude Code's sandbox the home directory is read-only, so first:
 
 ```

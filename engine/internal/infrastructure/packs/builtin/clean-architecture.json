@@ -1,0 +1,18 @@
+{
+  "name": "clean-architecture",
+  "layers": [
+    { "name": "domain", "mayImport": [], "thirdParty": false },
+    { "name": "application", "mayImport": ["domain"], "thirdParty": false },
+    { "name": "infrastructure", "mayImport": ["domain", "application"], "thirdParty": true },
+    { "name": "interface", "mayImport": ["domain", "application"], "thirdParty": true }
+  ],
+  "paths": {
+    "go": {
+      "domain": ["internal/domain"],
+      "application": ["internal/application"],
+      "infrastructure": ["internal/infrastructure"],
+      "interface": ["internal/interface"],
+      "composition": ["main.go", "cmd"]
+    }
+  }
+}

@@ -1,10 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "millennium project config",
-  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, react-feature-based needs typescript, mypy needs python). engine/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
+  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, react-feature-based needs typescript in its component, mypy needs python, the most specific component wins). engine/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "languages"],
+  "required": ["version"],
+  "anyOf": [
+    { "required": ["languages"], "not": { "required": ["components"] } },
+    { "required": ["components"], "not": { "anyOf": [{ "required": ["languages"] }, { "required": ["conventions"] }] } }
+  ],
+  "$defs": {
+    "language": { "enum": ["go", "typescript", "python"] },
+    "convention": { "enum": ["clean-architecture", "react-feature-based"] },
+    "prefixPattern": {
+      "type": "string",
+      "description": "A path relative to the repository root, '.' for the root itself. '*' and '?' match within one segment.",
+      "pattern": "^(\\.|[A-Za-z0-9._*?@+ -]+(/[A-Za-z0-9._*?@+ -]+)*)$"
+    }
+  },
   "properties": {
     "$schema": {
       "type": "string",
@@ -16,16 +29,65 @@
     },
     "languages": {
       "type": "array",
-      "description": "Languages whose checks run. At least one.",
+      "description": "Single-project form: languages whose checks run. Use components instead for a monorepo.",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "enum": ["go", "typescript", "python"] }
+      "items": { "$ref": "#/$defs/language" }
     },
     "conventions": {
       "type": "array",
-      "description": "Convention packs to enforce.",
+      "description": "Single-project form: convention packs to enforce.",
       "uniqueItems": true,
-      "items": { "enum": ["clean-architecture", "react-feature-based"] },
+      "items": { "$ref": "#/$defs/convention" },
+      "default": []
+    },
+    "components": {
+      "type": "array",
+      "description": "Monorepo form: each component maps paths to languages and conventions. A file belongs to the most specific matching component.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["paths", "languages"],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "description": "Component roots, such as \"services/*/api\".",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/prefixPattern" }
+          },
+          "languages": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/language" }
+          },
+          "conventions": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/convention" },
+            "default": []
+          },
+          "layers": {
+            "type": "object",
+            "description": "Overrides a convention's layer paths for this component, relative to its root.",
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/prefixPattern" }
+            }
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this component is an exception, for example a legacy service with no conventions."
+          }
+        }
+      }
+    },
+    "exclude": {
+      "type": "array",
+      "description": "Paths no check reads, such as generated or vendored code. '**' matches any number of segments; a directory excludes everything inside it.",
+      "items": { "type": "string" },
       "default": []
     },
     "testing": {

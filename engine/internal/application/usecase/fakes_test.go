@@ -17,15 +17,19 @@ func (f fakeSource) Load() (domain.Config, error) { return f.cfg, f.err }
 type fakeRepo struct {
 	changes    []domain.ChangedFile
 	changesErr error
+	files      []string
+	filesErr   error
 	tracked    bool
 	trackedErr error
 	gotBase    string
 }
 
-func (f *fakeRepo) Changes(_ context.Context, base string) ([]domain.ChangedFile, error) {
+func (f *fakeRepo) Changes(_ context.Context, base string) (domain.ChangeSet, error) {
 	f.gotBase = base
-	return f.changes, f.changesErr
+	return domain.ChangeSet{Base: "base-tree", Files: f.changes}, f.changesErr
 }
+
+func (f *fakeRepo) Files(context.Context) ([]string, error) { return f.files, f.filesErr }
 
 func (f *fakeRepo) Tracked(context.Context, string, string) (bool, error) {
 	return f.tracked, f.trackedErr

@@ -22,9 +22,6 @@ func TestChangesSkipsSpecialFiles(t *testing.T) {
 	}
 	write(t, dir, "new.go", "package main")
 
-	got, err := open(t, dir).Changes(t.Context(), "")
-	if err != nil {
-		t.Fatalf("Changes: %v", err)
-	}
+	got := changes(t, open(t, dir), "")
 	assertChanges(t, got, domain.ChangedFile{Path: "new.go", Kind: domain.ChangeAdded})
 }

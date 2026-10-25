@@ -20,18 +20,25 @@ func TestRequiredTools(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got []string
-			for _, req := range RequiredTools(tt.cfg) {
-				if req.Reason == "" {
-					t.Errorf("%v has no reason", req.Names)
-				}
-				got = append(got, strings.Join(req.Names, "|"))
-			}
-			if !slices.Equal(got, tt.want) {
+			if got := toolNames(t, RequiredTools(tt.cfg)); !slices.Equal(got, tt.want) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
 	}
+}
+
+// toolNames renders each requirement as its alternatives joined by "|" and
+// checks that every requirement says why it is needed.
+func toolNames(t *testing.T, reqs []ToolRequirement) []string {
+	t.Helper()
+	names := make([]string, 0, len(reqs))
+	for _, req := range reqs {
+		if req.Reason == "" {
+			t.Errorf("%v has no reason", req.Names)
+		}
+		names = append(names, strings.Join(req.Names, "|"))
+	}
+	return names
 }
 
 func TestToolRequirementDescribe(t *testing.T) {

@@ -17,6 +17,8 @@ import (
 	"millennium/internal/domain"
 	"millennium/internal/infrastructure/configfile"
 	"millennium/internal/infrastructure/gitrepo"
+	"millennium/internal/infrastructure/goanalyzer"
+	"millennium/internal/infrastructure/packs"
 	"millennium/internal/infrastructure/toolpath"
 	"millennium/internal/interface/cli"
 )
@@ -40,13 +42,24 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 	if err != nil {
 		return cli.Deps{}, err
 	}
+	builtinPacks, err := packs.Builtin()
+	if err != nil {
+		return cli.Deps{}, fmt.Errorf("load the builtin convention packs (an engine bug): %w", err)
+	}
 	configPath := filepath.Join(repo.Root(), filepath.FromSlash(domain.ConfigPath))
 	loadConfig := usecase.NewLoadConfig(configfile.NewLoader(configPath), repo)
+	analyzers := map[domain.Language]port.Analyzer{
+		domain.LanguageGo: goanalyzer.New(repo.Root()),
+	}
 	gates := []port.Gate{
 		gate.NewToolchain(toolpath.Locator{}),
+		gate.NewStructure(analyzers, builtinPacks, repo),
 	}
 	return cli.Deps{
-		Gates:  usecase.NewRunGates(loadConfig, repo, gates),
-		Config: loadConfig,
+		Gates:    usecase.NewRunGates(loadConfig, repo, gates),
+		Audit:    usecase.NewRunAudit(loadConfig, repo, gates),
+		Config:   loadConfig,
+		Explain:  usecase.NewExplainFile(loadConfig, builtinPacks),
+		RepoPath: repo.RepoPath,
 	}, nil
 }

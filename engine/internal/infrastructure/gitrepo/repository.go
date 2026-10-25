@@ -13,7 +13,6 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -43,13 +42,22 @@ func Open(ctx context.Context, dir string) (*Repository, error) {
 func (r *Repository) Root() string { return r.root }
 
 // Changes lists files that differ between base and the working tree, staged,
-// unstaged and untracked alike, sorted by path. An empty base means HEAD, or
-// the empty tree in a repository without commits.
-func (r *Repository) Changes(ctx context.Context, base string) ([]domain.ChangedFile, error) {
+// unstaged and untracked alike, sorted by path, with the tree they were
+// compared against. An empty base means HEAD, or the empty tree in a
+// repository without commits.
+func (r *Repository) Changes(ctx context.Context, base string) (domain.ChangeSet, error) {
 	tree, err := r.baseTree(ctx, base)
 	if err != nil {
-		return nil, err
+		return domain.ChangeSet{}, err
 	}
+	files, err := r.changedFiles(ctx, base, tree)
+	if err != nil {
+		return domain.ChangeSet{}, err
+	}
+	return domain.ChangeSet{Base: tree, Files: files}, nil
+}
+
+func (r *Repository) changedFiles(ctx context.Context, base, tree string) ([]domain.ChangedFile, error) {
 	diff, err := r.git(ctx, "diff", "--name-status", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", tree, "--")
 	if err != nil {
 		return nil, fmt.Errorf("diff against %s: %w", describeBase(base), err)
@@ -140,7 +148,7 @@ func (r *Repository) dropSpecialFiles(files []domain.ChangedFile) ([]domain.Chan
 			kept = append(kept, f)
 			continue
 		}
-		info, err := os.Lstat(filepath.Join(r.root, filepath.FromSlash(f.Path)))
+		info, err := os.Lstat(r.abs(f.Path))
 		if err != nil {
 			return nil, fmt.Errorf("inspect changed file %s: %w", f.Path, err)
 		}

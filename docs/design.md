@@ -1,8 +1,9 @@
 # millennium: design
 
-Status: agreed in planning on 2026-10-25. Sections marked **Proposed** are
-designed but not yet confirmed; they are listed again under
-[Open decisions](#open-decisions). Platform details still to confirm are under
+Status: agreed in planning on 2026-10-25. Items marked proposed are designed
+but not yet confirmed; they are listed again under
+[Open decisions](#open-decisions). User documentation for what is built lives
+in [docs/README.md](README.md). Platform details still to confirm are under
 [To verify before building](#to-verify-before-building).
 
 ## Purpose
@@ -42,7 +43,8 @@ hooks, `/vet-dependency`) into something any project can install.
 ## Scope of v1
 
 - Harness: Claude Code.
-- Languages: TypeScript (Node backend and React), Go, Python.
+- Languages: TypeScript (Node backend and React), Go, Python, and shell (bash),
+  which much infrastructure automation depends on.
 - Conventions: Clean Architecture for backend code, feature-based structure for
   React, required unit tests.
 - Focus: the agent workflow and the in-session gates.
@@ -230,7 +232,10 @@ their reasons, so nothing is silently off:
 ]
 ```
 
-## Adopting an existing project (Proposed)
+## Adopting an existing project
+
+The `/millennium:adopt` flow below is proposed; the existing-code rule, the
+audit and local mode are agreed for v1.
 
 `/millennium:adopt` onboards a project that already has code:
 
@@ -248,12 +253,19 @@ their reasons, so nothing is silently off:
 4. **Review and apply:** the user reviews the proposal and a dry run of what
    would block today, then runs `millennium config apply`.
 
-**Existing code does not block adoption.** Gates look at what a change touches:
-new code meets every rule, existing functions that are modified must not get
-worse (longer, deeper, more complex), and only new imports are held to the
-layer rules.
+**Existing code does not block adoption (built).** Gates look at what a change
+touches: new code meets every rule, existing functions that are modified must
+not get worse (longer, deeper, more complex), and only new imports are held to
+the layer rules.
 
-**Local mode, for projects the user does not own.** The config lives on the
+**Auditing existing code (built).** `millennium audit [--path PATH]` runs every
+check over existing code with no allowance for code that was already over a
+limit, and summarises findings per rule. It is the starting point for
+refactoring: the tech lead turns the report into work packages for parallel
+engineers, and the existing-code rule keeps each improvement from slipping
+back. Hooks never run it.
+
+**Local mode, for projects the user does not own (agreed for v1).** The config lives on the
 user's machine at
 `${CLAUDE_PLUGIN_DATA}/projects/<repo-key>/config.json`, not in the repo.
 `<repo-key>` derives from git's common directory, so every worktree of a repo
@@ -263,7 +275,14 @@ Agents cannot write there; only the user creates or changes it. Local mode is
 not shared across machines and is deleted on uninstall unless the plugin is
 removed with `--keep-data`, so it needs export and import commands.
 
-## Monorepos: components (Proposed)
+## Monorepos: components (built)
+
+Agreed over per-directory configs: one root file keeps the whole policy in one
+place to review and protect, and a pattern such as `services/*/api` covers new
+services automatically, where a forgotten per-directory file would leave a new
+service unchecked. Nested overrides can be added later without breaking
+existing configs. `millennium config explain <file>` shows which component,
+layer and limits apply to any file.
 
 A config can list components, each mapping paths to languages, conventions and,
 where the layout differs from the pack's default, layer paths:
@@ -278,7 +297,7 @@ where the layout differs from the pack's default, layer paths:
       "conventions": ["clean-architecture"] },
     { "paths": ["services/kokoro-tts/app"], "languages": ["python"],
       "conventions": ["clean-architecture"],
-      "layers": { "domain": "*/domain.py", "application": "*/service.py" } },
+      "layers": { "domain": ["*/domain.py"], "application": ["*/service.py"] } },
     { "paths": ["services/game-dashboard", "services/porto-webapp/web"], "languages": ["typescript"],
       "conventions": ["react-feature-based"] },
     { "paths": ["services/websearch/api"], "languages": ["go"], "conventions": [],
@@ -541,14 +560,27 @@ What the v1 gates fix in the earlier hooks:
   outside the sandbox.
 - `to_posix` maps `D:\x` to the Git Bash form `/d/x`, which is wrong on WSL.
 
+## Shell support
+
+Agreed for v1. Shell files are `.sh` files and extensionless files with a bash
+or sh shebang (such as `bin/*`).
+
+- `bash -n` on every changed script.
+- shellcheck, **on by default and required (blocking) when on**, with
+  `"shell": { "lint": "off" }` for projects that cannot install it. It catches
+  the bugs that break shell (unquoted expansions, word splitting, ignored exit
+  codes) and nothing in a standard library replaces it.
+- Rules that need no parser: a required `set -euo pipefail` (or the variant a
+  pack names), banned patterns such as `eval` and `curl ... | sh`, and
+  `# shellcheck disable=` needing a reason like every suppression.
+- Function length, nesting and complexity for shell need a parser; the known
+  Go shell parser is a third-party module, so they wait for a tokenizer of our
+  own after v1. Until then the maintainability reviewer covers them.
+
 ## Open decisions
 
-1. **Components** for monorepos, with the most specific path winning.
-2. **The rule for existing code:** new code meets the limits; modified functions
-   must not get worse.
-3. **Shell support** (server-scripts is largely bash): v1 or later.
-4. **Local mode**, **`/millennium:adopt`**, and **disabling a check needs a
-   reason**: designed above, not yet confirmed.
+1. **`/millennium:adopt`** and **disabling a check needs a reason**: designed
+   above, not yet confirmed.
 
 ## To verify before building
 
@@ -564,17 +596,19 @@ What the v1 gates fix in the earlier hooks:
 
 ## Build order
 
-Step 1 is done: this repo's `AGENTS.md`, the config schema, and the engine
-skeleton (config loading, change detection, the toolchain gate, the report
-model, fail-closed plumbing).
-
-1. `AGENTS.md` for this repo, config schema, engine skeleton with the diff,
-   config-integrity and fail-closed plumbing.
-2. clean-architecture pack for Go (engine-native parsing), components and the
-   existing-code rule once decided, then TypeScript and Python helpers.
-3. Hooks and protection layers; `config apply`; the tests-required gate.
-4. Supply-chain gates.
-5. Agents, skills, and the tech-lead playbook.
-6. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
+1. **Done:** this repo's `AGENTS.md`, the config schema, and the engine
+   skeleton (config loading, change detection, the toolchain gate, the report
+   model, fail-closed plumbing).
+2. **Go part done:** components, `config explain`, the Go analyzer, the
+   clean-architecture pack for Go (embedded in the engine), function limits
+   with the existing-code rule, `millennium audit`, and the user docs in
+   `docs/`. The engine audits its own source in `scripts/verify.sh`.
+   **Remaining:** the TypeScript and Python analyzer helpers and their
+   clean-architecture paths.
+3. Shell support.
+4. Hooks and protection layers; `config apply`; the tests-required gate.
+5. Supply-chain gates.
+6. Agents, skills, and the tech-lead playbook.
+7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
    local mode.
-7. `plugin/` layout, launcher and engine lock, release workflow.
+8. `plugin/` layout, launcher and engine lock, release workflow.

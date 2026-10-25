@@ -69,6 +69,18 @@ func open(t *testing.T, dir string) *Repository {
 	return repo
 }
 
+func changes(t *testing.T, repo *Repository, base string) []domain.ChangedFile {
+	t.Helper()
+	set, err := repo.Changes(t.Context(), base)
+	if err != nil {
+		t.Fatalf("Changes: %v", err)
+	}
+	if set.Base == "" {
+		t.Fatal("a change set must name its base tree")
+	}
+	return set.Files
+}
+
 func assertChanges(t *testing.T, got []domain.ChangedFile, want ...domain.ChangedFile) {
 	t.Helper()
 	if !slices.Equal(got, want) {
@@ -100,10 +112,7 @@ func TestChangesWithoutCommitsListsEveryFileAsAdded(t *testing.T) {
 	write(t, dir, "a/x.py", "x = 1")
 	gitT(t, dir, "add", "b.go")
 
-	got, err := open(t, dir).Changes(t.Context(), "")
-	if err != nil {
-		t.Fatalf("Changes: %v", err)
-	}
+	got := changes(t, open(t, dir), "")
 	assertChanges(t, got,
 		domain.ChangedFile{Path: "a/x.py", Kind: domain.ChangeAdded},
 		domain.ChangedFile{Path: "b.go", Kind: domain.ChangeAdded},
@@ -125,10 +134,7 @@ func TestChangesAgainstHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := open(t, dir).Changes(t.Context(), "")
-	if err != nil {
-		t.Fatalf("Changes: %v", err)
-	}
+	got := changes(t, open(t, dir), "")
 	assertChanges(t, got,
 		domain.ChangedFile{Path: "edit.go", Kind: domain.ChangeModified},
 		domain.ChangedFile{Path: "gone.go", Kind: domain.ChangeDeleted},
@@ -144,10 +150,7 @@ func TestChangesAgainstBranchIncludeCommittedWork(t *testing.T) {
 	write(t, dir, "feature.go", "package main")
 	commitAll(t, dir, "feature")
 
-	got, err := open(t, dir).Changes(t.Context(), "main")
-	if err != nil {
-		t.Fatalf("Changes: %v", err)
-	}
+	got := changes(t, open(t, dir), "main")
 	assertChanges(t, got, domain.ChangedFile{Path: "feature.go", Kind: domain.ChangeAdded})
 }
 

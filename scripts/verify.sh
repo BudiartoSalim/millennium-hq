@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Full local check for this repository: gofmt, go vet for every release target
-# OS, and the engine's test suite. Run it before calling a change done.
+# OS, the engine's test suite, and the engine auditing its own source. Run it
+# before calling a change done.
 # Written for the bash 3.2 that macOS ships.
 set -euo pipefail
 
@@ -21,5 +22,14 @@ done
 
 echo "== go test"
 go test -count=1 ./...
+
+# The plugin practises what it enforces: the engine audits its own source
+# against .millennium/config.json, so a rule it would block in a user's
+# repository fails this repository too.
+echo "== self-audit"
+bin_dir="$(mktemp -d)"
+trap 'rm -rf "$bin_dir"' EXIT
+go build -o "$bin_dir/millennium" .
+(cd "$root" && "$bin_dir/millennium" audit)
 
 echo "verify: all checks passed"
