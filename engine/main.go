@@ -83,6 +83,7 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 		Stop:           usecase.NewStopCheck(runGates, statestore.New(stateDir())),
 		Scope:          usecase.NewCheckScope(loadConfig, repo),
 		Apply:          usecase.NewApplyConfig(configfile.Codec{}, files, projectfiles.New(repo.Root())),
+		Discover:       usecase.NewDiscover(repo, repo, builtinPacks),
 		Root:           repo.Root(),
 		LocalConfigDir: localDir,
 		RepoPath:       repo.RepoPath,

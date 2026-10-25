@@ -13,6 +13,9 @@ type AuditInput struct {
 	// Path is a repository-relative directory or file; empty audits everything.
 	Path string
 	Tier domain.Tier
+	// Config, when set, audits against it instead of the repository's
+	// config: a dry run of a proposal before the user applies it.
+	Config *domain.Config
 }
 
 // RunAudit runs every gate over existing code instead of a change, holding
@@ -35,12 +38,9 @@ func (u *RunAudit) Execute(ctx context.Context, in AuditInput) (domain.Report, e
 	if in.Path != "" && !domain.IsRepoRelative(in.Path) {
 		return domain.Report{}, fmt.Errorf("audit path %q must be inside the repository", in.Path)
 	}
-	cfg, enabled, err := u.config.Execute(ctx)
+	cfg, err := u.auditConfig(ctx, in)
 	if err != nil {
 		return domain.Report{}, err
-	}
-	if !enabled {
-		return domain.Report{}, ErrConfigRequired
 	}
 	paths, err := u.repo.Files(ctx)
 	if err != nil {
@@ -56,4 +56,18 @@ func (u *RunAudit) Execute(ctx context.Context, in AuditInput) (domain.Report, e
 	}
 	changes.Files = withoutExcluded(cfg, changes.Files)
 	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)})
+}
+
+func (u *RunAudit) auditConfig(ctx context.Context, in AuditInput) (domain.Config, error) {
+	if in.Config != nil {
+		return *in.Config, nil
+	}
+	cfg, enabled, err := u.config.Execute(ctx)
+	if err != nil {
+		return domain.Config{}, err
+	}
+	if !enabled {
+		return domain.Config{}, ErrConfigRequired
+	}
+	return cfg, nil
 }

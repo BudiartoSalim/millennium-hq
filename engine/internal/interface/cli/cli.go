@@ -31,8 +31,12 @@ Usage:
   millennium gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
       Check the changes against REV (default HEAD). Hooks run the fast tier;
       the full tier, the default, also runs the tests and measures coverage.
-  millennium audit [--path PATH] [--tier fast|full] [--format text|json]
-      Check all existing code, or only PATH, against the full rules.
+  millennium audit [--path PATH] [--proposal FILE] [--tier fast|full] [--format text|json]
+      Check all existing code, or only PATH, against the full rules; with
+      --proposal, against the config a proposal would apply.
+  millennium discover [--format text|json]
+      Find the modules, languages and fitting conventions of a repository
+      without a config, and draft a proposal for it.
   millennium scope --base REV --allow PATTERN [--allow PATTERN ...]
       Check that a branch changes only its work package's paths, and no
       protected path or acceptance test. The tech lead runs it before merging.
@@ -100,6 +104,12 @@ type ConfigApplier interface {
 	Export(target usecase.ApplyTarget) ([]byte, error)
 }
 
+// Discoverer inspects a repository without a config; usecase.Discover
+// implements it.
+type Discoverer interface {
+	Execute(ctx context.Context) (usecase.DiscoverResult, error)
+}
+
 // ErrNoRepository is what a DepsFactory returns outside a git repository;
 // hooks then do nothing, since nothing there is opted in.
 var ErrNoRepository = errors.New("not inside a git repository")
@@ -114,6 +124,8 @@ type Deps struct {
 	Stop    StopChecker
 	Scope   ScopeChecker
 	Apply   ConfigApplier
+	// Discover is nil only in tests that do not need it.
+	Discover Discoverer
 	// Root is the repository's absolute path.
 	Root string
 	// LocalConfigDir holds the local configs; no agent may write there.
@@ -194,6 +206,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.audit(ctx, args[1:])
 	case "scope":
 		return a.scope(ctx, args[1:])
+	case "discover":
+		return a.discover(ctx, args[1:])
 	case "hook":
 		return a.hook(ctx)
 	case "config":
@@ -238,6 +252,7 @@ func (a *App) gate(ctx context.Context, args []string) int {
 func (a *App) audit(ctx context.Context, args []string) int {
 	flags := a.flagSet("audit")
 	pathArg := flags.String("path", "", "directory or file to audit, relative to the current directory (default: everything)")
+	proposal := flags.String("proposal", "", "audit against the config in this proposal instead of the repository's")
 	formatName := flags.String("format", "text", "report format: text or json")
 	tierName := flags.String("tier", "full", "fast (no test runs) or full")
 	render, ok := a.parse(flags, args, formatName, "audited files")
@@ -253,6 +268,11 @@ func (a *App) audit(ctx context.Context, args []string) int {
 		in := usecase.AuditInput{Tier: tier}
 		if *pathArg != "" {
 			if in.Path, err = deps.RepoPath(*pathArg); err != nil {
+				return err
+			}
+		}
+		if *proposal != "" {
+			if in.Config, err = proposedConfig(deps, *proposal); err != nil {
 				return err
 			}
 		}

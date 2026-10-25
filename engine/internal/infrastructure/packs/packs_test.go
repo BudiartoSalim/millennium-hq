@@ -22,12 +22,19 @@ func TestBuiltinPacksAreValid(t *testing.T) {
 	if _, ok := pack.Paths[domain.LanguageGo]; !ok || len(pack.Layers) != 4 {
 		t.Fatalf("clean-architecture pack = %+v", pack)
 	}
+	react, err := source.Pack(domain.ConventionReactFeatureBased)
+	if err != nil {
+		t.Fatalf("react-feature-based: %v", err)
+	}
+	if len(react.Layers) != 2 || !react.Layers[1].Isolated || react.Layers[1].Name != "features" {
+		t.Fatalf("react-feature-based pack = %+v", react)
+	}
 }
 
 func TestMissingPackIsUnavailable(t *testing.T) {
-	source, err := Builtin()
+	source, err := load(fstest.MapFS{})
 	if err != nil {
-		t.Fatalf("Builtin: %v", err)
+		t.Fatalf("load: %v", err)
 	}
 	if _, err := source.Pack(domain.ConventionReactFeatureBased); !errors.Is(err, port.ErrPackUnavailable) {
 		t.Fatalf("err = %v, want ErrPackUnavailable", err)

@@ -234,24 +234,24 @@ their reasons, so nothing is silently off:
 
 ## Adopting an existing project
 
-The `/millennium:adopt` flow below is proposed; the existing-code rule, the
-audit and local mode are agreed for v1.
-
-`/millennium:adopt` onboards a project that already has code:
+`/millennium:adopt` (built) onboards a project that already has code:
 
 1. **Mode:** committed (`.millennium/config.json` in the repo, for projects the
    user owns) or local (see below).
 2. **Discovery (engine, deterministic):** `millennium discover` reports module
-   roots (`go.mod`, `package.json`, `pyproject.toml`, `requirements*.txt`),
-   languages, test runners, existing lint configs, the import graph between
-   directories, and how much existing code already exceeds the limits.
-3. **Matching:** the engine evaluates each available pack against each module
-   and counts violations; an agent proposes which pack fits which module, and
-   drafts a custom pack from the observed structure where none fits. The
-   project's own check commands (`npm run lint`, its golangci setup) can be
-   listed so they run through the same gate.
-4. **Review and apply:** the user reviews the proposal and a dry run of what
-   would block today, then runs `millennium config apply`.
+   roots (`go.mod`, `package.json`, `pyproject.toml`, `setup.py`,
+   `requirements.txt`), code and test files per language, React use, code
+   outside any module, and how many files each pack's default layout already
+   places in a layer. It reads file names and `package.json` only, and drafts
+   a proposal that is validated as a config.
+3. **Matching:** the agent confirms fits with `config explain`, maps layers
+   onto a differing layout with `layers` overrides, or leaves a module without
+   a convention, with a reason. (Drafting whole custom packs, an import graph,
+   and running a project's own lint commands through the gate are not built.)
+4. **Review and apply:** `millennium audit --proposal <file>` shows what the
+   rules find in today's code without applying anything; the user reviews it
+   and runs `millennium config apply`. `/millennium:init` is the same flow for
+   a new project, with an optional layout skeleton.
 
 **Existing code does not block adoption (built).** Gates look at what a change
 touches: new code meets every rule, existing functions that are modified must
@@ -465,11 +465,13 @@ v1 packs:
   `application` (ports + use-cases) -> `infrastructure` (adapters) and
   `interface` (delivery), dependencies pointing inward, `main` as the only
   composition root. Ported from the `server-scripts` rules.
-- **react-feature-based**: `app/` (routes, providers), `features/<name>/`
+- **react-feature-based (built)**: `app/` (routes, providers), `features/<name>/`
   (components, hooks, api, types), shared `components/`, `lib/`, `hooks/`.
-  Imports flow shared -> features -> app; features never import each other.
-  Logic lives in plain modules and hooks with unit tests; components stay thin.
-  Feature-Sliced Design is a candidate for a later pack.
+  Imports flow shared -> features -> app; features never import each other
+  (an `isolated` layer: each match of `src/features/*` is a unit no sibling
+  may import). Shared code and features both need unit tests, components
+  included; keeping components thin keeps that cheap. Feature-Sliced Design
+  is a candidate for a later pack.
 
 A project can also have its own pack that extends a shipped one. For
 `server-scripts`, several prose rules become gated checks that way: the HTTP
@@ -598,8 +600,8 @@ or sh shebang (such as `bin/*`).
 
 ## Open decisions
 
-1. **`/millennium:adopt`**: designed above, built as described unless you
-   change it. Disabling a check with a reason is built (step 4d).
+1. **License.** The plugin has no license yet; `claude plugin validate`
+   notes that the plugin directory requires one. Your choice.
 
 ## To verify before building
 
@@ -673,5 +675,8 @@ or sh shebang (such as `bin/*`).
    through the sandbox. The session-start context names the launcher, since
    the plugin has no `bin/`. qa-tester may read documents inside components.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
-   local mode.
+   local mode. **Done:** the react-feature-based pack with `isolated` layers
+   (features may not import each other, aliases included), `millennium
+   discover`, `millennium audit --proposal` as a dry run, and the `init` and
+   `adopt` skills. Local mode was built in step 4f, qa-tester in step 6.
 8. `plugin/` layout, launcher and engine lock, release workflow.

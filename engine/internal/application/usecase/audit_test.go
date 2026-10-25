@@ -79,3 +79,20 @@ func TestAuditFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestAuditAgainstAProposedConfig(t *testing.T) {
+	proposed, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: []string{"go"}, Exclude: []string{"gen"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &fakeRepo{files: []string{"a.go", "gen/f.go"}}
+	gate := &fakeGate{name: "g"}
+	// No config in the repository: the proposal is what the audit uses.
+	uc := NewRunAudit(NewLoadConfig(fakeSource{err: port.ErrConfigNotFound}, repo), repo, []port.Gate{gate})
+	if _, err := uc.Execute(t.Context(), AuditInput{Config: &proposed}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := auditedPaths(t, gate.got.Changes.Files); !slices.Equal(got, []string{"a.go"}) {
+		t.Fatalf("audited %q; the proposal's exclude must apply", got)
+	}
+}

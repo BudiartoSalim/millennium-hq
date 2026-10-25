@@ -177,3 +177,45 @@ func TestCheckImportsOnlyChecksNewImportsOfExistingFiles(t *testing.T) {
 		t.Fatalf("without a base every import is checked, got %+v", all)
 	}
 }
+
+func TestIsolatedLayerKeepsSiblingsApart(t *testing.T) {
+	pack, err := NewPack(PackInput{
+		Name: "react-feature-based", Languages: []string{"typescript"},
+		Layers: []PackLayer{
+			{Name: "shared", ThirdParty: true},
+			{Name: "features", MayImport: []string{"shared"}, ThirdParty: true, Isolated: true},
+		},
+		Paths: map[string]map[string][]string{"typescript": {
+			"shared": {"src/components"}, "features": {"src/features/*"}, "composition": {"src/app"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	layering, err := pack.For(LanguageTypeScript, ComponentMatch{Component: Component{Patterns: []Pattern{RootPattern()}}, Root: "web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := func(line int, target string) Import {
+		return Import{Path: "@/" + target, Line: line, Kind: ImportProject, Target: "web/" + target}
+	}
+	file := FileFacts{Path: "web/src/features/cart/components/Cart.tsx", Imports: []Import{
+		project(1, "src/features/cart/hooks/useCart"),
+		project(2, "src/components/Button"),
+		project(3, "src/features/auth/hooks/useUser"),
+		project(4, "src/app/routes"),
+	}}
+	findings := layering.CheckImports(file, nil)
+	if len(findings) != 2 || findings[0].Line != 3 || findings[1].Line != 4 ||
+		!strings.Contains(findings[0].Message, "cart must not import auth") {
+		t.Fatalf("findings = %+v", findings)
+	}
+	app := FileFacts{Path: "web/src/app/App.tsx", Imports: []Import{project(1, "src/features/cart/index"), project(2, "src/features/auth/index")}}
+	if got := layering.CheckImports(app, nil); len(got) != 0 {
+		t.Fatalf("the composition root may compose features: %+v", got)
+	}
+	shared := FileFacts{Path: "web/src/components/Button.tsx", Imports: []Import{project(1, "src/features/cart/index")}}
+	if got := layering.CheckImports(shared, nil); len(got) != 1 || !strings.Contains(got[0].Message, "shared code must not import features code") {
+		t.Fatalf("shared code must not depend on a feature: %+v", got)
+	}
+}

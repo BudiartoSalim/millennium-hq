@@ -1,6 +1,6 @@
 # Agents and skills
 
-The plugin ships seven agents and eleven skills. The agents differ by what
+The plugin ships seven agents and thirteen skills. The agents differ by what
 they may do (tools, worktree, what they may read); the skills hold the
 instructions. Skills are portable (the Agent Skills format); the agent files
 are Claude Code's adapter.
@@ -75,6 +75,8 @@ The workflow, in order:
 | Skill | Invoked by | What it is |
 |---|---|---|
 | `lead` | you (`/millennium:lead <task>`), the tech-lead agent | The tech-lead playbook above. |
+| `init` | you (`/millennium:init [committed\|local]`) | Sets up a new project: languages, conventions, a draft config, an optional layout skeleton. |
+| `adopt` | you (`/millennium:adopt [committed\|local]`) | Onboards existing code: `millennium discover`, convention matching, a dry-run audit, the draft config. |
 | `vet-dependency` | you (`/millennium:vet-dependency npm express@4.21.2`), the lead | Vets a dependency and drafts its approval records into `millennium.proposal.json`. |
 | `engineering-standards` | engineer | Scope discipline, conventions, tests, dependencies, working with the gates. |
 | `review-protocol` | every reviewer | What a finding is, severities, and the JSON report format. |

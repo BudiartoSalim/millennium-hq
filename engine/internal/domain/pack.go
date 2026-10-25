@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 )
@@ -20,6 +21,10 @@ type PackLayer struct {
 	ThirdParty bool
 	// Tested layers need unit tests for every change to their logic.
 	Tested bool
+	// Isolated layers hold sibling units, one per match of the layer's path
+	// patterns ("src/features/*" makes each feature a unit): code in one
+	// unit may not import another unit of the same layer.
+	Isolated bool
 }
 
 // Pack is a validated convention pack: layers, their dependency rules, and
@@ -157,18 +162,26 @@ func (l Layering) Tested(repoPath string) bool {
 // LayerOf names the layer repoPath belongs to, CompositionRoot, or "" when it
 // is in none or outside the component.
 func (l Layering) LayerOf(repoPath string) string {
+	layer, _ := l.locate(repoPath)
+	return layer
+}
+
+// locate names the layer repoPath belongs to and the unit within it: the
+// component-relative prefix its layer pattern matched, such as
+// "src/features/cart".
+func (l Layering) locate(repoPath string) (layer, unit string) {
 	if !Within(repoPath, l.root) {
-		return ""
+		return "", ""
 	}
 	rel := Relative(repoPath, l.root)
 	for _, name := range l.order() {
 		for _, pattern := range l.paths[name] {
-			if _, ok := pattern.MatchPrefix(rel); ok {
-				return name
+			if prefix, ok := pattern.MatchPrefix(rel); ok {
+				return name, prefix
 			}
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // order is the pack's layer order with the composition root last, so the
@@ -185,7 +198,7 @@ func (l Layering) order() []string {
 // base, the file before the change, is given, only imports it did not have
 // are checked, so existing code is held to the rules once it is touched.
 func (l Layering) CheckImports(file FileFacts, base *FileFacts) []Finding {
-	from := l.LayerOf(file.Path)
+	from, unit := l.locate(file.Path)
 	if from == "" || from == CompositionRoot {
 		return nil
 	}
@@ -196,20 +209,20 @@ func (l Layering) CheckImports(file FileFacts, base *FileFacts) []Finding {
 		if existing[imp.Path] {
 			continue
 		}
-		if msg := l.violation(*rule, imp); msg != "" {
+		if msg := l.violation(*rule, unit, imp); msg != "" {
 			findings = append(findings, Finding{Rule: "layer-import", File: file.Path, Line: imp.Line, Message: msg})
 		}
 	}
 	return findings
 }
 
-func (l Layering) violation(rule PackLayer, imp Import) string {
+func (l Layering) violation(rule PackLayer, unit string, imp Import) string {
 	if imp.Kind == ImportStandard {
 		return ""
 	}
-	target := ""
+	target, targetUnit := "", ""
 	if imp.Kind == ImportProject {
-		target = l.LayerOf(imp.Target)
+		target, targetUnit = l.locate(imp.Target)
 	}
 	if imp.Kind == ImportExternal || !Within(imp.Target, l.root) {
 		if rule.ThirdParty {
@@ -218,6 +231,9 @@ func (l Layering) violation(rule PackLayer, imp Import) string {
 		return fmt.Sprintf("%s code must not import %q: it is outside this component, and %s allows no third-party or outside imports", rule.Name, imp.Path, rule.Name)
 	}
 	switch {
+	case target == rule.Name && rule.Isolated && targetUnit != unit:
+		return fmt.Sprintf("%s must not import %s (%q): the units of the %s layer are isolated from each other; compose them in the composition root, or move what they share to a shared layer",
+			path.Base(unit), path.Base(targetUnit), imp.Path, rule.Name)
 	case target == rule.Name || slices.Contains(rule.MayImport, target):
 		return ""
 	case target == "":

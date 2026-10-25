@@ -67,6 +67,7 @@ type layerDTO struct {
 	MayImport  []string `json:"mayImport"`
 	ThirdParty bool     `json:"thirdParty"`
 	Tested     bool     `json:"tested"`
+	Isolated   bool     `json:"isolated"`
 }
 
 func parse(files fs.FS, name string) (domain.Pack, error) {

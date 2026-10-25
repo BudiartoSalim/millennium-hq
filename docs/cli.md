@@ -2,7 +2,8 @@
 
 ```
 millennium gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
-millennium audit [--path PATH] [--tier fast|full] [--format text|json]
+millennium audit [--path PATH] [--proposal FILE] [--tier fast|full] [--format text|json]
+millennium discover [--format text|json]
 millennium scope --base REV --allow PATTERN [--allow PATTERN ...] [--format text|json]
 millennium hook
 millennium config validate
@@ -66,10 +67,39 @@ a refactor: the report's "by rule" line shows where the work is.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--path PATH` | whole repository | Audit only this directory or file. |
+| `--proposal FILE` | | Audit against the config in a proposal instead of the repository's: a dry run before `config apply`. The proposal is validated as `config apply` would, and nothing is written. Works in a repository without a config. |
 | `--tier` | `full` | As for `gate`. In an audit the full tier requires every executable line of tested layers to be covered. |
 | `--format` | `text` | As for `gate`. |
 
-An audit needs a config; without one there are no rules to audit against.
+An audit needs a config, or a proposal; without either there are no rules to
+audit against.
+
+## `millennium discover`
+
+Inspects a repository that has no config yet, for `/millennium:adopt` and
+`/millennium:init`, and drafts a proposal:
+
+```
+$ millennium discover
+millennium discover: 2 modules
+  services/game/api (go.mod): go 42 files, 12 test files
+    clean-architecture: 30 of 30 go files in its layers
+  services/game/web (package.json): typescript 18 files, React
+    react-feature-based: 4 of 15 typescript files in its layers
+  outside any module: shell 3 files
+```
+
+followed by the draft proposal. A module root is a directory with `go.mod`,
+`package.json`, `pyproject.toml`, `setup.py` or `requirements.txt`. A
+convention is drafted where its default layout places at least half of a
+module's non-test files in a layer (react-feature-based for modules whose
+`package.json` depends on React, clean-architecture otherwise); other modules
+get no convention and a reason. Each top-level directory with code outside
+any module, such as `scripts`, gets a component of its own.
+
+It reads file names and `package.json` only, runs nothing from the
+repository, and writes nothing. `--format json` prints the modules, the
+counts and the draft (`proposal`) as JSON.
 
 ## `millennium scope`
 

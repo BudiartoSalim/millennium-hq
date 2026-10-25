@@ -107,7 +107,7 @@ by `audit`. The layers and their rules come from the convention: see
 | `analysis-failed` | A file cannot be read or parsed: a syntax error, a symlink, a file larger than 4 MiB, a Go file without `go.mod`, a TypeScript project whose dependencies are not installed or whose TypeScript is 7 or newer, Python older than 3.10. | Fix the cause the message names. Exclude generated or vendored files in the config. |
 | `component-ambiguous` | Two components match a file equally. | Make one component's pattern more specific. |
 | `analysis-unavailable` | A component lists a language whose code checks this engine version does not have. | None: the code cannot pass until an analyzer for it ships. |
-| `convention-unavailable` | A component selects a convention this engine version does not have yet (`react-feature-based` today), or one with no rules for the component's language. | None yet; remove the convention only if you accept losing its rules. |
+| `convention-unavailable` | A component selects a convention this engine version does not have, or one with no rules for the component's language. | None yet; remove the convention only if you accept losing its rules. |
 
 ## `shell`
 

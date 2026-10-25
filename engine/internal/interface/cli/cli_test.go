@@ -72,6 +72,7 @@ type harness struct {
 	stop           *fakeStop
 	scope          *fakeScope
 	applier        *fakeApplier
+	discover       *fakeDiscover
 	root           string
 	localDir       string
 	terminal       bool
@@ -105,10 +106,13 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	if h.applier == nil {
 		h.applier = &fakeApplier{}
 	}
+	if h.discover == nil {
+		h.discover = &fakeDiscover{}
+	}
 	deps := func(_ context.Context, dir string) (Deps, error) {
 		h.gotDir = dir
 		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
-			Stop: h.stop, Scope: h.scope, Apply: h.applier, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath}, h.depsErr
+			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath}, h.depsErr
 	}
 	app := New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps)
 	app.terminal = func() bool { return h.terminal }
