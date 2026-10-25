@@ -154,8 +154,11 @@ func TestSessionStartHook(t *testing.T) {
 	h := &harness{config: fakeConfig{enabled: true}}
 	code, out := runHook(t, h, map[string]any{"hook_event_name": "SessionStart", "cwd": "/r"})
 	specific, _ := out["hookSpecificOutput"].(map[string]any)
-	if code != 0 || !strings.Contains(fmt.Sprint(specific["additionalContext"]), "millennium is active") {
+	if code != 0 || !strings.Contains(fmt.Sprint(specific["additionalContext"]), "run `millennium gate --tier full`") {
 		t.Fatalf("exit %d, output %v", code, out)
+	}
+	if got := sessionContext("'/p/scripts/millennium'"); !strings.Contains(got, "run `'/p/scripts/millennium' gate --tier full`") {
+		t.Fatalf("the context must name the launcher: %s", got)
 	}
 	quiet := &harness{config: fakeConfig{enabled: false}}
 	if code, out := runHook(t, quiet, map[string]any{"hook_event_name": "SessionStart", "cwd": "/r"}); code != 0 || out != nil {

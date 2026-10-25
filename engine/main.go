@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -86,6 +87,7 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 		LocalConfigDir: localDir,
 		RepoPath:       repo.RepoPath,
 		Close:          closeAnalyzers,
+		EngineCommand:  engineCommand(),
 	}, nil
 }
 
@@ -175,4 +177,14 @@ func stateDir() string {
 		return filepath.Join(dir, "millennium", "state")
 	}
 	return filepath.Join(os.TempDir(), "millennium-state")
+}
+
+// engineCommand is how agents' shells reach the engine: hooks run with
+// CLAUDE_PLUGIN_ROOT set, and the plugin's launcher lives under it.
+func engineCommand() string {
+	root := os.Getenv("CLAUDE_PLUGIN_ROOT")
+	if root == "" {
+		return "millennium"
+	}
+	return "'" + strings.ReplaceAll(filepath.Join(root, "scripts", "millennium"), "'", `'\''`) + "'"
 }

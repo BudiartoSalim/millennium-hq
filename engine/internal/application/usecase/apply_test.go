@@ -106,7 +106,7 @@ func TestApplyCommittedConfig(t *testing.T) {
 	if err := uc.Apply(plan); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"write /repo/.millennium/config.json go", "settings " + PluginID, "agents", "ignore " + ProposalFile}
+	want := []string{"write /repo/.millennium/config.json go", "settings " + PluginID, "agents", "ignore " + ProposalFile, "ignore " + WorktreesDir}
 	if !slices.Equal(w.calls, want) {
 		t.Fatalf("writes = %q, want %q", w.calls, want)
 	}

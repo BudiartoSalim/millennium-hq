@@ -40,7 +40,8 @@ func TestMergeSettingsKeepsOtherSettings(t *testing.T) {
 	denyWrite := sandbox["filesystem"].(map[string]any)["denyWrite"].([]any)
 	deny := got["permissions"].(map[string]any)["deny"].([]any)
 	if got["model"] != "opus" || got["cleanupPeriodDays"] != float64(30) || sandbox["enabled"] != true || sandbox["allowUnsandboxedCommands"] != false ||
-		len(denyWrite) != 2 || len(deny) != 1 || got["enabledPlugins"].(map[string]any)["millennium@millennium-hq"] != true {
+		len(denyWrite) != 2 || len(deny) != 1 || got["enabledPlugins"].(map[string]any)["millennium@millennium-hq"] != true ||
+		got["worktree"].(map[string]any)["baseRef"] != "head" || len(sandbox["network"].(map[string]any)["allowedDomains"].([]any)) != len(registryHosts) {
 		t.Fatalf("settings = %v", got)
 	}
 }

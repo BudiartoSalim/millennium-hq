@@ -30,6 +30,14 @@ type Writer struct {
 // New returns a writer for the repository at root.
 func New(root string) *Writer { return &Writer{root: root} }
 
+// registryHosts are what the deps gate's full tier contacts: the npm
+// registry, the Go module proxy, PyPI, OSV, and the sigstore root that npm
+// audit signatures verifies against.
+var registryHosts = []string{
+	"registry.npmjs.org:443", "proxy.golang.org:443", "pypi.org:443",
+	"api.osv.dev:443", "tuf-repo-cdn.sigstore.dev:443",
+}
+
 // WriteFile writes data to target, an absolute path, creating its directory.
 func (w *Writer) WriteFile(target string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -59,7 +67,10 @@ func (w *Writer) WriteFile(target string, data []byte) error {
 // MergeSettings adds millennium's entries to the project's
 // .claude/settings.json: the plugin enabled, the sandbox on with
 // unsandboxed retries off, writes to .millennium denied for every command,
-// and Edit denied on it for every agent. Other settings are kept.
+// Edit denied on it for every agent, the registries the full-tier supply
+// chain checks ask allowed through the sandbox, and subagent worktrees
+// branched from the current HEAD, so parallel engineers start from the lead's
+// work rather than the default branch. Other settings are kept.
 func (w *Writer) MergeSettings(pluginID string) error {
 	path := filepath.Join(w.root, ".claude", "settings.json")
 	settings, err := readJSONObject(path)
@@ -71,7 +82,11 @@ func (w *Writer) MergeSettings(pluginID string) error {
 	sandbox["enabled"] = true
 	sandbox["allowUnsandboxedCommands"] = false
 	appendUnique(object(sandbox, "filesystem"), "denyWrite", "./.millennium")
+	for _, host := range registryHosts {
+		appendUnique(object(sandbox, "network"), "allowedDomains", host)
+	}
 	appendUnique(object(settings, "permissions"), "deny", "Edit(/.millennium/**)")
+	object(settings, "worktree")["baseRef"] = "head"
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("format %s: %w", path, err)

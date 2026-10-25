@@ -1,0 +1,7 @@
+{
+  "name": "millennium",
+  "version": "0.1.0",
+  "description": "Quality and security gates agents cannot work around, and a tech-lead workflow with parallel engineers and fresh-context reviewers.",
+  "author": { "name": "budiarto" },
+  "keywords": ["quality", "security", "code-review", "clean-architecture", "supply-chain"]
+}

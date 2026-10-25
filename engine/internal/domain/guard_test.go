@@ -71,6 +71,16 @@ func TestQATesterAtTheRepositoryRootOfASingleProject(t *testing.T) {
 	if !got.Deny || !strings.Contains(got.Reason, "the repository root is implementation code") {
 		t.Fatalf("decision %+v", got)
 	}
+	// The whole repository is the component, so the spec and the run
+	// instructions must stay readable while the code does not.
+	for p, wantDeny := range map[string]bool{
+		"docs/specs/cart.md": false, "README": false, "api/openapi.yaml": false, "docs/flow.PNG": false,
+		"main.go": true, "src/cart.ts": true, "Makefile": true, "db/001.sql": true, "web/index.html": true,
+	} {
+		if got := Guard(cfg, ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{p}}); got.Deny != wantDeny {
+			t.Errorf("Read %q: deny %v, want %v", p, got.Deny, wantDeny)
+		}
+	}
 }
 
 func TestQATesterCannotSearchAroundComponentsInAMonorepo(t *testing.T) {

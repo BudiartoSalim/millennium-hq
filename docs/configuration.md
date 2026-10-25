@@ -154,9 +154,11 @@ built-in runner:
   cannot pass for a new one. It must cover the TypeScript sources (enable
   source maps when tests run on compiled JavaScript).
 
-Not every setting is enforced yet: `dependencyPolicy`,
-`paths.acceptanceTests` and `run` are validated now and enforced by checks
-still being built. [Checks](checks.md) lists what runs today.
+`dependencyPolicy` has one value, `strict`, which the `deps` gate enforces;
+it exists so a later, looser policy has to be named in the config, where
+`config apply` lists it as a loosening. `paths.acceptanceTests` is enforced by
+the hooks and `millennium scope`; `run` is the recipe the qa-tester agent
+follows.
 
 ## How strictly the file is read
 
@@ -201,11 +203,16 @@ For a config in the repository, it writes:
 - `.millennium/config.json`;
 - `.claude/settings.json`, merged with what is there: the plugin enabled for
   the project, the sandbox on with unsandboxed commands off, writes to
-  `.millennium` denied for every command, and `Edit` on it denied for every
-  agent;
+  `.millennium` denied for every command, `Edit` on it denied for every
+  agent, the hosts the full-tier supply-chain checks contact allowed through
+  the sandbox (`registry.npmjs.org`, `proxy.golang.org`, `pypi.org`,
+  `api.osv.dev` and `tuf-repo-cdn.sigstore.dev`, port 443 only), and subagent
+  worktrees branched from the current `HEAD`
+  (`worktree.baseRef: "head"`), so parallel engineers start from the tech
+  lead's work rather than the default branch;
 - a managed section in `AGENTS.md` describing the gates to every agent, plus an
   `@AGENTS.md` import in `CLAUDE.md` when the repository has one;
-- `millennium.proposal.json` in `.gitignore`.
+- `millennium.proposal.json` and `.claude/worktrees/` in `.gitignore`.
 
 The applied default proposal is removed. Inside an agent's sandbox the command
 cannot write `.millennium`, and the hooks deny agents from running it at all.

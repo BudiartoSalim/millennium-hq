@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -100,17 +101,41 @@ func protectedPath(p string) (string, bool) {
 }
 
 // guardBlackBox keeps qa-tester out of component code: it may read the
-// acceptance tests and anything outside the components (docs, specs).
+// acceptance tests, anything outside the components, and documents inside
+// them (a spec, a README, an API description), but not code, and it may not
+// search inside components, since a search reads every file it passes.
 func guardBlackBox(cfg Config, call ToolCall) GuardDecision {
 	for _, p := range call.Paths {
-		if Within(p, cfg.AcceptanceTests) {
+		if Within(p, cfg.AcceptanceTests) || (call.Tool == "Read" && IsDocument(p)) {
 			continue
 		}
 		if cfg.Reaches(p) {
-			return deny("%s is implementation code; qa-tester tests black-box, from the spec and the running software", displayPath(p))
+			return deny("%s is implementation code; qa-tester tests black-box, from the spec, the documents and the running software (it may Read documents such as specs and READMEs by path)", displayPath(p))
 		}
 	}
 	return GuardDecision{}
+}
+
+// documentExtensions are the files qa-tester may read inside a component:
+// prose, API descriptions and images, never code or data the code embeds.
+var documentExtensions = map[string]bool{
+	".md": true, ".markdown": true, ".mdx": true, ".txt": true, ".rst": true, ".adoc": true,
+	".json": true, ".yaml": true, ".yml": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".svg": true, ".pdf": true,
+}
+
+// IsDocument reports whether a file is a document rather than code: one of
+// documentExtensions, or an extensionless README, LICENSE or CHANGELOG.
+func IsDocument(p string) bool {
+	base := path.Base(p)
+	if ext := strings.ToLower(path.Ext(base)); ext != "" {
+		return documentExtensions[ext]
+	}
+	switch strings.ToUpper(base) {
+	case "README", "LICENSE", "CHANGELOG":
+		return true
+	}
+	return false
 }
 
 func guardShell(command string) GuardDecision {

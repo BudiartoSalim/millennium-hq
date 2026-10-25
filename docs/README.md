@@ -5,10 +5,10 @@ development. Rules that can be checked mechanically are enforced by a gate
 engine the agents cannot talk their way past; judgement calls go to
 fresh-context reviewer agents.
 
-**Status: early development.** What exists today is the gate engine, a
-command-line tool you can build and run yourself. The Claude Code plugin around
-it (agents, skills, hooks, `config apply`) is not built yet; see the build
-order in [design.md](design.md).
+**Status: early development.** The gate engine, the hooks, `config apply`,
+and the agents and skills exist; release binaries and the marketplace
+install are not done yet, so for now you build the engine yourself. See the
+build order in [design.md](design.md).
 
 ## Guides
 
@@ -20,6 +20,7 @@ order in [design.md](design.md).
 | [Checks](checks.md) | What each check enforces, and how to fix its findings |
 | [Clean Architecture](conventions/clean-architecture.md) | The layers, their import rules, and how to map an existing layout |
 | [Hooks](hooks.md) | What the plugin's hooks enforce in every session, and their limits |
+| [Agents and skills](agents.md) | The tech-lead workflow, each agent and skill, and the reviewer report format |
 | [Design](design.md) | Why things are the way they are, and what is planned |
 
 ## Getting started

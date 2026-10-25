@@ -663,7 +663,15 @@ or sh shebang (such as `bin/*`).
    `go env` integrity and `npm audit signatures`); approvals carried in
    proposals and written by `config apply`. A failing registry blocks.
    `go.sum` `/go.mod`-only lines need no approval (they never build).
-6. Agents, skills, and the tech-lead playbook.
+6. Agents, skills, and the tech-lead playbook. **Done:** seven agents and
+   eleven skills (lead playbook, engineering standards, a shared review
+   protocol with a JSON report, correctness, security review, threat model,
+   security research, maintainability, performance, qa-testing modes,
+   vet-dependency). `config apply` also sets `worktree.baseRef: "head"` (so
+   engineer worktrees start from the lead's commit), ignores
+   `.claude/worktrees/`, and allows the registries the full tier contacts
+   through the sandbox. The session-start context names the launcher, since
+   the plugin has no `bin/`. qa-tester may read documents inside components.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
    local mode.
 8. `plugin/` layout, launcher and engine lock, release workflow.

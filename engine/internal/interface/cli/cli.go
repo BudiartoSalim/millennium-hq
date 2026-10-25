@@ -124,6 +124,10 @@ type Deps struct {
 	// Close releases what the dependencies hold, such as analyzer
 	// processes; nil when there is nothing to release.
 	Close func()
+	// EngineCommand is how an agent's shell runs the engine: the plugin's
+	// launcher, which is not on PATH, or plain "millennium" outside the
+	// plugin.
+	EngineCommand string
 }
 
 // DepsFactory builds Deps on demand for the repository containing dir ("" is

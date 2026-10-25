@@ -175,8 +175,17 @@ func stopMessage(v usecase.StopVerdict, ending string) string {
 }
 
 // sessionContext tells every session in an opted-in repository how the work
-// is checked, so agents do not discover the gates by tripping over them.
-const sessionContext = `millennium is active in this repository. Gates check every change: hooks run the fast tier when an agent stops and block it while anything fails; before calling work done, run "millennium gate --tier full" (tests and coverage included) and fix every finding. Agents never change .millennium/, the project's Claude settings, or (as the engineer) the acceptance tests; rule changes are proposals the user applies with "millennium config apply". Use "millennium config explain <file>" when a finding is surprising.`
+// is checked, so agents do not discover the gates by tripping over them. The
+// plugin's launcher is not on PATH, so the context names the command to run.
+func sessionContext(engine string) string {
+	if engine == "" {
+		engine = "millennium"
+	}
+	return fmt.Sprintf("millennium is active in this repository. The engine command is %[1]s (in this document, `millennium` means that command). "+
+		"Gates check every change: hooks run the fast tier when an agent stops and block it while anything fails; before calling work done, run `%[1]s gate --tier full` "+
+		"(tests and coverage included) and fix every finding. Agents never change .millennium/, the project's Claude settings, or (as the engineer) the acceptance tests; "+
+		"rule changes are proposals the user applies with `millennium config apply`. Use `%[1]s config explain <file>` when a finding is surprising.", engine)
+}
 
 func (a *App) sessionStart(ctx context.Context, deps Deps) error {
 	_, enabled, err := deps.Config.Execute(ctx)
@@ -185,7 +194,7 @@ func (a *App) sessionStart(ctx context.Context, deps Deps) error {
 		return nil
 	}
 	return a.writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{
-		"hookEventName": "SessionStart", "additionalContext": sessionContext,
+		"hookEventName": "SessionStart", "additionalContext": sessionContext(deps.EngineCommand),
 	}})
 }
 
