@@ -96,6 +96,7 @@ func TestSchemaPropertiesMatchDecoder(t *testing.T) {
 	}{
 		{"root", root, reflect.TypeFor[configDTO]()},
 		{"python", child(t, root, "properties", "python"), reflect.TypeFor[pythonDTO]()},
+		{"shell", child(t, root, "properties", "shell"), reflect.TypeFor[shellDTO]()},
 		{"paths", child(t, root, "properties", "paths"), reflect.TypeFor[pathsDTO]()},
 		{"run", child(t, root, "properties", "run"), reflect.TypeFor[runDTO]()},
 		{"component", child(t, root, "properties", "components", "items"), reflect.TypeFor[componentDTO]()},
@@ -120,6 +121,7 @@ func TestSchemaEnumsMatchDomain(t *testing.T) {
 		{"testing", child(t, props, "testing"), asStrings(domain.TestingProfiles())},
 		{"dependencyPolicy", child(t, props, "dependencyPolicy"), asStrings(domain.DependencyPolicies())},
 		{"python.typeCheck", child(t, props, "python", "properties", "typeCheck"), asStrings(domain.PythonTypeChecks())},
+		{"shell.lint", child(t, props, "shell", "properties", "lint"), asStrings(domain.ShellLints())},
 	}
 	for _, e := range enums {
 		if got := stringArray(t, e.node, "enum"); !slices.Equal(got, e.domain) {
@@ -139,6 +141,7 @@ func TestSchemaDefaultsAndRequiredMatchDomain(t *testing.T) {
 		{"testing", child(t, props, "testing"), string(domain.DefaultTesting)},
 		{"dependencyPolicy", child(t, props, "dependencyPolicy"), string(domain.DefaultDependencyPolicy)},
 		{"python.typeCheck", child(t, props, "python", "properties", "typeCheck"), string(domain.DefaultPythonTypeCheck)},
+		{"shell.lint", child(t, props, "shell", "properties", "lint"), string(domain.DefaultShellLint)},
 		{"paths.acceptanceTests", child(t, props, "paths", "properties", "acceptanceTests"), domain.DefaultAcceptanceTests},
 	}
 	for _, d := range defaults {

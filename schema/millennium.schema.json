@@ -10,7 +10,7 @@
     { "required": ["components"], "not": { "anyOf": [{ "required": ["languages"] }, { "required": ["conventions"] }] } }
   ],
   "$defs": {
-    "language": { "enum": ["go", "typescript", "python"] },
+    "language": { "enum": ["go", "typescript", "python", "shell"] },
     "convention": { "enum": ["clean-architecture", "react-feature-based"] },
     "prefixPattern": {
       "type": "string",
@@ -108,6 +108,17 @@
           "description": "Python type checker. When set to mypy, a missing mypy blocks.",
           "enum": ["off", "mypy"],
           "default": "off"
+        }
+      }
+    },
+    "shell": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lint": {
+          "description": "Shell linter. shellcheck is on by default and then required: a missing shellcheck blocks.",
+          "enum": ["shellcheck", "off"],
+          "default": "shellcheck"
         }
       }
     },

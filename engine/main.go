@@ -20,6 +20,8 @@ import (
 	"millennium/internal/infrastructure/goanalyzer"
 	"millennium/internal/infrastructure/helperanalyzer"
 	"millennium/internal/infrastructure/packs"
+	"millennium/internal/infrastructure/shellanalyzer"
+	"millennium/internal/infrastructure/shelltools"
 	"millennium/internal/infrastructure/toolpath"
 	"millennium/internal/interface/cli"
 )
@@ -55,10 +57,12 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 		domain.LanguageGo:         goanalyzer.New(repo.Root()),
 		domain.LanguageTypeScript: typeScript,
 		domain.LanguagePython:     python,
+		domain.LanguageShell:      shellanalyzer.Analyzer{},
 	}
 	gates := []port.Gate{
 		gate.NewToolchain(toolpath.Locator{}),
 		gate.NewStructure(analyzers, builtinPacks, repo),
+		gate.NewShell(repo, shelltools.New(repo.Root())),
 	}
 	return cli.Deps{
 		Gates:    usecase.NewRunGates(loadConfig, repo, gates),

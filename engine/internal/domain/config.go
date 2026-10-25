@@ -24,11 +24,12 @@ const (
 	LanguageGo         Language = "go"
 	LanguageTypeScript Language = "typescript"
 	LanguagePython     Language = "python"
+	LanguageShell      Language = "shell"
 )
 
 // Languages lists every supported language in a stable order.
 func Languages() []Language {
-	return []Language{LanguageGo, LanguageTypeScript, LanguagePython}
+	return []Language{LanguageGo, LanguageTypeScript, LanguagePython, LanguageShell}
 }
 
 // Convention is a convention pack a project can select.
@@ -79,11 +80,25 @@ func PythonTypeChecks() []PythonTypeCheck {
 	return []PythonTypeCheck{PythonTypeCheckOff, PythonTypeCheckMypy}
 }
 
+// ShellLint selects the shell linter. shellcheck is on by default: shell has
+// little else to check it, and nothing in a standard library replaces it.
+type ShellLint string
+
+// Supported shell lint settings.
+const (
+	ShellLintShellcheck ShellLint = "shellcheck"
+	ShellLintOff        ShellLint = "off"
+)
+
+// ShellLints lists every supported shell lint setting.
+func ShellLints() []ShellLint { return []ShellLint{ShellLintShellcheck, ShellLintOff} }
+
 // Defaults for settings a config may leave out.
 const (
 	DefaultTesting          = TestingTestsRequired
 	DefaultDependencyPolicy = DependencyPolicyStrict
 	DefaultPythonTypeCheck  = PythonTypeCheckOff
+	DefaultShellLint        = ShellLintShellcheck
 	DefaultAcceptanceTests  = "tests/acceptance"
 )
 
@@ -98,6 +113,7 @@ type Config struct {
 	Testing          TestingProfile
 	DependencyPolicy DependencyPolicy
 	PythonTypeCheck  PythonTypeCheck
+	ShellLint        ShellLint
 	AcceptanceTests  string
 	Run              *RunRecipe
 }
@@ -121,6 +137,7 @@ type ConfigInput struct {
 	Testing          *string
 	DependencyPolicy *string
 	PythonTypeCheck  *string
+	ShellLint        *string
 	AcceptanceTests  *string
 	Run              *RunRecipe
 }
@@ -152,6 +169,7 @@ func NewConfig(in ConfigInput) (Config, error) {
 		Testing:          parseChoice(v, "testing", in.Testing, TestingProfiles(), DefaultTesting),
 		DependencyPolicy: parseChoice(v, "dependencyPolicy", in.DependencyPolicy, DependencyPolicies(), DefaultDependencyPolicy),
 		PythonTypeCheck:  parseChoice(v, "python.typeCheck", in.PythonTypeCheck, PythonTypeChecks(), DefaultPythonTypeCheck),
+		ShellLint:        parseChoice(v, "shell.lint", in.ShellLint, ShellLints(), DefaultShellLint),
 		AcceptanceTests:  v.repoDir("paths.acceptanceTests", in.AcceptanceTests, DefaultAcceptanceTests),
 		Run:              v.run(in.Run),
 	}

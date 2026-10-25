@@ -3,14 +3,33 @@
   "version": 1,
   "components": [
     {
-      "paths": ["engine"],
-      "languages": ["go"],
-      "conventions": ["clean-architecture"]
+      "paths": [
+        "engine"
+      ],
+      "languages": [
+        "go"
+      ],
+      "conventions": [
+        "clean-architecture"
+      ]
     },
     {
-      "paths": ["engine/internal/infrastructure/helperanalyzer/scripts"],
-      "languages": ["python"],
+      "paths": [
+        "engine/internal/infrastructure/helperanalyzer/scripts"
+      ],
+      "languages": [
+        "python"
+      ],
       "reason": "the Python analyzer helper: a single script, so no layers, but the limits apply"
+    },
+    {
+      "paths": [
+        "scripts"
+      ],
+      "languages": [
+        "shell"
+      ],
+      "reason": "the repository's own tooling scripts"
     }
   ]
 }

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"millennium/internal/domain"
 )
 
 func TestFilesListsTrackedAndUntrackedButNotIgnoredOrDeleted(t *testing.T) {
@@ -107,5 +109,43 @@ func TestRepoPath(t *testing.T) {
 		if (err == nil) != tt.ok || got != tt.want {
 			t.Errorf("relativeTo(%q, %q) = %q, %v; want %q, ok %v", tt.cwd, tt.arg, got, err, tt.want, tt.ok)
 		}
+	}
+}
+
+func TestChangedLines(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "a.sh", "one\ntwo\nthree\nfour\nfive\n")
+	commitAll(t, dir, "base")
+	write(t, dir, "a.sh", "one\nTWO\nthree\nfive\nsix\nseven\n")
+	repo := open(t, dir)
+	set, err := repo.Changes(t.Context(), "")
+	if err != nil {
+		t.Fatalf("Changes: %v", err)
+	}
+	lines, err := repo.ChangedLines(t.Context(), set.Base, "a.sh")
+	if err != nil {
+		t.Fatalf("ChangedLines: %v", err)
+	}
+	for line, want := range map[int]bool{1: false, 2: true, 3: false, 4: false, 5: true, 6: true, 7: false} {
+		if got := lines.Contains(line); got != want {
+			t.Errorf("line %d changed = %v, want %v (set %+v)", line, got, want, lines)
+		}
+	}
+	if _, err := repo.ChangedLines(t.Context(), "-x", "a.sh"); err == nil {
+		t.Fatal("an option passed as revision was accepted")
+	}
+}
+
+func TestParseHunks(t *testing.T) {
+	set, err := parseHunks([]byte("diff --git a/x b/x\n@@ -3 +3 @@\n-a\n+b\n@@ -10,2 +9,0 @@\n-c\n-d\n@@ -20,0 +18,3 @@\n+e\n"))
+	if err != nil {
+		t.Fatalf("parseHunks: %v", err)
+	}
+	want := []domain.LineRange{{First: 3, Last: 3}, {First: 18, Last: 20}}
+	if !slices.Equal(set.Ranges, want) {
+		t.Fatalf("ranges = %+v, want %+v (a pure deletion adds nothing)", set.Ranges, want)
+	}
+	if _, err := parseHunks([]byte("@@ garbage @@\n")); err == nil {
+		t.Fatal("a malformed hunk header must be an error")
 	}
 }

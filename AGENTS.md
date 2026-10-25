@@ -15,11 +15,12 @@ engine/                       gate engine, Go standard library only
                               rules, limits, facts, verdict
   internal/application/
     port/                     interfaces the core needs
-    gate/                     the checks (toolchain, structure); each reports findings
+    gate/                     the checks (toolchain, structure, shell); each reports findings
     usecase/                  load config, run gates, audit, explain
   internal/infrastructure/    configfile, gitrepo, goanalyzer, helperanalyzer
                               (TypeScript and Python helpers, embedded), packs
-                              (embedded convention packs), toolpath adapters
+                              (embedded convention packs), shellanalyzer,
+                              shelltools (bash -n, shellcheck), toolpath
   internal/interface/cli/     argument parsing, rendering, exit codes
 schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
 .millennium/config.json       this repository's own config: the engine audits itself

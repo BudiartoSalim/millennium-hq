@@ -29,6 +29,9 @@ func RequiredTools(cfg Config) []ToolRequirement {
 	if cfg.PythonTypeCheck == PythonTypeCheckMypy {
 		tools = append(tools, ToolRequirement{Names: []string{"mypy"}, Reason: `python.typeCheck is "mypy"`})
 	}
+	if cfg.Has(LanguageShell) && cfg.ShellLint == ShellLintShellcheck {
+		tools = append(tools, ToolRequirement{Names: []string{"shellcheck"}, Reason: `shell.lint is "shellcheck" (the default)`})
+	}
 	return tools
 }
 
@@ -45,6 +48,8 @@ func toolsFor(lang Language) []ToolRequirement {
 		return []ToolRequirement{{Names: []string{"node"}, Reason: reason}}
 	case LanguagePython:
 		return []ToolRequirement{{Names: []string{"python3", "python", "py"}, Reason: reason}}
+	case LanguageShell:
+		return []ToolRequirement{{Names: []string{"bash"}, Reason: reason}}
 	}
 	return nil
 }

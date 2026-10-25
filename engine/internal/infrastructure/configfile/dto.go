@@ -15,6 +15,7 @@ type configDTO struct {
 	Testing          *string        `json:"testing"`
 	DependencyPolicy *string        `json:"dependencyPolicy"`
 	Python           *pythonDTO     `json:"python"`
+	Shell            *shellDTO      `json:"shell"`
 	Paths            *pathsDTO      `json:"paths"`
 	Run              *runDTO        `json:"run"`
 }
@@ -29,6 +30,10 @@ type componentDTO struct {
 
 type pythonDTO struct {
 	TypeCheck *string `json:"typeCheck"`
+}
+
+type shellDTO struct {
+	Lint *string `json:"lint"`
 }
 
 type pathsDTO struct {
@@ -59,6 +64,9 @@ func (d configDTO) toInput() domain.ConfigInput {
 	}
 	if d.Python != nil {
 		in.PythonTypeCheck = d.Python.TypeCheck
+	}
+	if d.Shell != nil {
+		in.ShellLint = d.Shell.Lint
 	}
 	if d.Paths != nil {
 		in.AcceptanceTests = d.Paths.AcceptanceTests

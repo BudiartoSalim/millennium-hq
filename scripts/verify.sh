@@ -12,6 +12,7 @@ cd "$root/engine"
 # not a pass: refuse to start rather than report an incomplete run as done.
 if [ -z "${MILLENNIUM_TYPESCRIPT:-}" ] || [ ! -f "$MILLENNIUM_TYPESCRIPT/node_modules/typescript/package.json" ]; then
 	printf 'verify: MILLENNIUM_TYPESCRIPT must point at the TypeScript test fixture.\n' >&2
+	# shellcheck disable=SC2016 # the command is printed for the user to copy, unexpanded
 	printf 'Set it up once with: eval "$(bash scripts/setup-fixtures.sh)"\n' >&2
 	exit 1
 fi

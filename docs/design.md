@@ -622,7 +622,9 @@ or sh shebang (such as `bin/*`).
    (embedded in the engine), function limits with the existing-code rule,
    `millennium audit`, and the user docs in `docs/`. The engine audits its own
    source, and its Python helper, in `scripts/verify.sh`.
-3. Shell support.
+3. **Done:** shell support: `bash -n`, strict mode, shellcheck on touched
+   lines (`--norc`), shebang detection for extensionless scripts, and a
+   line-based shell analyzer for comments and risky constructs.
 4. Hooks and protection layers; `config apply`; the tests-required gate.
 5. Supply-chain gates.
 6. Agents, skills, and the tech-lead playbook.

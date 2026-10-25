@@ -44,6 +44,20 @@ type SourceReader interface {
 	// ReadAt reads a file as it was in rev, reporting false when it did not
 	// exist there.
 	ReadAt(ctx context.Context, rev, path string) ([]byte, bool, error)
+	// ChangedLines lists the lines of a modified file that differ from rev,
+	// as numbered in the working tree. Callers treat added files, and every
+	// file of an audit, as wholly changed instead of asking.
+	ChangedLines(ctx context.Context, rev, path string) (domain.LineSet, error)
+}
+
+// ShellChecker runs the shell toolchain on one script.
+type ShellChecker interface {
+	// Syntax returns the script's syntax errors from the shell's own parser;
+	// none means it parses.
+	Syntax(ctx context.Context, path string) ([]domain.LintIssue, error)
+	// Lint returns shellcheck's findings. dialect is the shell to assume for
+	// a script that does not say ("" lets shellcheck decide).
+	Lint(ctx context.Context, path, dialect string) ([]domain.LintIssue, error)
 }
 
 // Analyzer extracts facts from source files of one language.

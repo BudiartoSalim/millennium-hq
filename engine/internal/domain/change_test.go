@@ -55,3 +55,27 @@ func TestIsRepoRelative(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectLanguage(t *testing.T) {
+	tests := []struct {
+		path, head string
+		want       Language
+		ok         bool
+	}{
+		{"scripts/install.sh", "", LanguageShell, true},
+		{"lib.bash", "", LanguageShell, true},
+		{"bin/deploy", "#!/usr/bin/env bash\nset -e\n", LanguageShell, true},
+		{"bin/run", "#!/bin/sh\n", LanguageShell, true},
+		{"bin/tool", "#!/usr/bin/env -S bash -e\n", LanguageShell, true},
+		{"bin/script", "#!/usr/bin/env python3\n", "", false},
+		{"bin/data", "hello\n", "", false},
+		{"notes.txt", "#!/bin/bash\n", "", false},
+		{"main.go", "", LanguageGo, true},
+	}
+	for _, tt := range tests {
+		got, ok := DetectLanguage(tt.path, []byte(tt.head))
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("DetectLanguage(%q) = %q, %v; want %q, %v", tt.path, got, ok, tt.want, tt.ok)
+		}
+	}
+}

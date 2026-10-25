@@ -16,7 +16,9 @@ func TestRequiredTools(t *testing.T) {
 		{"typescript", Config{Languages: []Language{LanguageTypeScript}}, []string{"node"}},
 		{"python without type checking", Config{Languages: []Language{LanguagePython}, PythonTypeCheck: PythonTypeCheckOff}, []string{"python3|python|py"}},
 		{"python with mypy", Config{Languages: []Language{LanguagePython}, PythonTypeCheck: PythonTypeCheckMypy}, []string{"python3|python|py", "mypy"}},
-		{"all languages", Config{Languages: Languages()}, []string{"go", "gofmt", "node", "python3|python|py"}},
+		{"all languages", Config{Languages: Languages()}, []string{"go", "gofmt", "node", "python3|python|py", "bash"}},
+		{"shell with shellcheck", Config{Languages: []Language{LanguageShell}, ShellLint: ShellLintShellcheck}, []string{"bash", "shellcheck"}},
+		{"shell without lint", Config{Languages: []Language{LanguageShell}, ShellLint: ShellLintOff}, []string{"bash"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

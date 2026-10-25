@@ -28,6 +28,7 @@ func (f fakeAnalyzer) Analyze(_ context.Context, path string, content []byte) (d
 type fakeSource struct {
 	working map[string]string
 	base    map[string]string
+	changed map[string]domain.LineSet
 	gotRev  string
 }
 
@@ -43,6 +44,14 @@ func (f *fakeSource) ReadAt(_ context.Context, rev, path string) ([]byte, bool, 
 	f.gotRev = rev
 	content, ok := f.base[path]
 	return []byte(content), ok, nil
+}
+
+func (f *fakeSource) ChangedLines(_ context.Context, rev, path string) (domain.LineSet, error) {
+	f.gotRev = rev
+	if lines, ok := f.changed[path]; ok {
+		return lines, nil
+	}
+	return domain.LineSet{}, nil
 }
 
 type fakePacks struct{}

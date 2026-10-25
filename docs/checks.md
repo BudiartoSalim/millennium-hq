@@ -3,10 +3,10 @@
 Every finding blocks. A finding is printed as `[gate/rule] file:line: message`.
 This page lists each rule, what it enforces, and how to fix it.
 
-**What runs today:** the `toolchain` and `structure` gates, for Go, TypeScript
-and Python. The other checks in [design.md](design.md#checks) (format and
-types, banned APIs, suppressions, secrets, tests required, coverage, supply
-chain, shell) are being built.
+**What runs today:** the `toolchain`, `structure` and `shell` gates, for Go,
+TypeScript, Python and shell. The other checks in
+[design.md](design.md#checks) (format and types, banned APIs, suppressions,
+secrets, tests required, coverage, supply chain) are being built.
 
 How each language is read:
 
@@ -15,6 +15,12 @@ How each language is read:
 | Go | The Go standard library, inside the engine | Nothing extra |
 | TypeScript | The project's own `typescript` package, through a small helper run with `node` | The project's dependencies installed (`npm ci`) and TypeScript 6 or older: TypeScript 7 no longer ships the compiler API the helper uses, and blocks with a message saying so |
 | Python | Python's `ast` module, through a small helper | Python 3.10 or newer |
+| Shell | Line by line, for comments and risky constructs; `bash -n` and shellcheck in the `shell` gate | `bash`, and `shellcheck` unless `"shell": {"lint": "off"}` |
+
+Shell scripts are `.sh` and `.bash` files, and extensionless files whose
+shebang names `sh`, `bash`, `dash` or `ksh` (such as `bin/deploy`). Function
+length, nesting and complexity need a full shell grammar, so they do not apply
+to shell yet; the maintainability reviewer covers them.
 
 The helpers ship inside the engine. They read nothing but the file they are
 given and the project's own `typescript`; Python runs isolated (`-I`), so
@@ -28,7 +34,8 @@ modules in the repository or on `PYTHONPATH` cannot run in their place.
 
 Required tools per language: Go needs `go` and `gofmt`; TypeScript needs
 `node`; Python needs `python3`, `python` or `py`; `"python": {"typeCheck":
-"mypy"}` adds `mypy`. A missing tool always blocks: a check that cannot run
+"mypy"}` adds `mypy`; shell needs `bash`, plus `shellcheck` unless
+`"shell": {"lint": "off"}`. A missing tool always blocks: a check that cannot run
 never counts as a pass.
 
 ## `structure`
@@ -96,6 +103,23 @@ by `audit`. The layers and their rules come from the convention: see
 | `component-ambiguous` | Two components match a file equally. | Make one component's pattern more specific. |
 | `analysis-unavailable` | A component lists a language whose code checks this engine version does not have. | None: the code cannot pass until an analyzer for it ships. |
 | `convention-unavailable` | A component selects a convention this engine version does not have yet (`react-feature-based` today), or one with no rules for the component's language. | None yet; remove the convention only if you accept losing its rules. |
+
+## `shell`
+
+Runs on every changed script of a component that lists `shell`.
+
+| Rule | Fires when | Fix |
+|---|---|---|
+| `syntax-error` | `bash -n` cannot parse the script. Nothing else is checked until it parses. | Fix the syntax error. |
+| `strict-mode` | An executable script (one with a shebang) does not switch on `errexit` and `nounset`, plus `pipefail` for bash and ksh, within its first 40 lines. | Add `set -euo pipefail` (bash) or `set -eu` (sh) after the shebang. A script without a shebang is a library meant to be sourced and is exempt. |
+| `shellcheck` | shellcheck reports a problem on a line the change touched (every line, for a new script or an audit). The code, such as `SC2086`, links to shellcheck's explanation. | Fix it, or suppress that one code with a written reason: `# shellcheck disable=SC2016 # printed for the user to copy`. |
+
+An existing script that already lacked strict mode is not blocked when it is
+edited; `millennium audit` lists it. shellcheck runs with `--norc`, so a
+`.shellcheckrc` cannot switch checks off, and with `-x
+--source-path=SCRIPTDIR`, so `# shellcheck source=` paths resolve relative to
+the script. A library without a shebang or `# shellcheck shell=` directive is
+linted as bash.
 
 ## Gate failures
 

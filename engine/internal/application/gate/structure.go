@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 
 	"millennium/internal/application/port"
 	"millennium/internal/domain"
@@ -41,7 +42,7 @@ func (g *Structure) Run(ctx context.Context, in port.GateInput) ([]domain.Findin
 }
 
 func (g *Structure) checkFile(ctx context.Context, in port.GateInput, file domain.ChangedFile) []domain.Finding {
-	lang, ok := domain.LanguageOf(file.Path)
+	lang, ok := g.language(file.Path)
 	if !ok {
 		return nil
 	}
@@ -63,6 +64,22 @@ func (g *Structure) checkFile(ctx context.Context, in port.GateInput, file domai
 	}
 	findings := g.limits.Check(facts, base)
 	return append(findings, g.layerFindings(match, lang, facts, base)...)
+}
+
+// language detects a file's language by extension and, for an
+// extensionless file such as bin/deploy, by its shebang.
+func (g *Structure) language(p string) (domain.Language, bool) {
+	if lang, ok := domain.LanguageOf(p); ok {
+		return lang, true
+	}
+	if path.Ext(p) != "" {
+		return "", false
+	}
+	content, err := g.source.ReadWorking(p)
+	if err != nil {
+		return "", false
+	}
+	return domain.DetectLanguage(p, content)
 }
 
 // analyze returns the facts of the file now and, when it existed at base,

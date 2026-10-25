@@ -55,7 +55,7 @@ func TestExplainFileProblemsAndMisses(t *testing.T) {
 	if len(web.Layers) != 1 || web.Layers[0].Problem != "not available in this engine version" {
 		t.Fatalf("web layers = %+v", web.Layers)
 	}
-	outside := explain(t, "scripts/install.sh")
+	outside := explain(t, "docs/notes.txt")
 	if outside.Component != nil || outside.Language != "" {
 		t.Fatalf("a file outside every component: %+v", outside)
 	}

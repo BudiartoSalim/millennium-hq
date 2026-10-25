@@ -178,3 +178,56 @@ func (r *Repository) relativeTo(cwd, arg string) (string, error) {
 	}
 	return rel, nil
 }
+
+// ChangedLines lists the working-tree lines of p that differ from rev, from
+// the hunk headers of a zero-context diff: "@@ -a,b +c,d @@" adds lines c to
+// c+d-1, and a missing ",d" means one line.
+func (r *Repository) ChangedLines(ctx context.Context, rev, p string) (domain.LineSet, error) {
+	if err := checkRevision(rev); err != nil {
+		return domain.LineSet{}, err
+	}
+	if _, err := checkedPath(p); err != nil {
+		return domain.LineSet{}, err
+	}
+	out, err := r.git(ctx, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", rev, "--", p)
+	if err != nil {
+		return domain.LineSet{}, fmt.Errorf("diff %s against %s: %w", p, rev, err)
+	}
+	return parseHunks(out)
+}
+
+func parseHunks(diff []byte) (domain.LineSet, error) {
+	var set domain.LineSet
+	for _, line := range strings.Split(string(diff), "\n") {
+		if !strings.HasPrefix(line, "@@ ") {
+			continue
+		}
+		added, ok := hunkAdded(line)
+		if !ok {
+			return domain.LineSet{}, fmt.Errorf("unexpected diff hunk header %q", line)
+		}
+		if added.Last >= added.First {
+			set.Ranges = append(set.Ranges, added)
+		}
+	}
+	return set, nil
+}
+
+func hunkAdded(header string) (domain.LineRange, bool) {
+	fields := strings.Fields(header)
+	if len(fields) < 3 || !strings.HasPrefix(fields[2], "+") {
+		return domain.LineRange{}, false
+	}
+	startText, countText, hasCount := strings.Cut(strings.TrimPrefix(fields[2], "+"), ",")
+	start, err := strconv.Atoi(startText)
+	if err != nil {
+		return domain.LineRange{}, false
+	}
+	count := 1
+	if hasCount {
+		if count, err = strconv.Atoi(countText); err != nil {
+			return domain.LineRange{}, false
+		}
+	}
+	return domain.LineRange{First: start, Last: start + count - 1}, true
+}
