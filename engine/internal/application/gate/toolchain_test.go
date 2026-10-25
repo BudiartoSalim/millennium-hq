@@ -49,3 +49,32 @@ func TestToolchainBlocksOnEachMissingTool(t *testing.T) {
 		}
 	}
 }
+
+func TestToolchainAcceptsAnyAlternativeName(t *testing.T) {
+	python := port.GateInput{Config: domain.Config{Languages: []domain.Language{domain.LanguagePython}}}
+	tests := []struct {
+		name         string
+		missing      []string
+		wantFindings int
+	}{
+		{"python3 present", nil, 0},
+		{"only python present, as on Windows", []string{"python3", "py"}, 0},
+		{"only the py launcher present", []string{"python3", "python"}, 0},
+		{"none present", []string{"python3", "python", "py"}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			missing := map[string]bool{}
+			for _, name := range tt.missing {
+				missing[name] = true
+			}
+			findings, err := NewToolchain(fakeLocator{missing: missing}).Run(t.Context(), python)
+			if err != nil || len(findings) != tt.wantFindings {
+				t.Fatalf("findings %+v, err %v; want %d findings", findings, err, tt.wantFindings)
+			}
+			if tt.wantFindings == 1 && !strings.Contains(findings[0].Message, "python3, python or py") {
+				t.Fatalf("message %q does not list the alternatives", findings[0].Message)
+			}
+		})
+	}
+}

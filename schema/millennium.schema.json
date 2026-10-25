@@ -30,8 +30,8 @@
     },
     "testing": {
       "description": "Testing discipline the gates enforce.",
-      "enum": ["tdd-strict"],
-      "default": "tdd-strict"
+      "enum": ["tests-required"],
+      "default": "tests-required"
     },
     "dependencyPolicy": {
       "description": "How strictly new dependencies are gated.",

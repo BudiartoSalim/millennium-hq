@@ -48,11 +48,12 @@ func Conventions() []Convention {
 // TestingProfile is the testing discipline the gates enforce.
 type TestingProfile string
 
-// TestingTDDStrict requires a failing test before production code changes.
-const TestingTDDStrict TestingProfile = "tdd-strict"
+// TestingTestsRequired requires unit tests for changed production code in
+// the layers a convention marks as tested. Writing them first is not required.
+const TestingTestsRequired TestingProfile = "tests-required"
 
 // TestingProfiles lists every supported testing profile.
-func TestingProfiles() []TestingProfile { return []TestingProfile{TestingTDDStrict} }
+func TestingProfiles() []TestingProfile { return []TestingProfile{TestingTestsRequired} }
 
 // DependencyPolicy is how strictly new dependencies are gated.
 type DependencyPolicy string
@@ -92,7 +93,7 @@ func PythonTypeChecks() []PythonTypeCheck {
 
 // Defaults for settings a config may leave out.
 const (
-	DefaultTesting          = TestingTDDStrict
+	DefaultTesting          = TestingTestsRequired
 	DefaultDependencyPolicy = DependencyPolicyStrict
 	DefaultCI               = CIGitHubActions
 	DefaultPythonTypeCheck  = PythonTypeCheckOff

@@ -30,7 +30,7 @@ them.
 ## Non-negotiables
 
 **The plugin practises what it enforces.** Code here meets the standard
-millennium imposes on its users: Clean Architecture, TDD, gated limits, no
+millennium imposes on its users: Clean Architecture, required unit tests, gated limits, no
 unexplained suppressions.
 
 **Zero third-party dependencies.** The engine uses the Go standard library
@@ -80,7 +80,8 @@ per-caller special cases.
 
 ## Testing
 
-TDD: write the failing test, run it red, then write the code. Tests are
+Every change comes with unit tests in the same change; writing them first is
+welcome, not required. Tests are
 table-driven, beside the code, standard `testing` only, with fakes as plain
 structs implementing the port. Test the failure paths, not just the happy path.
 A security property gets a test that fails when the protection is removed;

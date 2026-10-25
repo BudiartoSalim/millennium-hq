@@ -37,7 +37,7 @@ func TestNewConfigAcceptsFullConfig(t *testing.T) {
 		Version:          ptr(1),
 		Languages:        []string{"go", "typescript", "python"},
 		Conventions:      []string{"clean-architecture", "react-feature-based"},
-		Testing:          ptr("tdd-strict"),
+		Testing:          ptr("tests-required"),
 		DependencyPolicy: ptr("strict"),
 		CI:               ptr("none"),
 		PythonTypeCheck:  ptr("mypy"),

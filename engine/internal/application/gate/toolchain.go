@@ -30,13 +30,29 @@ func (*Toolchain) Name() string { return "toolchain" }
 func (g *Toolchain) Run(_ context.Context, in port.GateInput) ([]domain.Finding, error) {
 	var findings []domain.Finding
 	for _, req := range domain.RequiredTools(in.Config) {
-		if err := g.tools.Locate(req.Name); err != nil {
+		if err := g.locateAny(req.Names); err != nil {
 			findings = append(findings, domain.Finding{
 				Gate:    g.Name(),
 				Rule:    "tool-missing",
-				Message: fmt.Sprintf("%s is required because %s, but it cannot be run: %v", req.Name, req.Reason, err),
+				Message: fmt.Sprintf("%s is required because %s, but it cannot be run: %v", req.Describe(), req.Reason, err),
 			})
 		}
 	}
 	return findings, nil
+}
+
+// locateAny succeeds when any of names can be run, and otherwise returns the
+// error for the preferred name.
+func (g *Toolchain) locateAny(names []string) error {
+	var first error
+	for _, name := range names {
+		err := g.tools.Locate(name)
+		if err == nil {
+			return nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return first
 }

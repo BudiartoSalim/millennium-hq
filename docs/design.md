@@ -40,7 +40,7 @@ hooks, `/vet-dependency`) into something any project can install.
 - Harness: Claude Code.
 - Languages: TypeScript (Node backend and React), Go, Python.
 - Conventions: Clean Architecture for backend code, feature-based structure for
-  React, enforced TDD.
+  React, required unit tests.
 - CI: GitHub Actions templates, behind a provider-agnostic interface.
 
 ## Roles
@@ -48,7 +48,7 @@ hooks, `/vet-dependency`) into something any project can install.
 | Agent | Skills / modes | Context | Tools |
 |---|---|---|---|
 | tech-lead | `tech-lead` | Full | All |
-| engineer | `engineering-standards` + active packs | Task spec + standards | Edit/Write/Bash, own git worktree |
+| engineer (one or more, in parallel) | `engineering-standards` + active packs | Its work package + standards | Edit/Write/Bash, own git worktree |
 | qa-engineer | `correctness-review` | Spec + diff (incl. tests) | Read-only on the change, own worktree for proof-of-bug tests |
 | qa-tester | `smoke`, `acceptance`, `exploratory` | Spec + run recipe; no implementation source | Bash (run the app, HTTP), browser for web |
 | security-engineer | `threat-model`, `security-review`, `security-research` | Spec + diff (+ codebase for research) | Read-only |
@@ -67,7 +67,7 @@ Notes:
   `security-engineer` with three modes avoids a bottleneck without a separate
   researcher persona. qa-tester is separate from qa-engineer because it runs the
   software and must stay black-box.
-- **qa-engineer owns test quality.** The engineer writes its own tests (TDD), so
+- **qa-engineer owns test quality.** The engineer writes its own unit tests, so
   `correctness-review` checks them: do the assertions prove the spec, which
   requirements and edge cases have no test, would a test pass whatever the code
   did. The maintainability reviewer covers test readability only. Every finding
@@ -82,8 +82,10 @@ Notes:
 ```
 spec + acceptance criteria (lead, with the user)
   -> [threat-model when the change touches auth, input, secrets, crypto, permissions]
-  -> engineer: TDD in its own worktree
-  -> gates: red-before-green, format/lint/types, architecture, complexity,
+  -> lead splits the work into packages (see Parallel work)
+  -> engineers, in parallel: implement with unit tests, each in its own worktree
+  -> lead merges the branches
+  -> gates: tests required, format/lint/types, architecture, complexity,
             changed-line coverage, dependencies, secrets
   -> qa-tester smoke            (fail: straight back to the engineer)
   -> in parallel:
@@ -94,7 +96,7 @@ spec + acceptance criteria (lead, with the user)
        performance-reviewer             (by risk)
   -> lead triage: every finding gets a disposition (fix / defer + reason /
      reject + reason) in the decision log
-  -> fix loop, bounded rounds: a bug becomes a failing test first, then a fix;
+  -> fix loop, bounded rounds: every bug fix comes with a regression test;
      a significant rewrite gets a fresh review and a re-test
   -> final gates: full suite, supply chain, CI-equivalent run
   -> summary with the decision log
@@ -102,6 +104,30 @@ spec + acceptance criteria (lead, with the user)
 
 Reviewer output is structured JSON (severity, `file:line`, evidence, failure
 scenario, suggested fix) so findings can be triaged and logged mechanically.
+
+## Parallel work
+
+The tech lead splits a task across several engineer subagents when the parts
+are independent, so development is not limited to one engineer.
+
+- **Work packages with disjoint file ownership.** The lead cuts the task by
+  feature, module or Clean Architecture layer. Each package has its own slice
+  of the spec, its acceptance criteria, and the list of paths it may change.
+- **Contracts first.** When packages share an interface (a port, an API shape,
+  a DTO), that interface lands first, from the lead or one engineer, and the
+  others build against it.
+- **One worktree per engineer.** Each engineer is a separate subagent in its
+  own git worktree, running in the background alongside the others.
+- **Ownership is gated.** At merge time the engine checks each branch's diff
+  against the package's declared paths; a change outside them blocks, so two
+  engineers cannot silently edit the same file.
+- **Integrate, then review.** The lead merges the branches one at a time and
+  runs the gates on the integrated result; a failure goes back to the
+  package's engineer. The review panel normally sees the integrated diff once;
+  a large change can be reviewed per package.
+- **Judgement, with a cap.** Tightly coupled work stays with one engineer, and
+  a concurrency limit keeps cost and machine load (parallel test suites) in
+  check.
 
 ## Enforcement model
 
@@ -140,7 +166,7 @@ Additional rules:
   (`core.fsmonitor`). The engine disables fsmonitor on every git call and
   refuses revisions that look like options; `/millennium:init` must also
   write-protect `.git/config` and `.git/hooks`.
-- **Hook-owned state** (test-run records, attempt counters) lives in
+- **Hook-owned state** (stop-attempt counters, gate results) lives in
   `${CLAUDE_PLUGIN_DATA}`, outside the sandboxed Bash tool's writable area.
 - **Config integrity.** The engine verifies that tool configs have not been
   weakened (required tsconfig strict flags present, lint thresholds unchanged)
@@ -192,7 +218,7 @@ address so qa-tester can never be pointed at a shared deployment.
   "version": 1,
   "languages": ["go", "typescript", "python"],
   "conventions": ["clean-architecture", "react-feature-based"],
-  "testing": "tdd-strict",
+  "testing": "tests-required",
   "dependencyPolicy": "strict",
   "ci": "github-actions",
   "python": { "typeCheck": "off" },
@@ -261,16 +287,16 @@ v1 packs:
   Logic lives in plain modules and hooks with unit tests; components stay thin.
   Feature-Sliced Design is a candidate for a later pack.
 
-Future packs (hexagonal, feature-sliced, test-after testing profile) are new
+Future packs (hexagonal, feature-sliced, a test-first testing profile) are new
 folders, not engine changes.
 
 ## Testing
 
-- **TDD (gated).** A test wrapper records each run; a PreToolUse hook refuses
-  edits to production code in TDD-scoped layers (`domain`, `application`, React
-  logic modules) unless a failing run was recorded for the current change. CI
-  backs this with "changed production code has changed tests" and changed-line
-  coverage on those layers.
+- **Unit tests required (gated).** Changed production code in the layers a
+  convention marks as tested (`domain`, `application`, React logic modules)
+  must come with added or changed tests in the same change, and its changed
+  lines must be covered by the suite. Writing the tests first is welcome but
+  not enforced (`"testing": "tests-required"`).
 - **Test quality (reviewed).** qa-engineer `correctness-review`, see Roles.
 - **Acceptance tests.** qa-tester writes black-box regression tests in the
   developed project's `tests/acceptance/`, committed and run in that project's
@@ -381,7 +407,7 @@ model, fail-closed plumbing).
    config-integrity and fail-closed plumbing.
 2. clean-architecture pack for Go (engine-native parsing), then TypeScript and
    Python helpers.
-3. Hooks and protection layers; the TDD gate.
+3. Hooks and protection layers; the tests-required gate.
 4. Supply-chain gates.
 5. Agents, skills, and the tech-lead playbook.
 6. react-feature-based pack, qa-tester, CI templates, `/millennium:init`.
