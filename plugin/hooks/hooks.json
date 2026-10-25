@@ -1,0 +1,40 @@
+{
+  "description": "millennium: guard every tool call, check the work when an agent stops, and brief each session. All hooks run the engine through the launcher; a failing guard blocks the tool call.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Grep|Glob|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/millennium",
+            "args": ["hook"],
+            "timeout": 30,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/millennium", "args": ["hook"], "timeout": 600 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/millennium", "args": ["hook"], "timeout": 600 }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/scripts/millennium", "args": ["hook"], "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}

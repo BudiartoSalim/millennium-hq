@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -24,6 +25,7 @@ import (
 	"millennium/internal/infrastructure/packs"
 	"millennium/internal/infrastructure/shellanalyzer"
 	"millennium/internal/infrastructure/shelltools"
+	"millennium/internal/infrastructure/statestore"
 	"millennium/internal/infrastructure/testrunner"
 	"millennium/internal/infrastructure/toolpath"
 	"millennium/internal/interface/cli"
@@ -34,17 +36,13 @@ var version = "dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := cli.New(version, os.Stdout, os.Stderr, buildDeps).Run(ctx, os.Args[1:])
+	code := cli.New(version, os.Stdin, os.Stdout, os.Stderr, buildDeps).Run(ctx, os.Args[1:])
 	stop()
 	os.Exit(code)
 }
 
-func buildDeps(ctx context.Context) (cli.Deps, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return cli.Deps{}, fmt.Errorf("find working directory: %w", err)
-	}
-	repo, err := gitrepo.Open(ctx, wd)
+func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
+	repo, err := openRepository(ctx, dir)
 	if err != nil {
 		return cli.Deps{}, err
 	}
@@ -64,7 +62,44 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 		domain.LanguagePython:     analysiscache.Wrap(python),
 		domain.LanguageShell:      analysiscache.Wrap(shellanalyzer.Analyzer{}),
 	}
-	gates := []port.Gate{
+	runGates := usecase.NewRunGates(loadConfig, repo, gates(repo, node, analyzers, builtinPacks))
+	return cli.Deps{
+		Gates:    runGates,
+		Audit:    usecase.NewRunAudit(loadConfig, repo, gates(repo, node, analyzers, builtinPacks)),
+		Config:   loadConfig,
+		Explain:  usecase.NewExplainFile(loadConfig, builtinPacks),
+		Guard:    usecase.NewGuardToolCall(loadConfig),
+		Stop:     usecase.NewStopCheck(runGates, statestore.New(stateDir())),
+		Scope:    usecase.NewCheckScope(loadConfig, repo),
+		RepoPath: repo.RepoPath,
+		Close: func() {
+			typeScript.Close()
+			python.Close()
+		},
+	}, nil
+}
+
+// openRepository opens the repository containing dir, the current directory
+// when dir is empty, and reports a directory outside any repository as
+// cli.ErrNoRepository.
+func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error) {
+	if dir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("find working directory: %w", err)
+		}
+		dir = wd
+	}
+	repo, err := gitrepo.Open(ctx, dir)
+	if errors.Is(err, gitrepo.ErrNotRepository) {
+		return nil, fmt.Errorf("%w: %v", cli.ErrNoRepository, err)
+	}
+	return repo, err
+}
+
+// gates lists every gate in the order reports show them.
+func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]port.Analyzer, builtinPacks *packs.Source) []port.Gate {
+	return []port.Gate{
 		gate.NewToolchain(toolpath.Locator{}),
 		gate.NewStructure(analyzers, builtinPacks, repo),
 		gate.NewShell(repo, shelltools.New(repo.Root())),
@@ -72,15 +107,20 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 		gate.NewBuild(buildtools.New(repo.Root(), node), repo),
 		gate.NewTests(analyzers, builtinPacks, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
 	}
-	return cli.Deps{
-		Gates:    usecase.NewRunGates(loadConfig, repo, gates),
-		Audit:    usecase.NewRunAudit(loadConfig, repo, gates),
-		Config:   loadConfig,
-		Explain:  usecase.NewExplainFile(loadConfig, builtinPacks),
-		RepoPath: repo.RepoPath,
-		Close: func() {
-			typeScript.Close()
-			python.Close()
-		},
-	}, nil
+}
+
+// stateDir is where the hooks keep their counters: MILLENNIUM_STATE_DIR when
+// set, the plugin's data directory when run by Claude Code (outside the
+// agents' writable area), or the user cache directory.
+func stateDir() string {
+	if dir := os.Getenv("MILLENNIUM_STATE_DIR"); dir != "" {
+		return dir
+	}
+	if dir := os.Getenv("CLAUDE_PLUGIN_DATA"); dir != "" {
+		return filepath.Join(dir, "state")
+	}
+	if dir, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(dir, "millennium", "state")
+	}
+	return filepath.Join(os.TempDir(), "millennium-state")
 }

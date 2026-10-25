@@ -29,9 +29,16 @@ type Repository struct {
 	root string
 }
 
+// ErrNotRepository means the directory is not inside a git working tree.
+var ErrNotRepository = errors.New("not inside a git repository")
+
 // Open finds the repository containing dir.
 func Open(ctx context.Context, dir string) (*Repository, error) {
 	out, err := run(ctx, dir, "rev-parse", "--show-toplevel")
+	var gitErr *gitError
+	if errors.As(err, &gitErr) && strings.Contains(gitErr.stderr, "not a git repository") {
+		return nil, fmt.Errorf("%s: %w", dir, ErrNotRepository)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("find repository root: %w", err)
 	}

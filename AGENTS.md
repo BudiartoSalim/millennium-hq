@@ -22,6 +22,7 @@ engine/                       gate engine, Go standard library only
                               (embedded convention packs), shellanalyzer,
                               shelltools (bash -n, shellcheck), testrunner, toolpath
   internal/interface/cli/     argument parsing, rendering, exit codes
+plugin/                       what users install: hooks/hooks.json, scripts/millennium (launcher)
 schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
 .millennium/config.json       this repository's own config: the engine audits itself
 scripts/verify.sh             the full local check

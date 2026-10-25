@@ -3,6 +3,8 @@
 ```
 millennium gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
 millennium audit [--path PATH] [--tier fast|full] [--format text|json]
+millennium scope --base REV --allow PATTERN [--allow PATTERN ...] [--format text|json]
+millennium hook
 millennium config validate
 millennium config explain PATH
 millennium version
@@ -66,6 +68,29 @@ a refactor: the report's "by rule" line shows where the work is.
 | `--format` | `text` | As for `gate`. |
 
 An audit needs a config; without one there are no rules to audit against.
+
+## `millennium scope`
+
+Checks that a branch stays inside its work package. The tech lead runs it in
+an engineer's worktree before merging, so it holds however the files were
+written.
+
+| Flag | Meaning |
+|---|---|
+| `--base REV` | The revision the branch started from, such as `main`. |
+| `--allow PATTERN` | A path the package may change; repeat it. `**` matches any depth: `services/game/api/internal/domain/**`. |
+
+| Rule | Fires when |
+|---|---|
+| `scope/out-of-scope` | A changed file matches no `--allow` pattern. |
+| `scope/acceptance-test-changed` | The branch changes an acceptance test. |
+| `scope/protected-path` | The branch changes `.millennium/` or the project's Claude settings. |
+
+## `millennium hook`
+
+Handles one Claude Code hook event from stdin. The plugin's hooks call it; see
+[Hooks](hooks.md). It exits 0 with its answer on stdout, and 2 when it cannot
+decide, which blocks.
 
 ## `millennium config validate`
 

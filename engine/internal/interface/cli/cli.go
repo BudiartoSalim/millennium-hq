@@ -32,6 +32,11 @@ Usage:
       the full tier, the default, also runs the tests and measures coverage.
   millennium audit [--path PATH] [--tier fast|full] [--format text|json]
       Check all existing code, or only PATH, against the full rules.
+  millennium scope --base REV --allow PATTERN [--allow PATTERN ...]
+      Check that a branch changes only its work package's paths, and no
+      protected path or acceptance test. The tech lead runs it before merging.
+  millennium hook
+      Handle a Claude Code hook event read from stdin (the plugin's hooks).
   millennium config validate
       Validate .millennium/config.json.
   millennium config explain PATH
@@ -64,12 +69,36 @@ type Explainer interface {
 	Execute(ctx context.Context, path string) (usecase.Explanation, error)
 }
 
+// ToolGuard decides an agent's tool call; usecase.GuardToolCall implements it.
+type ToolGuard interface {
+	Execute(ctx context.Context, call domain.ToolCall) domain.GuardDecision
+}
+
+// StopChecker decides whether an agent may stop; usecase.StopCheck
+// implements it.
+type StopChecker interface {
+	Execute(ctx context.Context, key string) (usecase.StopVerdict, error)
+}
+
+// ScopeChecker checks a branch against its work package; usecase.CheckScope
+// implements it.
+type ScopeChecker interface {
+	Execute(ctx context.Context, in usecase.ScopeInput) (domain.Report, error)
+}
+
+// ErrNoRepository is what a DepsFactory returns outside a git repository;
+// hooks then do nothing, since nothing there is opted in.
+var ErrNoRepository = errors.New("not inside a git repository")
+
 // Deps are what the commands call.
 type Deps struct {
 	Gates   GateRunner
 	Audit   AuditRunner
 	Config  ConfigLoader
 	Explain Explainer
+	Guard   ToolGuard
+	Stop    StopChecker
+	Scope   ScopeChecker
 	// RepoPath turns a command-line path, relative to the current
 	// directory, into a repository-relative one.
 	RepoPath func(arg string) (string, error)
@@ -78,13 +107,19 @@ type Deps struct {
 	Close func()
 }
 
-// DepsFactory builds Deps on demand, so commands such as version work
-// outside a git repository.
-type DepsFactory func(ctx context.Context) (Deps, error)
+// DepsFactory builds Deps on demand for the repository containing dir ("" is
+// the current directory), so commands such as version work outside a git
+// repository.
+type DepsFactory func(ctx context.Context, dir string) (Deps, error)
 
-// withDeps builds the dependencies, runs use, and releases them.
+// withDeps builds the dependencies for the current directory, runs use, and
+// releases them.
 func (a *App) withDeps(ctx context.Context, use func(Deps) error) error {
-	deps, err := a.deps(ctx)
+	return a.withDepsIn(ctx, "", use)
+}
+
+func (a *App) withDepsIn(ctx context.Context, dir string, use func(Deps) error) error {
+	deps, err := a.deps(ctx, dir)
 	if deps.Close != nil {
 		defer deps.Close()
 	}
@@ -97,15 +132,16 @@ func (a *App) withDeps(ctx context.Context, use func(Deps) error) error {
 // App is the command-line application.
 type App struct {
 	version string
+	stdin   io.Reader
 	stdout  io.Writer
 	stderr  io.Writer
 	deps    DepsFactory
 }
 
 // New returns the application. Text reports go to stderr, where Claude Code
-// hooks pick them up; JSON reports go to stdout.
-func New(version string, stdout, stderr io.Writer, deps DepsFactory) *App {
-	return &App{version: version, stdout: stdout, stderr: stderr, deps: deps}
+// hooks pick them up; JSON reports go to stdout; hook events arrive on stdin.
+func New(version string, stdin io.Reader, stdout, stderr io.Writer, deps DepsFactory) *App {
+	return &App{version: version, stdin: stdin, stdout: stdout, stderr: stderr, deps: deps}
 }
 
 // Run executes the command in args and returns the exit status.
@@ -119,6 +155,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.gate(ctx, args[1:])
 	case "audit":
 		return a.audit(ctx, args[1:])
+	case "scope":
+		return a.scope(ctx, args[1:])
+	case "hook":
+		return a.hook(ctx)
 	case "config":
 		return a.config(ctx, args[1:])
 	case "version":

@@ -68,8 +68,13 @@ type harness struct {
 	gates          *fakeGates
 	audit          *fakeAudit
 	explain        *fakeExplain
+	guard          *fakeGuard
+	stop           *fakeStop
+	scope          *fakeScope
 	config         fakeConfig
 	depsErr        error
+	gotDir         string
+	stdin          bytes.Buffer
 	stdout, stderr bytes.Buffer
 }
 
@@ -84,10 +89,21 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	if h.explain == nil {
 		h.explain = &fakeExplain{}
 	}
-	deps := func(context.Context) (Deps, error) {
-		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, RepoPath: repoPath}, h.depsErr
+	if h.guard == nil {
+		h.guard = &fakeGuard{}
 	}
-	return New("1.2.3", &h.stdout, &h.stderr, deps).Run(t.Context(), args)
+	if h.stop == nil {
+		h.stop = &fakeStop{}
+	}
+	if h.scope == nil {
+		h.scope = &fakeScope{}
+	}
+	deps := func(_ context.Context, dir string) (Deps, error) {
+		h.gotDir = dir
+		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
+			Stop: h.stop, Scope: h.scope, RepoPath: repoPath}, h.depsErr
+	}
+	return New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps).Run(t.Context(), args)
 }
 
 var (

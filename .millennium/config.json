@@ -24,12 +24,13 @@
     },
     {
       "paths": [
-        "scripts"
+        "scripts",
+        "plugin/scripts"
       ],
       "languages": [
         "shell"
       ],
-      "reason": "the repository's own tooling scripts"
+      "reason": "the repository's tooling scripts and the plugin's launcher"
     }
   ]
 }

@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -101,8 +102,11 @@ func TestOpenFindsRootFromSubdirectory(t *testing.T) {
 
 func TestOpenOutsideRepositoryFails(t *testing.T) {
 	isolateGit(t)
-	if _, err := Open(t.Context(), t.TempDir()); err == nil {
-		t.Fatal("want an error outside a git repository")
+	if _, err := Open(t.Context(), t.TempDir()); !errors.Is(err, ErrNotRepository) {
+		t.Fatalf("err = %v, want ErrNotRepository outside a git repository", err)
+	}
+	if _, err := Open(t.Context(), filepath.Join(t.TempDir(), "missing")); err == nil || errors.Is(err, ErrNotRepository) {
+		t.Fatalf("a directory that does not exist is a different error: %v", err)
 	}
 }
 

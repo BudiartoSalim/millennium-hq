@@ -19,6 +19,7 @@ order in [design.md](design.md).
 | [Commands](cli.md) | `gate`, `audit`, `config validate`, `config explain`, exit codes, output formats |
 | [Checks](checks.md) | What each check enforces, and how to fix its findings |
 | [Clean Architecture](conventions/clean-architecture.md) | The layers, their import rules, and how to map an existing layout |
+| [Hooks](hooks.md) | What the plugin's hooks enforce in every session, and their limits |
 | [Design](design.md) | Why things are the way they are, and what is planned |
 
 ## Getting started

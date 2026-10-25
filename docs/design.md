@@ -639,6 +639,14 @@ or sh shebang (such as `bin/*`).
    **4d done:** `disable` entries (one gate/rule, a reason, listed on every
    report; fail-closed rules cannot be disabled), gates that declare their
    rules, and undeclared rules treated as an engine bug.
+   **4e done:** `millennium hook` (PreToolUse guard for protected paths,
+   acceptance tests and black-box qa-tester; Stop and SubagentStop run the
+   fast tier, three attempts then an escalation to the user; SessionStart
+   context), `onFailure: "block"` on the guard, `millennium scope` for
+   engineer branches, and `plugin/hooks/hooks.json` with a first launcher.
+   Verified: hooks run outside the sandbox, the sandbox already protects
+   `.git/config` and `.git/hooks`, `!` commands are unsandboxed, and Stop
+   hooks cannot block when they fail to run.
 5. Supply-chain gates.
 6. Agents, skills, and the tech-lead playbook.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,

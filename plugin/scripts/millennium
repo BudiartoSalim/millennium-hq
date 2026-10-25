@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs the millennium engine for the plugin's hooks and skills.
+#
+# $MILLENNIUM_ENGINE, when set, names a millennium binary to run: one you
+# built from source or vetted yourself. Downloading the verified release for
+# this platform on first use arrives with the release workflow.
+set -eu
+
+if [ -n "${MILLENNIUM_ENGINE:-}" ]; then
+	exec "$MILLENNIUM_ENGINE" "$@"
+fi
+
+echo "millennium: no engine found; set MILLENNIUM_ENGINE to a millennium binary built from engine/ (see docs/README.md)" >&2
+exit 2

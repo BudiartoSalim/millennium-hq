@@ -96,6 +96,24 @@ func (c Config) ComponentFor(file string) (ComponentMatch, bool, error) {
 	return ComponentMatch{Component: c.Components[best.index], Root: best.root}, true, nil
 }
 
+// Reaches reports whether dir holds component code: it is inside a component,
+// or a component root can lie inside it, so reading or searching dir would
+// reach that component's files.
+func (c Config) Reaches(dir string) bool {
+	if _, owned, err := c.ComponentFor(path.Join(dir, "x")); owned || err != nil {
+		return true
+	}
+	segments := splitPath(dir)
+	for _, component := range c.Components {
+		for _, pattern := range component.Patterns {
+			if len(segments) <= len(pattern.segments) && matchSegments(pattern.segments[:len(segments)], segments) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // components validates the component list, or turns the single-project form
 // into one component at the repository root.
 func (v *validator) components(in ConfigInput) []Component {

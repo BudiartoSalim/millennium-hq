@@ -115,6 +115,13 @@ type PackSource interface {
 	Pack(name domain.Convention) (domain.Pack, error)
 }
 
+// AttemptStore counts an agent's consecutive blocked stops. It lives where
+// agents cannot write, so an agent cannot reset its own count.
+type AttemptStore interface {
+	Increment(key string) (int, error)
+	Reset(key string) error
+}
+
 // ToolLocator finds executables. Locate returns an error describing why name
 // cannot be run.
 type ToolLocator interface {
