@@ -15,9 +15,10 @@ func (fakePacks) Pack(name domain.Convention) (domain.Pack, error) {
 		return domain.Pack{}, port.ErrPackUnavailable
 	}
 	return domain.NewPack(domain.PackInput{
-		Name:   "clean-architecture",
-		Layers: []domain.PackLayer{{Name: "domain"}},
-		Paths:  map[string]map[string][]string{"go": {"domain": {"internal/domain"}}},
+		Name:      "clean-architecture",
+		Languages: []string{"go", "python"},
+		Layers:    []domain.PackLayer{{Name: "domain"}},
+		Paths:     map[string]map[string][]string{"go": {"domain": {"internal/domain"}}},
 	})
 }
 

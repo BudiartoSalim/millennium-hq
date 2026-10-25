@@ -632,6 +632,10 @@ or sh shebang (such as `bin/*`).
    **4b done:** the `build` gate (gofmt and go vet per touched module, the
    project's own tsc, tsconfig strictness through `tsc --showConfig`,
    optional mypy).
+   **4c done:** the `tests` gate (changed logic in tested layers needs changed
+   tests; the full tier runs the suites and requires every changed executable
+   line to run), tiers (`--tier fast|full`), test recipes with lcov, and packs
+   that declare the languages they govern.
 5. Supply-chain gates.
 6. Agents, skills, and the tech-lead playbook.
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,

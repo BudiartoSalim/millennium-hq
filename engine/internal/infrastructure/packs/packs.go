@@ -56,15 +56,17 @@ func (s *Source) Pack(name domain.Convention) (domain.Pack, error) {
 }
 
 type packDTO struct {
-	Name   string                         `json:"name"`
-	Layers []layerDTO                     `json:"layers"`
-	Paths  map[string]map[string][]string `json:"paths"`
+	Name      string                         `json:"name"`
+	Languages []string                       `json:"languages"`
+	Layers    []layerDTO                     `json:"layers"`
+	Paths     map[string]map[string][]string `json:"paths"`
 }
 
 type layerDTO struct {
 	Name       string   `json:"name"`
 	MayImport  []string `json:"mayImport"`
 	ThirdParty bool     `json:"thirdParty"`
+	Tested     bool     `json:"tested"`
 }
 
 func parse(files fs.FS, name string) (domain.Pack, error) {
@@ -78,9 +80,9 @@ func parse(files fs.FS, name string) (domain.Pack, error) {
 	if err := dec.Decode(&dto); err != nil {
 		return domain.Pack{}, fmt.Errorf("parse %s: %w", name, err)
 	}
-	in := domain.PackInput{Name: dto.Name, Paths: dto.Paths}
+	in := domain.PackInput{Name: dto.Name, Languages: dto.Languages, Paths: dto.Paths}
 	for _, layer := range dto.Layers {
-		in.Layers = append(in.Layers, domain.PackLayer{Name: layer.Name, MayImport: layer.MayImport, ThirdParty: layer.ThirdParty})
+		in.Layers = append(in.Layers, domain.PackLayer(layer))
 	}
 	return domain.NewPack(in)
 }

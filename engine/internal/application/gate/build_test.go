@@ -18,6 +18,8 @@ type fakeBuildTools struct {
 	tsconfig    map[string]string
 	mypy        []domain.LintIssue
 	err         error
+	vetErr      error
+	tsconfigErr error
 	calls       []string
 }
 
@@ -28,6 +30,9 @@ func (f *fakeBuildTools) Gofmt(_ context.Context, files []string) ([]string, err
 
 func (f *fakeBuildTools) GoVet(_ context.Context, dir string) ([]domain.LintIssue, error) {
 	f.calls = append(f.calls, "vet "+dir)
+	if f.vetErr != nil {
+		return nil, f.vetErr
+	}
 	return f.vet[dir], f.err
 }
 
@@ -37,6 +42,9 @@ func (f *fakeBuildTools) TypeCheck(_ context.Context, dir string) ([]domain.Lint
 }
 
 func (f *fakeBuildTools) TSConfig(_ context.Context, dir string) ([]byte, error) {
+	if f.tsconfigErr != nil {
+		return nil, f.tsconfigErr
+	}
 	if config, ok := f.tsconfig[dir]; ok {
 		return []byte(config), nil
 	}

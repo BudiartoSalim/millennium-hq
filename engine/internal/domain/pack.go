@@ -18,13 +18,18 @@ type PackLayer struct {
 	MayImport []string
 	// ThirdParty allows imports of external dependencies.
 	ThirdParty bool
+	// Tested layers need unit tests for every change to their logic.
+	Tested bool
 }
 
 // Pack is a validated convention pack: layers, their dependency rules, and
 // where each layer lives per language. Build one with NewPack.
 type Pack struct {
-	Name   Convention
-	Layers []PackLayer
+	Name Convention
+	// Languages are the languages the convention governs. Others, such as
+	// shell for a layered architecture, are outside its scope.
+	Languages []Language
+	Layers    []PackLayer
 	// Paths maps a language to layer name to path patterns relative to the
 	// component root.
 	Paths map[Language]map[string][]Pattern
@@ -32,19 +37,32 @@ type Pack struct {
 
 // PackInput is an unvalidated pack as read from its definition file.
 type PackInput struct {
-	Name   string
-	Layers []PackLayer
-	Paths  map[string]map[string][]string
+	Name      string
+	Languages []string
+	Layers    []PackLayer
+	Paths     map[string]map[string][]string
 }
 
-// ErrLanguageNotSupported means a pack has no layer paths for a language yet.
-var ErrLanguageNotSupported = errors.New("the convention has no rules for this language yet")
+// Errors from Pack.For.
+var (
+	// ErrLanguageNotSupported means the pack governs the language but has
+	// no layer paths for it yet: the convention cannot be checked, which
+	// blocks.
+	ErrLanguageNotSupported = errors.New("the convention has no rules for this language yet")
+	// ErrLanguageNotGoverned means the convention does not apply to the
+	// language at all, such as layers to shell scripts.
+	ErrLanguageNotGoverned = errors.New("the convention does not govern this language")
+)
 
 // NewPack validates in. Packs ship inside the engine, so an invalid one is an
 // engine bug, but it is reported like any config problem.
 func NewPack(in PackInput) (Pack, error) {
 	v := &validator{}
 	name := parseChoice(v, "name", &in.Name, Conventions(), "")
+	languages := parseList(v, "languages", in.Languages, Languages())
+	if len(languages) == 0 {
+		v.add("languages: a pack must govern at least one language")
+	}
 	known := v.packLayers(in.Layers)
 	paths := make(map[Language]map[string][]Pattern, len(in.Paths))
 	for rawLang, layers := range in.Paths {
@@ -54,7 +72,7 @@ func NewPack(in PackInput) (Pack, error) {
 	if len(v.problems) > 0 {
 		return Pack{}, fmt.Errorf("pack %q: %w", in.Name, &ConfigError{Problems: v.problems})
 	}
-	return Pack{Name: name, Layers: in.Layers, Paths: paths}, nil
+	return Pack{Name: name, Languages: languages, Layers: in.Layers, Paths: paths}, nil
 }
 
 func (v *validator) packLayers(layers []PackLayer) []string {
@@ -101,6 +119,9 @@ type Layering struct {
 // For applies the pack to a component's files of lang, with the component's
 // layer overrides on top of the pack's paths.
 func (p Pack) For(lang Language, match ComponentMatch) (Layering, error) {
+	if !slices.Contains(p.Languages, lang) {
+		return Layering{}, fmt.Errorf("%s for %s: %w", p.Name, lang, ErrLanguageNotGoverned)
+	}
 	base, ok := p.Paths[lang]
 	if !ok {
 		return Layering{}, fmt.Errorf("%s for %s: %w", p.Name, lang, ErrLanguageNotSupported)
@@ -125,6 +146,12 @@ func (p Pack) layer(name string) *PackLayer {
 		}
 	}
 	return nil
+}
+
+// Tested reports whether the layer repoPath belongs to needs unit tests.
+func (l Layering) Tested(repoPath string) bool {
+	layer := l.pack.layer(l.LayerOf(repoPath))
+	return layer != nil && layer.Tested
 }
 
 // LayerOf names the layer repoPath belongs to, CompositionRoot, or "" when it

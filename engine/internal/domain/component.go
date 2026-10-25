@@ -20,6 +20,8 @@ type Component struct {
 	// Reason explains a deliberate exception, such as a legacy component
 	// with no conventions.
 	Reason string
+	// Test overrides the built-in test runner; nil uses it.
+	Test *TestRecipe
 }
 
 // ComponentInput is an unvalidated component as read from a file.
@@ -29,6 +31,7 @@ type ComponentInput struct {
 	Conventions []string
 	Layers      map[string][]string
 	Reason      string
+	Test        *TestRecipe
 }
 
 // Name identifies the component in messages by its first pattern.
@@ -101,11 +104,11 @@ func (v *validator) components(in ConfigInput) []Component {
 			v.add("languages: at least one language is required, or list components")
 		}
 		return []Component{v.component("", ComponentInput{
-			Paths: []string{"."}, Languages: in.Languages, Conventions: in.Conventions,
+			Paths: []string{"."}, Languages: in.Languages, Conventions: in.Conventions, Test: in.Test,
 		})}
 	}
-	if in.Languages != nil || in.Conventions != nil {
-		v.add("languages and conventions belong inside each component when components are listed")
+	if in.Languages != nil || in.Conventions != nil || in.Test != nil {
+		v.add("languages, conventions and test belong inside each component when components are listed")
 	}
 	if len(in.Components) == 0 {
 		v.add("components: at least one component is required")
@@ -130,6 +133,7 @@ func (v *validator) component(prefix string, in ComponentInput) Component {
 		Conventions: parseList(v, prefix+"conventions", in.Conventions, Conventions()),
 		Layers:      v.layers(prefix+"layers", in.Layers),
 		Reason:      in.Reason,
+		Test:        v.testRecipe(prefix+"test", in.Test),
 	}
 	// Every path was invalid and already reported; a placeholder keeps Name
 	// usable while the remaining problems are collected.
@@ -140,6 +144,20 @@ func (v *validator) component(prefix string, in ComponentInput) Component {
 		v.addf("%sconventions: %q needs %q in languages", prefix, ConventionReactFeatureBased, LanguageTypeScript)
 	}
 	return component
+}
+
+func (v *validator) testRecipe(field string, in *TestRecipe) *TestRecipe {
+	if in == nil {
+		return nil
+	}
+	if len(in.Command) == 0 || slices.Contains(in.Command, "") {
+		v.addf("%s.command: an argument list such as [\"npm\", \"test\"] is required, with no empty arguments", field)
+	}
+	if !isSafeRepoDir(in.LCOV) {
+		v.addf("%s.lcov: %q must be a relative path to the lcov report, inside the component", field, in.LCOV)
+	}
+	recipe := TestRecipe{Command: slices.Clone(in.Command), LCOV: in.LCOV}
+	return &recipe
 }
 
 func (v *validator) layers(field string, raw map[string][]string) map[string][]Pattern {

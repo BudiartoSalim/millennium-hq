@@ -78,6 +78,26 @@ type BuildTools interface {
 	Mypy(ctx context.Context, dir string, files []string) ([]domain.LintIssue, error)
 }
 
+// TestResult is one test-suite run.
+type TestResult struct {
+	Failed bool
+	// Summary names the failing tests, or the tail of the output.
+	Summary  string
+	Coverage domain.Coverage
+}
+
+// TestRunner runs test suites with line coverage. Directories are
+// repository-relative. An error means the suite could not run at all.
+type TestRunner interface {
+	// GoTest runs go test with a coverage profile for the module in dir.
+	GoTest(ctx context.Context, dir string) (TestResult, error)
+	// PythonTest runs unittest discovery for the project in dir.
+	PythonTest(ctx context.Context, dir string) (TestResult, error)
+	// Command runs a component's own test recipe from dir and reads its
+	// lcov report.
+	Command(ctx context.Context, dir string, recipe domain.TestRecipe) (TestResult, error)
+}
+
 // FileFinder looks for marker files such as go.mod in the working tree.
 type FileFinder interface {
 	// NearestUp returns the closest directory at or above from, and inside
@@ -105,6 +125,9 @@ type ToolLocator interface {
 type GateInput struct {
 	Config  domain.Config
 	Changes domain.ChangeSet
+	// Tier is how thorough the run is; gates that run test suites do so
+	// only in the full tier.
+	Tier domain.Tier
 }
 
 // Gate is one check. Run returns the findings it found; an error means the

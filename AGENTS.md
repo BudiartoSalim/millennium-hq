@@ -15,12 +15,12 @@ engine/                       gate engine, Go standard library only
                               rules, limits, facts, verdict
   internal/application/
     port/                     interfaces the core needs
-    gate/                     the checks (toolchain, structure, shell, code, build); each reports findings
+    gate/                     the checks (toolchain, structure, shell, code, build, tests); each reports findings
     usecase/                  load config, run gates, audit, explain
   internal/infrastructure/    analysiscache, buildtools, configfile, gitrepo, goanalyzer, helperanalyzer
                               (TypeScript and Python helpers, embedded), packs
                               (embedded convention packs), shellanalyzer,
-                              shelltools (bash -n, shellcheck), toolpath
+                              shelltools (bash -n, shellcheck), testrunner, toolpath
   internal/interface/cli/     argument parsing, rendering, exit codes
 schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
 .millennium/config.json       this repository's own config: the engine audits itself
@@ -111,7 +111,9 @@ outside the repository with install scripts disabled; `verify.sh` refuses to
 run without it rather than report skipped tests as passed.
 
 It runs gofmt, go vet for linux, darwin and windows, the full test suite, and
-the engine auditing its own source against `.millennium/config.json`: a rule
+the engine auditing its own source against `.millennium/config.json` in the
+full tier, so every executable line of the engine's domain and application
+code must run in a test: a rule
 the engine would enforce on a user's code fails this repository too. Fix the
 code, never the config, when the self-audit blocks.
 Inside Claude Code's sandbox the home directory is read-only, so first:

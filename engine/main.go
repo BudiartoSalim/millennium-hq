@@ -24,6 +24,7 @@ import (
 	"millennium/internal/infrastructure/packs"
 	"millennium/internal/infrastructure/shellanalyzer"
 	"millennium/internal/infrastructure/shelltools"
+	"millennium/internal/infrastructure/testrunner"
 	"millennium/internal/infrastructure/toolpath"
 	"millennium/internal/interface/cli"
 )
@@ -69,6 +70,7 @@ func buildDeps(ctx context.Context) (cli.Deps, error) {
 		gate.NewShell(repo, shelltools.New(repo.Root())),
 		gate.NewCode(analyzers, repo),
 		gate.NewBuild(buildtools.New(repo.Root(), node), repo),
+		gate.NewTests(analyzers, builtinPacks, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
 	}
 	return cli.Deps{
 		Gates:    usecase.NewRunGates(loadConfig, repo, gates),

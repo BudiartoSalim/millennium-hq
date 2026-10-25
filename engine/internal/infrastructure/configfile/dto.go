@@ -11,6 +11,7 @@ type configDTO struct {
 	Languages        []string       `json:"languages"`
 	Conventions      []string       `json:"conventions"`
 	Components       []componentDTO `json:"components"`
+	Test             *testDTO       `json:"test"`
 	Exclude          []string       `json:"exclude"`
 	Testing          *string        `json:"testing"`
 	DependencyPolicy *string        `json:"dependencyPolicy"`
@@ -26,6 +27,19 @@ type componentDTO struct {
 	Conventions []string            `json:"conventions"`
 	Layers      map[string][]string `json:"layers"`
 	Reason      string              `json:"reason"`
+	Test        *testDTO            `json:"test"`
+}
+
+type testDTO struct {
+	Command []string `json:"command"`
+	LCOV    string   `json:"lcov"`
+}
+
+func (t *testDTO) toDomain() *domain.TestRecipe {
+	if t == nil {
+		return nil
+	}
+	return &domain.TestRecipe{Command: t.Command, LCOV: t.LCOV}
 }
 
 type pythonDTO struct {
@@ -51,6 +65,7 @@ func (d configDTO) toInput() domain.ConfigInput {
 		Languages:        d.Languages,
 		Conventions:      d.Conventions,
 		Exclude:          d.Exclude,
+		Test:             d.Test.toDomain(),
 		Testing:          d.Testing,
 		DependencyPolicy: d.DependencyPolicy,
 	}
@@ -59,6 +74,7 @@ func (d configDTO) toInput() domain.ConfigInput {
 		for i, c := range d.Components {
 			in.Components[i] = domain.ComponentInput{
 				Paths: c.Paths, Languages: c.Languages, Conventions: c.Conventions, Layers: c.Layers, Reason: c.Reason,
+				Test: c.Test.toDomain(),
 			}
 		}
 	}

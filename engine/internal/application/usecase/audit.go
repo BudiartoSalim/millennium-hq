@@ -12,6 +12,7 @@ import (
 type AuditInput struct {
 	// Path is a repository-relative directory or file; empty audits everything.
 	Path string
+	Tier domain.Tier
 }
 
 // RunAudit runs every gate over existing code instead of a change, holding
@@ -54,5 +55,5 @@ func (u *RunAudit) Execute(ctx context.Context, in AuditInput) (domain.Report, e
 		}
 	}
 	changes.Files = withoutExcluded(cfg, changes.Files)
-	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes}), nil
+	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)}), nil
 }

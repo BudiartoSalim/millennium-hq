@@ -7,11 +7,21 @@
   "required": ["version"],
   "anyOf": [
     { "required": ["languages"], "not": { "required": ["components"] } },
-    { "required": ["components"], "not": { "anyOf": [{ "required": ["languages"] }, { "required": ["conventions"] }] } }
+    { "required": ["components"], "not": { "anyOf": [{ "required": ["languages"] }, { "required": ["conventions"] }, { "required": ["test"] }] } }
   ],
   "$defs": {
     "language": { "enum": ["go", "typescript", "python", "shell"] },
     "convention": { "enum": ["clean-architecture", "react-feature-based"] },
+    "test": {
+      "type": "object",
+      "description": "How the component runs its tests when the built-in runner does not fit, and the only way for TypeScript: an argument list run from the component root without a shell, and the lcov report it writes.",
+      "additionalProperties": false,
+      "required": ["command", "lcov"],
+      "properties": {
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "lcov": { "type": "string", "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$" }
+      }
+    },
     "prefixPattern": {
       "type": "string",
       "description": "A path relative to the repository root, '.' for the root itself. '*' and '?' match within one segment.",
@@ -80,10 +90,12 @@
           "reason": {
             "type": "string",
             "description": "Why this component is an exception, for example a legacy service with no conventions."
-          }
+          },
+          "test": { "$ref": "#/$defs/test" }
         }
       }
     },
+    "test": { "$ref": "#/$defs/test" },
     "exclude": {
       "type": "array",
       "description": "Paths no check reads, such as generated or vendored code. '**' matches any number of segments; a directory excludes everything inside it.",

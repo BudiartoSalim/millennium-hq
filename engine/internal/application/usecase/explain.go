@@ -66,27 +66,34 @@ func (u *ExplainFile) Execute(ctx context.Context, path string) (Explanation, er
 	}
 	out.Component = &match
 	for _, convention := range match.Component.Conventions {
-		out.Layers = append(out.Layers, u.assign(convention, out.Language, match, path))
+		if assignment, applies := u.assign(convention, out.Language, match, path); applies {
+			out.Layers = append(out.Layers, assignment)
+		}
 	}
 	return out, nil
 }
 
-func (u *ExplainFile) assign(convention domain.Convention, lang domain.Language, match domain.ComponentMatch, path string) LayerAssignment {
+// assign places the file under one convention; false means the convention
+// does not govern the file's language, so it says nothing about the file.
+func (u *ExplainFile) assign(convention domain.Convention, lang domain.Language, match domain.ComponentMatch, path string) (LayerAssignment, bool) {
 	assignment := LayerAssignment{Convention: convention}
 	pack, err := u.packs.Pack(convention)
 	if errors.Is(err, port.ErrPackUnavailable) {
 		assignment.Problem = "not available in this engine version"
-		return assignment
+		return assignment, true
 	}
 	if err != nil {
 		assignment.Problem = err.Error()
-		return assignment
+		return assignment, true
 	}
 	layering, err := pack.For(lang, match)
+	if errors.Is(err, domain.ErrLanguageNotGoverned) {
+		return assignment, false
+	}
 	if err != nil {
 		assignment.Problem = err.Error()
-		return assignment
+		return assignment, true
 	}
 	assignment.Layer = layering.LayerOf(path)
-	return assignment
+	return assignment, true
 }

@@ -26,10 +26,12 @@ func (f fakeAnalyzer) Analyze(_ context.Context, path string, content []byte) (d
 }
 
 type fakeSource struct {
-	working map[string]string
-	base    map[string]string
-	changed map[string]domain.LineSet
-	gotRev  string
+	working    map[string]string
+	base       map[string]string
+	changed    map[string]domain.LineSet
+	readAtErr  error
+	changedErr error
+	gotRev     string
 }
 
 func (f *fakeSource) ReadWorking(path string) ([]byte, error) {
@@ -43,11 +45,14 @@ func (f *fakeSource) ReadWorking(path string) ([]byte, error) {
 func (f *fakeSource) ReadAt(_ context.Context, rev, path string) ([]byte, bool, error) {
 	f.gotRev = rev
 	content, ok := f.base[path]
-	return []byte(content), ok, nil
+	return []byte(content), ok, f.readAtErr
 }
 
 func (f *fakeSource) ChangedLines(_ context.Context, rev, path string) (domain.LineSet, error) {
 	f.gotRev = rev
+	if f.changedErr != nil {
+		return domain.LineSet{}, f.changedErr
+	}
 	if lines, ok := f.changed[path]; ok {
 		return lines, nil
 	}
@@ -61,9 +66,10 @@ func (fakePacks) Pack(name domain.Convention) (domain.Pack, error) {
 		return domain.Pack{}, port.ErrPackUnavailable
 	}
 	return domain.NewPack(domain.PackInput{
-		Name:   "clean-architecture",
-		Layers: []domain.PackLayer{{Name: "domain"}, {Name: "infrastructure", MayImport: []string{"domain"}, ThirdParty: true}},
-		Paths:  map[string]map[string][]string{"go": {"domain": {"internal/domain"}, "infrastructure": {"internal/infrastructure"}}},
+		Name:      "clean-architecture",
+		Languages: []string{"go", "typescript", "python"},
+		Layers:    []domain.PackLayer{{Name: "domain"}, {Name: "infrastructure", MayImport: []string{"domain"}, ThirdParty: true}},
+		Paths:     map[string]map[string][]string{"go": {"domain": {"internal/domain"}, "infrastructure": {"internal/infrastructure"}}},
 	})
 }
 

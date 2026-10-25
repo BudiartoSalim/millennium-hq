@@ -38,8 +38,9 @@ func TestLoadRejectsBrokenPacks(t *testing.T) {
 	tests := []struct {
 		name, content, want string
 	}{
-		{"unknown field", `{"name":"clean-architecture","layers":[],"paths":{},"extra":1}`, "unknown field"},
-		{"invalid pack", `{"name":"clean-architecture","layers":[{"name":"domain","mayImport":["web"]}],"paths":{}}`, `"web" is not a layer`},
+		{"unknown field", `{"name":"clean-architecture","languages":["go"],"layers":[],"paths":{},"extra":1}`, "unknown field"},
+		{"invalid pack", `{"name":"clean-architecture","languages":["go"],"layers":[{"name":"domain","mayImport":["web"]}],"paths":{}}`, `"web" is not a layer`},
+		{"no languages", `{"name":"clean-architecture","layers":[],"paths":{}}`, "at least one language"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

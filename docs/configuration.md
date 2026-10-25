@@ -84,6 +84,7 @@ apply to any file.
 | `conventions` | no | `[]` | Convention packs: `clean-architecture`, `react-feature-based`. |
 | `components` | monorepo form | | See above. |
 | `exclude` | no | `[]` | Paths no check reads. `**` matches any number of segments; a directory excludes everything inside it. |
+| `test` | no | | Single-project form: the test recipe (below). |
 | `testing` | no | `tests-required` | Changed production code needs tests. |
 | `dependencyPolicy` | no | `strict` | Every new dependency needs a vetting record. |
 | `python.typeCheck` | no | `off` | `mypy` turns on Python type checking; a missing mypy then blocks. |
@@ -100,8 +101,31 @@ Component fields:
 | `conventions` | no | Convention packs for this component. |
 | `layers` | no | Overrides a convention's layer paths, relative to the component root, for layouts that differ from the pack's default. |
 | `reason` | no | Why the component is an exception; shown by `config explain`. |
+| `test` | no | The component's test recipe (below). |
 
-Not every setting is enforced yet: `testing`, `dependencyPolicy`,
+### Test recipes
+
+The full tier runs each component's tests. Go and Python have built-in runners;
+TypeScript needs a **recipe**, and any component can use one to replace the
+built-in runner:
+
+```json
+"test": {
+  "command": ["npm", "test", "--", "--experimental-test-coverage",
+              "--test-reporter=lcov", "--test-reporter-destination=coverage/lcov.info",
+              "--test-reporter=spec", "--test-reporter-destination=stdout"],
+  "lcov": "coverage/lcov.info"
+}
+```
+
+- `command` is an argument list run from the component root without a shell,
+  with a 15-minute limit; a non-zero exit is a test failure.
+- `lcov` is where the command writes an lcov coverage report, relative to the
+  component root. The engine deletes it before the run, so a stale report
+  cannot pass for a new one. It must cover the TypeScript sources (enable
+  source maps when tests run on compiled JavaScript).
+
+Not every setting is enforced yet: `dependencyPolicy`,
 `paths.acceptanceTests` and `run` are validated now and enforced by checks
 still being built. [Checks](checks.md) lists what runs today.
 

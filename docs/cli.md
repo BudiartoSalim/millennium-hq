@@ -1,8 +1,8 @@
 # Commands
 
 ```
-millennium gate [--base REV] [--require-config] [--format text|json]
-millennium audit [--path PATH] [--format text|json]
+millennium gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
+millennium audit [--path PATH] [--tier fast|full] [--format text|json]
 millennium config validate
 millennium config explain PATH
 millennium version
@@ -33,6 +33,7 @@ tech lead run.
 |---|---|---|
 | `--base REV` | `HEAD` | Compare against REV instead, for example `--base main` to check a whole branch. |
 | `--require-config` | off | Block when the repository has no config. Use it where a missing config must never look like a pass, such as the tech lead's final run or your own CI. |
+| `--tier` | `full` | `fast` skips the test runs (what hooks use on every agent turn); `full` also runs the tests and measures coverage of the changed lines. |
 | `--format` | `text` | `text` writes a report to stderr; `json` writes a machine-readable report to stdout. |
 
 Existing code is judged leniently, new code strictly:
@@ -61,6 +62,7 @@ a refactor: the report's "by rule" line shows where the work is.
 | Flag | Default | Meaning |
 |---|---|---|
 | `--path PATH` | whole repository | Audit only this directory or file. |
+| `--tier` | `full` | As for `gate`. In an audit the full tier requires every executable line of tested layers to be covered. |
 | `--format` | `text` | As for `gate`. |
 
 An audit needs a config; without one there are no rules to audit against.

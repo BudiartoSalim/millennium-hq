@@ -3,10 +3,14 @@
 Every finding blocks. A finding is printed as `[gate/rule] file:line: message`.
 This page lists each rule, what it enforces, and how to fix it.
 
-**What runs today:** the `toolchain`, `structure`, `shell`, `code` and
-`build` gates, for Go, TypeScript, Python and shell. The other checks in
-[design.md](design.md#checks) (tests required, coverage, supply chain) are
-being built.
+**What runs today:** the `toolchain`, `structure`, `shell`, `code`, `build`
+and `tests` gates, for Go, TypeScript, Python and shell. The supply-chain
+checks in [design.md](design.md#supply-chain) are being built.
+
+**Tiers.** Every gate runs in both tiers except the test runs: the **fast**
+tier (what hooks run on every agent turn) checks that changed logic comes with
+changed tests; the **full** tier, the default for `gate` and `audit`, also runs
+the test suites and measures coverage.
 
 How each language is read:
 
@@ -164,6 +168,32 @@ Runs each language's own tools on the modules and projects a change touches.
 TypeScript is checked with the project's own compiler from its `node_modules`,
 or a parent's in a workspace that hoists it; `go vet` runs with
 `GOFLAGS=-mod=readonly`, so it cannot change `go.mod`.
+
+## `tests`
+
+Changed logic in a **tested layer** (`domain` and `application` under
+clean-architecture) is held to its tests. A file is logic when it has at least
+one function and is neither test code nor generated; files that only declare
+types or interfaces are exempt.
+
+| Rule | Tier | Fires when | Fix |
+|---|---|---|---|
+| `tests-missing` | both | Changed logic comes without a change to its tests (in an audit: has no tests). A test counts when it is, in Go, any `_test.go` file in the same package; in TypeScript, `<name>.test.ts`/`.spec.ts` or `__tests__/<name>.ts` in the component; in Python, `test_<name>.py` or `<name>_test.py` in the component. | Add or update the test. Writing it first is welcome, not required. |
+| `tests-failed` | full | A test suite of a touched module or component fails, or does not compile. | Fix the code or the test. |
+| `uncovered-change` | full | A changed executable line of logic never runs in any test of its module (any test, not only those of its own package). In an audit every line counts. | Add a test that exercises it, or remove the line if no caller can reach it. |
+| `tests-unconfigured` | full | A TypeScript component has no test recipe, so its tests cannot be run. | Add `"test"` to the component (see [Configuration](configuration.md#test-recipes)). |
+| `tool-failed` | full | A suite could not run at all. | The message says why. |
+
+How each language's suite runs:
+
+| Language | Runner | Coverage |
+|---|---|---|
+| Go | `go test -count=1 -coverpkg=./... ./...` per touched module | the coverage profile |
+| Python | `unittest` discovery from the component root (`tests/` when present), through a helper | `sys.monitoring` on Python 3.12+, coverage.py below |
+| TypeScript, or any component with a `test` recipe | the recipe's command | the lcov report it writes |
+
+When a suite fails, its files' coverage is not reported on top: the failure
+already blocks.
 
 ## Gate failures
 

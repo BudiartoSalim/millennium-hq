@@ -100,6 +100,7 @@ func TestSchemaPropertiesMatchDecoder(t *testing.T) {
 		{"paths", child(t, root, "properties", "paths"), reflect.TypeFor[pathsDTO]()},
 		{"run", child(t, root, "properties", "run"), reflect.TypeFor[runDTO]()},
 		{"component", child(t, root, "properties", "components", "items"), reflect.TypeFor[componentDTO]()},
+		{"test", child(t, root, "$defs", "test"), reflect.TypeFor[testDTO]()},
 	}
 	for _, obj := range objects {
 		if got, want := propertyNames(t, obj.node), jsonTags(obj.dto); !slices.Equal(got, want) {

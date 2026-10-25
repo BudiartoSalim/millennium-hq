@@ -114,7 +114,10 @@ func (g *Structure) analyze(ctx context.Context, analyzer port.Analyzer, base st
 func (g *Structure) layerFindings(match domain.ComponentMatch, lang domain.Language, facts domain.FileFacts, base *domain.FileFacts) []domain.Finding {
 	var findings []domain.Finding
 	for _, convention := range match.Component.Conventions {
-		layering, err := g.layering(convention, lang, match)
+		layering, err := layeringFor(g.packs, convention, lang, match)
+		if errors.Is(err, domain.ErrLanguageNotGoverned) {
+			continue
+		}
 		if err != nil {
 			findings = append(findings, domain.Finding{Rule: "convention-unavailable", Message: fmt.Sprintf(
 				"component %s: %v; the change is blocked until the convention can be checked", match.Component.Name(), err)})
@@ -125,8 +128,10 @@ func (g *Structure) layerFindings(match domain.ComponentMatch, lang domain.Langu
 	return findings
 }
 
-func (g *Structure) layering(convention domain.Convention, lang domain.Language, match domain.ComponentMatch) (domain.Layering, error) {
-	pack, err := g.packs.Pack(convention)
+// layeringFor applies a convention's pack to a component's files of lang,
+// with errors worded for findings.
+func layeringFor(packs port.PackSource, convention domain.Convention, lang domain.Language, match domain.ComponentMatch) (domain.Layering, error) {
+	pack, err := packs.Pack(convention)
 	if errors.Is(err, port.ErrPackUnavailable) {
 		return domain.Layering{}, fmt.Errorf("convention %s is not available in this engine version", convention)
 	}
@@ -134,6 +139,9 @@ func (g *Structure) layering(convention domain.Convention, lang domain.Language,
 		return domain.Layering{}, err
 	}
 	layering, err := pack.For(lang, match)
+	if errors.Is(err, domain.ErrLanguageNotGoverned) {
+		return domain.Layering{}, err
+	}
 	if errors.Is(err, domain.ErrLanguageNotSupported) {
 		return domain.Layering{}, fmt.Errorf("convention %s has no %s rules in this engine version", convention, lang)
 	}

@@ -11,10 +11,11 @@ import (
 )
 
 type fakeShellTools struct {
-	syntax map[string][]domain.LintIssue
-	lint   map[string][]domain.LintIssue
-	err    error
-	linted []string
+	syntax  map[string][]domain.LintIssue
+	lint    map[string][]domain.LintIssue
+	err     error
+	lintErr error
+	linted  []string
 }
 
 func (f *fakeShellTools) Syntax(_ context.Context, path string) ([]domain.LintIssue, error) {
@@ -23,7 +24,7 @@ func (f *fakeShellTools) Syntax(_ context.Context, path string) ([]domain.LintIs
 
 func (f *fakeShellTools) Lint(_ context.Context, path, dialect string) ([]domain.LintIssue, error) {
 	f.linted = append(f.linted, path+"|"+dialect)
-	return f.lint[path], nil
+	return f.lint[path], f.lintErr
 }
 
 const strictScript = "#!/usr/bin/env bash\nset -euo pipefail\necho hi\n"

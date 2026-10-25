@@ -119,3 +119,23 @@ func TestConfigExcluded(t *testing.T) {
 		}
 	}
 }
+
+func TestTestRecipes(t *testing.T) {
+	recipe := &TestRecipe{Command: []string{"npm", "test"}, LCOV: "coverage/lcov.info"}
+	cfg, err := NewConfig(monorepo(ComponentInput{Paths: []string{"web"}, Languages: []string{"typescript"}, Test: recipe}))
+	if err != nil || cfg.Components[0].Test == nil || cfg.Components[0].Test.LCOV != "coverage/lcov.info" {
+		t.Fatalf("component recipe: %+v, %v", cfg.Components, err)
+	}
+	single := minimalInput()
+	single.Test = recipe
+	if cfg, err := NewConfig(single); err != nil || cfg.Components[0].Test == nil {
+		t.Fatalf("single-project recipe: %+v, %v", cfg.Components, err)
+	}
+	bad := []*TestRecipe{{LCOV: "lcov.info"}, {Command: []string{"npm", ""}, LCOV: "lcov.info"}, {Command: []string{"npm"}, LCOV: "../lcov.info"}}
+	for _, r := range bad {
+		assertConfigError(t, monorepo(ComponentInput{Paths: []string{"web"}, Languages: []string{"typescript"}, Test: r}), "components[0].test")
+	}
+	both := monorepo(ComponentInput{Paths: []string{"web"}, Languages: []string{"typescript"}})
+	both.Test = recipe
+	assertConfigError(t, both, "belong inside each component")
+}

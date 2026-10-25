@@ -25,6 +25,7 @@ type RunGatesInput struct {
 	// Base is the revision to compare the working tree against; empty means HEAD.
 	Base   string
 	Config ConfigRequirement
+	Tier   domain.Tier
 }
 
 // RunGates runs every gate over the change set and collects the report.
@@ -57,7 +58,15 @@ func (u *RunGates) Execute(ctx context.Context, in RunGatesInput) (domain.Report
 		return domain.Report{}, fmt.Errorf("detect changes: %w", err)
 	}
 	changes.Files = withoutExcluded(cfg, changes.Files)
-	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes}), nil
+	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)}), nil
+}
+
+// tierOrFull defaults an unset tier to the thorough one.
+func tierOrFull(tier domain.Tier) domain.Tier {
+	if tier == "" {
+		return domain.TierFull
+	}
+	return tier
 }
 
 // runAll runs each gate in order and collects their results.

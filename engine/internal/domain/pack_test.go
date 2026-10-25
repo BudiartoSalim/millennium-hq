@@ -8,7 +8,8 @@ import (
 
 func cleanArchitectureInput() PackInput {
 	return PackInput{
-		Name: "clean-architecture",
+		Name:      "clean-architecture",
+		Languages: []string{"go", "python"},
 		Layers: []PackLayer{
 			{Name: "domain"},
 			{Name: "application", MayImport: []string{"domain"}},
@@ -51,6 +52,7 @@ func TestNewPackRejects(t *testing.T) {
 		{"unknown dependency", func(in *PackInput) { in.Layers[0].MayImport = []string{"web"} }, `layers.domain.mayImport: "web"`},
 		{"path for unknown layer", func(in *PackInput) { in.Paths["go"]["web"] = []string{"web"} }, `"web" is not a layer`},
 		{"unknown language", func(in *PackInput) { in.Paths["rust"] = map[string][]string{} }, `paths: "rust"`},
+		{"governs nothing", func(in *PackInput) { in.Languages = nil }, "at least one language"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -70,6 +72,9 @@ func TestPackForUnsupportedLanguageAndBadOverride(t *testing.T) {
 	}
 	if _, err := pack.For(LanguagePython, ComponentMatch{Component: Component{Patterns: []Pattern{RootPattern()}}}); !errors.Is(err, ErrLanguageNotSupported) {
 		t.Fatalf("err = %v, want ErrLanguageNotSupported", err)
+	}
+	if _, err := pack.For(LanguageShell, ComponentMatch{Component: Component{Patterns: []Pattern{RootPattern()}}}); !errors.Is(err, ErrLanguageNotGoverned) {
+		t.Fatalf("err = %v, want ErrLanguageNotGoverned for a language outside the pack", err)
 	}
 	override := ComponentMatch{Component: Component{Patterns: []Pattern{RootPattern()}, Layers: map[string][]Pattern{"web": nil}}}
 	if _, err := pack.For(LanguageGo, override); err == nil || !strings.Contains(err.Error(), `overrides layer "web"`) {

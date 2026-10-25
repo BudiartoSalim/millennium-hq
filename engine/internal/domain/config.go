@@ -133,6 +133,7 @@ type ConfigInput struct {
 	Languages        []string
 	Conventions      []string
 	Components       []ComponentInput
+	Test             *TestRecipe
 	Exclude          []string
 	Testing          *string
 	DependencyPolicy *string

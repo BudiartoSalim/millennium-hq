@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 
 	"millennium/internal/application/usecase"
 	"millennium/internal/domain"
@@ -26,10 +27,10 @@ const (
 const usageText = `millennium: the gate engine of the millennium plugin.
 
 Usage:
-  millennium gate [--base REV] [--require-config] [--format text|json]
-      Check the changes against REV (default HEAD): what hooks and the tech
-      lead run.
-  millennium audit [--path PATH] [--format text|json]
+  millennium gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
+      Check the changes against REV (default HEAD). Hooks run the fast tier;
+      the full tier, the default, also runs the tests and measures coverage.
+  millennium audit [--path PATH] [--tier fast|full] [--format text|json]
       Check all existing code, or only PATH, against the full rules.
   millennium config validate
       Validate .millennium/config.json.
@@ -136,11 +137,16 @@ func (a *App) gate(ctx context.Context, args []string) int {
 	base := flags.String("base", "", "revision to compare the working tree against (default HEAD)")
 	requireConfig := flags.Bool("require-config", false, "block when the repository has no config")
 	formatName := flags.String("format", "text", "report format: text or json")
+	tierName := flags.String("tier", "full", "fast (hooks: no test runs) or full (also runs the tests and measures coverage)")
 	render, ok := a.parse(flags, args, formatName, "changed files")
 	if !ok {
 		return exitBlocked
 	}
-	in := usecase.RunGatesInput{Base: *base, Config: usecase.ConfigOptional}
+	tier, ok := a.tier(*tierName)
+	if !ok {
+		return exitBlocked
+	}
+	in := usecase.RunGatesInput{Base: *base, Config: usecase.ConfigOptional, Tier: tier}
 	if *requireConfig {
 		in.Config = usecase.ConfigRequired
 	}
@@ -156,13 +162,18 @@ func (a *App) audit(ctx context.Context, args []string) int {
 	flags := a.flagSet("audit")
 	pathArg := flags.String("path", "", "directory or file to audit, relative to the current directory (default: everything)")
 	formatName := flags.String("format", "text", "report format: text or json")
+	tierName := flags.String("tier", "full", "fast (no test runs) or full")
 	render, ok := a.parse(flags, args, formatName, "audited files")
+	if !ok {
+		return exitBlocked
+	}
+	tier, ok := a.tier(*tierName)
 	if !ok {
 		return exitBlocked
 	}
 	var report domain.Report
 	err := a.withDeps(ctx, func(deps Deps) (err error) {
-		in := usecase.AuditInput{}
+		in := usecase.AuditInput{Tier: tier}
 		if *pathArg != "" {
 			if in.Path, err = deps.RepoPath(*pathArg); err != nil {
 				return err
@@ -172,6 +183,15 @@ func (a *App) audit(ctx context.Context, args []string) int {
 		return err
 	})
 	return render.outcome(report, err)
+}
+
+func (a *App) tier(name string) (domain.Tier, bool) {
+	tier := domain.Tier(name)
+	if !slices.Contains(domain.Tiers(), tier) {
+		fmt.Fprintf(a.stderr, "millennium: unknown tier %q: use fast or full\n", name)
+		return "", false
+	}
+	return tier, true
 }
 
 func (a *App) flagSet(name string) *flag.FlagSet {

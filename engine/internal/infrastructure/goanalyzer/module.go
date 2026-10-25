@@ -114,6 +114,10 @@ func readLimited(name string) ([]byte, error) {
 	return data, nil
 }
 
+// ModulePath reads the module directive of a go.mod, for other adapters
+// that map import paths to files.
+func ModulePath(data []byte) (string, error) { return modulePath(data) }
+
 // modulePath reads the module directive. go.mod parsing proper lives in
 // golang.org/x/mod, outside the standard library; the directive is simple
 // enough to read directly: "module path", optionally quoted, with an

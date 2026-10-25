@@ -1,8 +1,9 @@
 {
   "name": "clean-architecture",
+  "languages": ["go", "typescript", "python"],
   "layers": [
-    {"name": "domain", "mayImport": [], "thirdParty": false},
-    {"name": "application", "mayImport": ["domain"], "thirdParty": false},
+    {"name": "domain", "mayImport": [], "thirdParty": false, "tested": true},
+    {"name": "application", "mayImport": ["domain"], "thirdParty": false, "tested": true},
     {"name": "infrastructure", "mayImport": ["domain", "application"], "thirdParty": true},
     {"name": "interface", "mayImport": ["domain", "application"], "thirdParty": true}
   ],

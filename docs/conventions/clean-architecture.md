@@ -9,13 +9,21 @@ or per component.
 
 Code is split into four layers, and dependencies point inward:
 
-| Layer | Holds | May import | Third-party imports |
-|---|---|---|---|
-| `domain` | Entities, value types, domain errors | Nothing of the project | No |
-| `application` | Ports (interfaces the core needs) and use-cases | `domain` | No |
-| `infrastructure` | Adapters that implement ports: databases, HTTP clients, files | `domain`, `application` | Yes |
-| `interface` | Delivery: HTTP handlers, CLI, DTOs, error mapping | `domain`, `application` | Yes |
-| composition root | `main.go`: builds adapters, wires use-cases | Everything | Yes |
+| Layer | Holds | May import | Third-party imports | Tests required |
+|---|---|---|---|---|
+| `domain` | Entities, value types, domain errors | Nothing of the project | No | Yes |
+| `application` | Ports (interfaces the core needs) and use-cases | `domain` | No | Yes |
+| `infrastructure` | Adapters that implement ports: databases, HTTP clients, files | `domain`, `application` | Yes | No |
+| `interface` | Delivery: HTTP handlers, CLI, DTOs, error mapping | `domain`, `application` | Yes | No |
+| composition root | `main.go`: builds adapters, wires use-cases | Everything | Yes | No |
+
+"Tests required" means changed logic must come with changed tests, and in the
+full tier every changed line must run in a test: see the
+[`tests` gate](../checks.md#tests). Adapters are worth testing where it is
+cheap, but the gate does not demand it.
+
+The convention governs Go, TypeScript and Python; shell scripts in the same
+component are outside its scope.
 
 Every layer may import the standard library and its own layer. No layer may
 import the composition root, and `infrastructure` and `interface` may not
