@@ -26,7 +26,7 @@ data directory, where sandboxed agents cannot write.
 | Rule | Applies to | Denied |
 |---|---|---|
 | Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json` |
-| Acceptance tests | the engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`): the engineer cannot change the tests that judge its work |
+| Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`): the engineer cannot change the tests that judge its work |
 | Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
 | Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path |
 

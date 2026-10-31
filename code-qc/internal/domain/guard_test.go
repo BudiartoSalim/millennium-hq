@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,6 +18,20 @@ func guardConfig(t *testing.T) Config {
 	return cfg
 }
 
+// The guard knows agents only by name, so a role that no longer matches its
+// agent file would silently stop applying to that agent.
+func TestGuardRolesNameThePluginsAgents(t *testing.T) {
+	for _, role := range []string{RoleSoftwareEngineer, RoleQATester} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin", "agents", role+".md"))
+		if err != nil {
+			t.Fatalf("role %q has no agent file: %v", role, err)
+		}
+		if !strings.Contains(string(data), "\nname: "+role+"\n") {
+			t.Fatalf("plugin/agents/%s.md is not named %q", role, role)
+		}
+	}
+}
+
 func TestGuard(t *testing.T) {
 	cfg := guardConfig(t)
 	tests := []struct {
@@ -25,15 +41,15 @@ func TestGuard(t *testing.T) {
 	}{
 		{"main session edits code", ToolCall{Tool: "Edit", Paths: []string{"services/a/api/main.go"}}, ""},
 		{"main session edits the config", ToolCall{Tool: "Edit", Paths: []string{".millennium/config.json"}}, ".millennium is protected"},
-		{"engineer writes a dependency approval", ToolCall{Tool: "Write", Role: RoleEngineer, Paths: []string{".millennium/deps/npm/x.json"}}, ".millennium is protected"},
+		{"engineer writes a dependency approval", ToolCall{Tool: "Write", Role: RoleSoftwareEngineer, Paths: []string{".millennium/deps/npm/x.json"}}, ".millennium is protected"},
 		{"anyone edits project settings", ToolCall{Tool: "MultiEdit", Paths: []string{".claude/settings.json"}}, ".claude/settings.json is protected"},
-		{"engineer edits an acceptance test", ToolCall{Tool: "Edit", Role: RoleEngineer, Paths: []string{"tests/acceptance/login_test.go"}}, "acceptance test"},
+		{"engineer edits an acceptance test", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Paths: []string{"tests/acceptance/login_test.go"}}, "acceptance test"},
 		{"qa-tester writes an acceptance test", ToolCall{Tool: "Write", Role: RoleQATester, Paths: []string{"tests/acceptance/login_test.go"}}, ""},
 		{"qa-tester reads code", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"services/a/api/internal/domain/user.go"}}, "implementation code"},
 		{"qa-tester greps a service", ToolCall{Tool: "Grep", Role: RoleQATester, Paths: []string{"services/a/api"}}, "implementation code"},
 		{"qa-tester reads docs", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"docs/spec.md"}}, ""},
 		{"qa-tester reads acceptance tests", ToolCall{Tool: "Glob", Role: RoleQATester, Paths: []string{"tests/acceptance"}}, ""},
-		{"engineer reads code", ToolCall{Tool: "Read", Role: RoleEngineer, Paths: []string{"services/a/api/main.go"}}, ""},
+		{"engineer reads code", ToolCall{Tool: "Read", Role: RoleSoftwareEngineer, Paths: []string{"services/a/api/main.go"}}, ""},
 		{"shell writes the config", ToolCall{Tool: "Bash", Command: "echo '{}' > .millennium/config.json"}, "changes .millennium"},
 		{"shell sed on settings", ToolCall{Tool: "Bash", Command: "sed -i 's/x/y/' .claude/settings.json"}, "changes .claude/settings.json"},
 		{"shell reads the config", ToolCall{Tool: "Bash", Command: "cat .millennium/config.json"}, ""},
@@ -55,7 +71,7 @@ func TestGuard(t *testing.T) {
 }
 
 func TestRoleOf(t *testing.T) {
-	for agentType, want := range map[string]string{"millennium:engineer": "engineer", "qa-tester": "qa-tester", "": "", "a:b:qa-tester": "qa-tester"} {
+	for agentType, want := range map[string]string{"millennium:software-engineer": "software-engineer", "qa-tester": "qa-tester", "": "", "a:b:qa-tester": "qa-tester"} {
 		if got := RoleOf(agentType); got != want {
 			t.Errorf("RoleOf(%q) = %q, want %q", agentType, got, want)
 		}

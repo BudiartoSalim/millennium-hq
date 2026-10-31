@@ -36,8 +36,12 @@ The engine also holds what is not strictly code quality: the `deps` gate, and
 the agent enforcement and rule changes (`hook`, `config apply`, `scope`). They
 stay in it until a second tool exists and shows what they must share.
 
-Skills and agents are named for who or what they are, not a bare role word
-that a sibling could also claim: `tech-lead`, not `lead`.
+Skills, agents and gates are named for what they do, not with a bare word a
+sibling could also claim: `tech-lead` not `lead`, `software-engineer` not
+`engineer` beside `security-engineer`, `init-project` not `init`, and the
+`hygiene` gate not `code` in a tool where every gate checks code. Every
+reviewer of a change is `<topic>-reviewer` with a `<topic>-review` skill;
+`security-engineer` is the exception because it does more than review.
 
 ## Principles
 
@@ -81,8 +85,8 @@ that a sibling could also claim: `tech-lead`, not `lead`.
 | Agent | Skills / modes | Context | Tools |
 |---|---|---|---|
 | tech-lead | `tech-lead` | Full | All |
-| engineer (one or more, in parallel) | `engineering-standards` + active packs | Its work package + standards | Edit/Write/Bash, own git worktree |
-| qa-engineer | `correctness-review` | Spec + diff (incl. tests) | Read-only on the change, own worktree for proof-of-bug tests |
+| software-engineer (one or more, in parallel) | `engineering-standards` + active packs | Its work package + standards | Edit/Write/Bash, own git worktree |
+| correctness-reviewer | `correctness-review` | Spec + diff (incl. tests) | Read-only on the change, own worktree for proof-of-bug tests |
 | qa-tester | `smoke`, `acceptance`, `exploratory` | Spec + run recipe; no implementation source | Bash (run the app, HTTP), browser for web |
 | security-engineer | `threat-model`, `security-review`, `security-research` | Spec + diff (+ codebase for research) | Read-only |
 | maintainability-reviewer | `maintainability-review` + pack checklists | Spec + diff + conventions | Read-only |
@@ -98,9 +102,9 @@ Notes:
 - **Agents are split by tools and permissions, persona is a mode.** An agent
   definition is a template that can run as many parallel instances, so one
   `security-engineer` with three modes avoids a bottleneck without a separate
-  researcher persona. qa-tester is separate from qa-engineer because it runs the
+  researcher persona. qa-tester is separate from correctness-reviewer because it runs the
   software and must stay black-box.
-- **qa-engineer owns test quality.** The engineer writes its own unit tests, so
+- **correctness-reviewer owns test quality.** The engineer writes its own unit tests, so
   `correctness-review` checks them: do the assertions prove the spec, which
   requirements and edge cases have no test, would a test pass whatever the code
   did. The maintainability reviewer covers test readability only. Every finding
@@ -126,7 +130,7 @@ spec + acceptance criteria (lead, with the user)
   -> qa-tester smoke            (fail: straight back to the engineer)
   -> in parallel:
        qa-tester acceptance + exploratory
-       qa-engineer correctness-review   (always)
+       correctness-reviewer correctness-review   (always)
        maintainability-reviewer         (always)
        security-engineer review         (by risk)
        performance-reviewer             (by risk)
@@ -228,7 +232,7 @@ Additional rules:
 Agents can draft configuration but never make it effective.
 
 ```
-/millennium:init or /millennium:adopt
+/millennium:init-project or /millennium:adopt-project
   -> the engine discovers the project; an agent drafts millennium.proposal.json
      (an unprotected, git-ignored file that does nothing by itself)
   -> the user runs: millennium-code-qc config apply
@@ -256,7 +260,7 @@ their reasons, so nothing is silently off:
 
 ## Adopting an existing project
 
-`/millennium:adopt` (built) onboards a project that already has code:
+`/millennium:adopt-project` (built) onboards a project that already has code:
 
 1. **Mode:** committed (`.millennium/config.json` in the repo, for projects the
    user owns) or local (see below).
@@ -272,7 +276,7 @@ their reasons, so nothing is silently off:
    and running a project's own lint commands through the gate are not built.)
 4. **Review and apply:** `millennium-code-qc audit --proposal <file>` shows what the
    rules find in today's code without applying anything; the user reviews it
-   and runs `millennium-code-qc config apply`. `/millennium:init` is the same flow for
+   and runs `millennium-code-qc config apply`. `/millennium:init-project` is the same flow for
    a new project, with an optional layout skeleton.
 
 **Existing code does not block adoption (built).** Gates look at what a change
@@ -510,7 +514,7 @@ folders, not engine changes.
   must come with added or changed tests in the same change, and its changed
   lines must be covered by the suite. Writing the tests first is welcome but
   not enforced (`"testing": "tests-required"`).
-- **Test quality (reviewed).** qa-engineer `correctness-review`, see Roles.
+- **Test quality (reviewed).** correctness-reviewer `correctness-review`, see Roles.
 - **Acceptance tests.** qa-tester writes black-box regression tests in the
   developed project's `tests/acceptance/`, committed with the project and part
   of its test suite. The engineer cannot change them (agent hook + merge-time
@@ -680,7 +684,7 @@ None.
    lines (`--norc`), shebang detection for extensionless scripts, and a
    line-based shell analyzer for comments and risky constructs.
 4. Hooks and protection layers; `config apply`; the tests-required gate.
-   **4a done:** the `code` gate (secrets in any text file, banned constructs,
+   **4a done:** the `hygiene` gate (secrets in any text file, banned constructs,
    suppressions without a reason, TODOs without a link, `millennium:allow`
    waivers), with an analysis cache so each file version is parsed once.
    **4b done:** the `build` gate (gofmt and go vet per touched module, the
@@ -725,11 +729,10 @@ None.
    `.claude/worktrees/`, and allows the registries the full tier contacts
    through the sandbox. The session-start context names the launcher, since
    the plugin has no `bin/`. qa-tester may read documents inside components.
-7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
+7. react-feature-based pack, qa-tester, `/millennium:init-project`, `/millennium:adopt-project`,
    local mode. **Done:** the react-feature-based pack with `isolated` layers
    (features may not import each other, aliases included), `millennium
-   discover`, `millennium-code-qc audit --proposal` as a dry run, and the `init` and
-   `adopt` skills. Local mode was built in step 4f, qa-tester in step 6.
+   discover`, `millennium-code-qc audit --proposal` as a dry run, and the `init-project` and `adopt-project` skills. Local mode was built in step 4f, qa-tester in step 6.
 8. `plugin/` layout, launcher and engine lock, release workflow. **Done:**
    the marketplace file, the launcher (download, SHA-256 check on every run,
    kept beside the plugin where sandboxed agents can run but not change it),

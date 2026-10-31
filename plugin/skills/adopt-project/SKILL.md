@@ -1,5 +1,5 @@
 ---
-name: adopt
+name: adopt-project
 description: Onboards an existing codebase onto millennium - discovers its modules, languages and layouts, matches convention packs (or maps layers onto the existing layout), drafts the config as a proposal, dry-runs an audit of what existing code would show, and hands the user the apply command. Use when the user wants to start using millennium on a repository that already has code.
 argument-hint: "[committed|local]"
 disable-model-invocation: true

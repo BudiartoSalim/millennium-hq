@@ -1,6 +1,6 @@
 ---
-name: init
-description: Sets up millennium for a new project or one with little code - chooses languages, conventions and layout with the user, drafts the config as a proposal, and hands the user the apply command. Use when the user starts a new repository with millennium; for a codebase that already has substantial code, use adopt.
+name: init-project
+description: Sets up millennium for a new project or one with little code - chooses languages, conventions and layout with the user, drafts the config as a proposal, and hands the user the apply command. Use when the user starts a new repository with millennium; for a codebase that already has substantial code, use adopt-project.
 argument-hint: "[committed|local]"
 disable-model-invocation: true
 ---
@@ -18,7 +18,7 @@ You draft; the user decides and applies. In this skill, `millennium-code-qc` mea
   this is not one, ask whether to `git init`.
 - `millennium-code-qc config validate`: if a config exists, stop and say so.
 - `millennium-code-qc discover`: if it finds substantial code (more than a handful of
-  files), suggest `/millennium:adopt` instead, which maps conventions onto an
+  files), suggest `/millennium:adopt-project` instead, which maps conventions onto an
   existing layout.
 
 ## 2. Decide with the user

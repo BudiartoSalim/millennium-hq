@@ -183,7 +183,7 @@ func sessionContext(engine string) string {
 	}
 	return fmt.Sprintf("millennium is active in this repository. The engine command is %[1]s (wherever the docs write `millennium-code-qc`, use that command). "+
 		"Gates check every change: hooks run the fast tier when an agent stops and block it while anything fails; before calling work done, run `%[1]s gate --tier full` "+
-		"(tests and coverage included) and fix every finding. Agents never change .millennium/, the project's Claude settings, or (as the engineer) the acceptance tests; "+
+		"(tests and coverage included) and fix every finding. Agents never change .millennium/, the project's Claude settings, or (as the software-engineer agent) the acceptance tests; "+
 		"rule changes are proposals the user applies with `millennium-code-qc config apply`. Use `%[1]s config explain <file>` when a finding is surprising.", engine)
 }
 

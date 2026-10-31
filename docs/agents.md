@@ -49,8 +49,8 @@ The workflow, in order:
 | Agent | Skills | Tools | Isolation |
 |---|---|---|---|
 | `tech-lead` | lead | all | none |
-| `engineer` | engineering-standards | read, edit, shell, web | own worktree |
-| `qa-engineer` | review-protocol, correctness-review | read, shell, edit (proof tests only) | own worktree |
+| `software-engineer` | engineering-standards | read, edit, shell, web | own worktree |
+| `correctness-reviewer` | review-protocol, correctness-review | read, shell, edit (proof tests only) | own worktree |
 | `qa-tester` | qa-testing | all but Agent | own worktree |
 | `security-engineer` | review-protocol, security-review, threat-model, security-research | read, shell, web | none, read-only |
 | `maintainability-reviewer` | review-protocol, maintainability-review | read, shell | none, read-only |
@@ -75,12 +75,12 @@ The workflow, in order:
 | Skill | Invoked by | What it is |
 |---|---|---|
 | `tech-lead` | you (`/millennium:tech-lead <task>`), the tech-lead agent | The tech-lead playbook above. |
-| `init` | you (`/millennium:init [committed\|local]`) | Sets up a new project: languages, conventions, a draft config, an optional layout skeleton. |
-| `adopt` | you (`/millennium:adopt [committed\|local]`) | Onboards existing code: `millennium-code-qc discover`, convention matching, a dry-run audit, the draft config. |
+| `init-project` | you (`/millennium:init-project [committed\|local]`) | Sets up a new project: languages, conventions, a draft config, an optional layout skeleton. |
+| `adopt-project` | you (`/millennium:adopt-project [committed\|local]`) | Onboards existing code: `millennium-code-qc discover`, convention matching, a dry-run audit, the draft config. |
 | `vet-dependency` | you (`/millennium:vet-dependency npm express@4.21.2`), the lead | Vets a dependency and drafts its approval records into `millennium.proposal.json`. |
 | `engineering-standards` | engineer | Scope discipline, conventions, tests, dependencies, working with the gates. |
 | `review-protocol` | every reviewer | What a finding is, severities, and the JSON report format. |
-| `correctness-review` | qa-engineer | Spec conformance, edge cases, error paths, test quality, failing tests as proof. |
+| `correctness-review` | correctness-reviewer | Spec conformance, edge cases, error paths, test quality, failing tests as proof. |
 | `security-review` | security-engineer | Source-to-sink review of a diff, authorization, secrets, crypto, limits. |
 | `threat-model` | security-engineer | Assets, boundaries, STRIDE, abuse cases, testable security requirements. |
 | `security-research` | security-engineer | Variant analysis, source-to-sink across the codebase, surface audits; local proof only. |
@@ -98,14 +98,14 @@ logged the same way:
 
 ```json
 {
-  "reviewer": "qa-engineer",
+  "reviewer": "correctness-reviewer",
   "mode": "correctness-review",
   "base": "<commit>",
   "head": "<commit>",
   "verdict": "changes-requested",
   "findings": [
     {
-      "id": "QA-1",
+      "id": "CR-1",
       "severity": "high",
       "category": "edge-case",
       "file": "services/cart/internal/domain/total.go",

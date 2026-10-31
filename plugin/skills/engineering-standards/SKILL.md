@@ -49,7 +49,7 @@ In this skill, `millennium-code-qc` means the engine command
   tests, and in the full tier every changed line to run in a test.
 - Test behaviour, not implementation: assert on outputs and effects a caller
   can see. A test that would still pass if the code were wrong is worse than
-  none; the qa-engineer reviews your tests for exactly that.
+  none; the correctness-reviewer reviews your tests for exactly that.
 - Cover the edges: empty, one, many, boundaries, invalid input, error paths.
 - You do not write or change acceptance tests (`tests/acceptance` by
   default). qa-tester owns them and the hooks deny you.

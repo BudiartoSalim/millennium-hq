@@ -59,7 +59,7 @@ func TestCodeGateEdges(t *testing.T) {
 	}
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: map[string]domain.FileFacts{"x": {}}}}
 	run := func(source *fakeSource, base string, files ...domain.ChangedFile) ([]domain.Finding, error) {
-		return NewCode(analyzers, source).Run(t.Context(), port.GateInput{Config: cfg, Changes: domain.ChangeSet{Base: base, Files: files}})
+		return NewHygiene(analyzers, source).Run(t.Context(), port.GateInput{Config: cfg, Changes: domain.ChangeSet{Base: base, Files: files}})
 	}
 	source := &fakeSource{working: map[string]string{"a/b/c.go": "x", "svc/m.py": "x", "other/z.go": "x"}}
 	findings, err := run(source, "", domain.ChangedFile{Path: "svc/gone.go", Kind: domain.ChangeDeleted},

@@ -1,5 +1,5 @@
 ---
-name: engineer
+name: software-engineer
 description: Implements one work package from the tech lead, with its unit tests, in its own git worktree. Use for writing production code from a spec slice that names the paths it may change.
 tools: Read, Edit, Write, Bash, Grep, Glob, Skill, WebFetch, WebSearch
 skills:

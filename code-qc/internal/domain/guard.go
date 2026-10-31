@@ -9,10 +9,10 @@ import (
 )
 
 // Agent roles the guard knows. A plugin agent's type arrives scoped, such as
-// "millennium:engineer"; the role is the part after the last colon.
+// "millennium:software-engineer"; the role is the part after the last colon.
 const (
-	RoleEngineer = "engineer"
-	RoleQATester = "qa-tester"
+	RoleSoftwareEngineer = "software-engineer"
+	RoleQATester         = "qa-tester"
 )
 
 // ToolCall is a tool use an agent asks for, as the hooks see it.
@@ -63,7 +63,7 @@ var (
 )
 
 // Guard decides a tool call: no agent may write protected paths or apply a
-// config; the engineer may not change the acceptance tests it is checked
+// config; the software engineer may not change the acceptance tests it is checked
 // against; qa-tester may not read the implementation it tests black-box.
 // Shell commands are matched best-effort: the OS sandbox, not this, is what
 // stops a determined command.
@@ -84,8 +84,8 @@ func guardWrite(cfg Config, call ToolCall) GuardDecision {
 		if protected, ok := protectedPath(p); ok {
 			return deny("%s is protected: agents never change the rules they are checked against; the user changes them with `millennium-code-qc config apply`", protected)
 		}
-		if call.Role == RoleEngineer && Within(p, cfg.AcceptanceTests) {
-			return deny("%s is an acceptance test; the engineer cannot change the tests that judge its work (qa-tester owns them)", p)
+		if call.Role == RoleSoftwareEngineer && Within(p, cfg.AcceptanceTests) {
+			return deny("%s is an acceptance test; the software-engineer agent cannot change the tests that judge its work (qa-tester owns them)", p)
 		}
 	}
 	return GuardDecision{}

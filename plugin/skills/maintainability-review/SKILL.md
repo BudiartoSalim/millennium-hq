@@ -44,7 +44,7 @@ which convention and layer the config assigns to a file.
 
 ## Tests
 
-Readability only (the qa-engineer judges whether tests prove the behaviour):
+Readability only (the correctness-reviewer judges whether tests prove the behaviour):
 test names describe behaviour, setup is not repeated beyond reason, a failure
 message says what went wrong, and table-driven or parameterised tests are
 used where cases differ only in data.

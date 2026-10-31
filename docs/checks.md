@@ -3,7 +3,7 @@
 Every finding blocks. A finding is printed as `[gate/rule] file:line: message`.
 This page lists each rule, what it enforces, and how to fix it.
 
-**What runs today:** the `toolchain`, `structure`, `shell`, `code`, `build`,
+**What runs today:** the `toolchain`, `structure`, `shell`, `hygiene`, `build`,
 `tests` and `deps` gates, for Go, TypeScript, Python and shell.
 
 **Tiers.** The **fast** tier is what hooks run on every agent turn; the
@@ -126,7 +126,7 @@ edited; `millennium-code-qc audit` lists it. shellcheck runs with `--norc`, so a
 the script. A library without a shebang or `# shellcheck shell=` directive is
 linted as bash.
 
-## `code`
+## `hygiene`
 
 Runs on the lines a change touched (every line, for a new file or an audit).
 

@@ -153,7 +153,7 @@ func TestDisableValidation(t *testing.T) {
 		want  string
 	}{
 		{"whole gate", DisabledCheck{Check: "structure", Reason: "a long enough reason"}, "must name one rule as gate/rule"},
-		{"no reason", DisabledCheck{Check: "code/secret", Reason: "temp"}, "needs a reason"},
+		{"no reason", DisabledCheck{Check: "hygiene/secret", Reason: "temp"}, "needs a reason"},
 		{"bad name", DisabledCheck{Check: "Code/Secret", Reason: "a long enough reason"}, "must name one rule"},
 	}
 	for _, tt := range tests {

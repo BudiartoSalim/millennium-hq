@@ -23,7 +23,7 @@ func codeConfig(t *testing.T) domain.Config {
 func runCode(t *testing.T, source *fakeSource, facts map[string]domain.FileFacts, base string, files ...domain.ChangedFile) []domain.Finding {
 	t.Helper()
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: facts}}
-	findings, err := NewCode(analyzers, source).Run(t.Context(), port.GateInput{Config: codeConfig(t), Changes: domain.ChangeSet{Base: base, Files: files}})
+	findings, err := NewHygiene(analyzers, source).Run(t.Context(), port.GateInput{Config: codeConfig(t), Changes: domain.ChangeSet{Base: base, Files: files}})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestCodeGateFindsEachKind(t *testing.T) {
 	findings := runCode(t, source, map[string]domain.FileFacts{"risky": risky}, "",
 		added("svc/a.go"), added("config/.env"), added("svc/logo.png"), added("docs/notes.md"))
 	got := rules(findings)
-	want := []string{"code/banned-construct", "code/suppression-without-reason", "code/todo-without-link", "code/secret"}
+	want := []string{"hygiene/banned-construct", "hygiene/suppression-without-reason", "hygiene/todo-without-link", "hygiene/secret"}
 	if strings.Join(sortedCopy(got), ",") != strings.Join(sortedCopy(want), ",") {
 		t.Fatalf("findings %q, want %q", got, want)
 	}
@@ -67,7 +67,7 @@ func TestCodeGateChecksOnlyTouchedLinesOfModifiedFiles(t *testing.T) {
 
 func TestCodeGateBlocksWhatItCannotScan(t *testing.T) {
 	findings := runCode(t, &fakeSource{working: map[string]string{"svc/b.go": "garbage"}}, nil, "", added("svc/missing.go"), added("svc/b.go"))
-	if got := rules(findings); len(got) != 2 || got[0] != "code/scan-failed" || got[1] != "code/scan-failed" {
+	if got := rules(findings); len(got) != 2 || got[0] != "hygiene/scan-failed" || got[1] != "hygiene/scan-failed" {
 		t.Fatalf("findings %q, want two scan-failed", got)
 	}
 }

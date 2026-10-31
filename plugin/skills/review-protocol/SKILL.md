@@ -1,6 +1,6 @@
 ---
 name: review-protocol
-description: The shared rules and JSON output format for millennium's fresh-context reviewers - what to review, what makes a finding, severities, and the report the tech lead triages. Use when reviewing a change as qa-engineer, security-engineer, maintainability-reviewer or performance-reviewer.
+description: The shared rules and JSON output format for millennium's fresh-context reviewers - what to review, what makes a finding, severities, and the report the tech lead triages. Use when reviewing a change as correctness-reviewer, security-engineer, maintainability-reviewer or performance-reviewer.
 user-invocable: false
 ---
 
@@ -52,14 +52,14 @@ End your answer with exactly one JSON object in a fenced `json` block:
 
 ```json
 {
-  "reviewer": "qa-engineer",
+  "reviewer": "correctness-reviewer",
   "mode": "correctness-review",
   "base": "<commit>",
   "head": "<commit>",
   "verdict": "changes-requested",
   "findings": [
     {
-      "id": "QA-1",
+      "id": "CR-1",
       "severity": "high",
       "category": "edge-case",
       "file": "services/cart/internal/domain/total.go",
@@ -76,7 +76,7 @@ End your answer with exactly one JSON object in a fenced `json` block:
 ```
 
 - `verdict` is `approved` only with no critical, high or medium findings.
-- `id` prefixes: `QA` (qa-engineer), `SEC` (security-engineer), `MR`
+- `id` prefixes: `CR` (correctness-reviewer), `SEC` (security-engineer), `MR`
   (maintainability-reviewer), `PERF` (performance-reviewer), `QT` (qa-tester).
 - `category` is a short slug such as `spec`, `edge-case`, `test-quality`,
   `injection`, `authz`, `naming`, `architecture`, `complexity-at-scale`.

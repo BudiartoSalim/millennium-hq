@@ -7,21 +7,21 @@ import (
 	"millennium-code-qc/internal/domain"
 )
 
-// Code checks what any reviewer would flag at a glance, on the lines a
+// Hygiene checks what any reviewer would flag at a glance, on the lines a
 // change touched: credentials in any text file, and, in analysed code, risky
 // constructs, suppressions without a reason, and TODOs without a follow-up.
-type Code struct {
+type Hygiene struct {
 	analyzers map[domain.Language]port.Analyzer
 	source    port.SourceReader
 }
 
-// NewCode returns the code gate.
-func NewCode(analyzers map[domain.Language]port.Analyzer, source port.SourceReader) *Code {
-	return &Code{analyzers: analyzers, source: source}
+// NewHygiene returns the hygiene gate.
+func NewHygiene(analyzers map[domain.Language]port.Analyzer, source port.SourceReader) *Hygiene {
+	return &Hygiene{analyzers: analyzers, source: source}
 }
 
 // Rules lists the rules the gate reports.
-func (*Code) Rules() []port.Rule {
+func (*Hygiene) Rules() []port.Rule {
 	return []port.Rule{
 		{Name: "secret", Disableable: true},
 		{Name: "banned-construct", Disableable: true},
@@ -32,10 +32,10 @@ func (*Code) Rules() []port.Rule {
 }
 
 // Name identifies the gate in findings.
-func (*Code) Name() string { return "code" }
+func (*Hygiene) Name() string { return "hygiene" }
 
 // Run scans every added or modified file.
-func (g *Code) Run(ctx context.Context, in port.GateInput) ([]domain.Finding, error) {
+func (g *Hygiene) Run(ctx context.Context, in port.GateInput) ([]domain.Finding, error) {
 	var findings []domain.Finding
 	for _, file := range in.Changes.Files {
 		if file.Kind == domain.ChangeDeleted {
@@ -50,7 +50,7 @@ func (g *Code) Run(ctx context.Context, in port.GateInput) ([]domain.Finding, er
 	return label(g.Name(), findings), nil
 }
 
-func (g *Code) checkFile(ctx context.Context, in port.GateInput, file domain.ChangedFile) ([]domain.Finding, error) {
+func (g *Hygiene) checkFile(ctx context.Context, in port.GateInput, file domain.ChangedFile) ([]domain.Finding, error) {
 	content, err := g.source.ReadWorking(file.Path)
 	if err != nil {
 		// A file the scan cannot read could hold anything.
@@ -79,7 +79,7 @@ func (g *Code) checkFile(ctx context.Context, in port.GateInput, file domain.Cha
 
 // facts analyses the file when a component that owns it lists its language;
 // other files get only the secret scan.
-func (g *Code) facts(ctx context.Context, cfg domain.Config, p string, content []byte) (domain.FileFacts, bool, error) {
+func (g *Hygiene) facts(ctx context.Context, cfg domain.Config, p string, content []byte) (domain.FileFacts, bool, error) {
 	lang, ok := domain.DetectLanguage(p, content)
 	if !ok {
 		return domain.FileFacts{}, false, nil

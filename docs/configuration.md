@@ -90,7 +90,7 @@ apply to any file.
 | `dependencyPolicy` | no | `strict` | Every new dependency needs a vetting record. |
 | `python.typeCheck` | no | `off` | `mypy` turns on Python type checking; a missing mypy then blocks. |
 | `shell.lint` | no | `shellcheck` | `shellcheck` lints shell scripts and is then required; `off` for a project that cannot install it. |
-| `paths.acceptanceTests` | no | `tests/acceptance` | Where qa-tester's black-box tests live; the engineer agent cannot change them. |
+| `paths.acceptanceTests` | no | `tests/acceptance` | Where qa-tester's black-box tests live; the software-engineer agent cannot change them. |
 | `run.start`, `run.healthUrl` | no | | How qa-tester starts the software. `healthUrl` must be on `localhost` or a loopback address, so a config can never point tests at a shared deployment. |
 
 Component fields:

@@ -20,7 +20,7 @@ fi
 echo "== gofmt"
 unformatted="$(gofmt -l .)"
 if [ -n "$unformatted" ]; then
-	printf 'not gofmt-formatted (run: gofmt -w engine):\n%s\n' "$unformatted" >&2
+	printf 'not gofmt-formatted (run: gofmt -w code-qc):\n%s\n' "$unformatted" >&2
 	exit 1
 fi
 

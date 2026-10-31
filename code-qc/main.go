@@ -135,7 +135,7 @@ func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]
 		gate.NewToolchain(toolpath.Locator{}),
 		gate.NewStructure(analyzers, builtinPacks, repo),
 		gate.NewShell(repo, shelltools.New(repo.Root())),
-		gate.NewCode(analyzers, repo),
+		gate.NewHygiene(analyzers, repo),
 		gate.NewBuild(tools, repo),
 		gate.NewTests(analyzers, builtinPacks, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
 		gate.NewDeps(repo, manifests.Reader{}, approved, registry.New(registry.Public()), tools, time.Now),

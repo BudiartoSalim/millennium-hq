@@ -68,7 +68,7 @@ func TestPreToolUseHook(t *testing.T) {
 	code, out := runHook(t, h, map[string]any{
 		"hook_event_name": "PreToolUse", "cwd": "/repo/sub", "session_id": "s",
 		"tool_name": "Edit", "tool_input": map[string]any{"file_path": "/repo/.millennium/config.json"},
-		"agent_type": "millennium:engineer",
+		"agent_type": "millennium:software-engineer",
 	})
 	if code != 0 || h.gotDir != "/repo/sub" {
 		t.Fatalf("exit %d, deps built in %q", code, h.gotDir)
@@ -77,7 +77,7 @@ func TestPreToolUseHook(t *testing.T) {
 	if specific["permissionDecision"] != "deny" || specific["permissionDecisionReason"] != "protected" {
 		t.Fatalf("output = %v", out)
 	}
-	if h.guard.got.Role != "engineer" || h.guard.got.Tool != "Edit" || !slices.Equal(h.guard.got.Paths, []string{"sub//repo/.millennium/config.json"}) {
+	if h.guard.got.Role != "software-engineer" || h.guard.got.Tool != "Edit" || !slices.Equal(h.guard.got.Paths, []string{"sub//repo/.millennium/config.json"}) {
 		t.Fatalf("guard got %+v", h.guard.got)
 	}
 }
@@ -107,7 +107,7 @@ func TestPreToolUsePaths(t *testing.T) {
 }
 
 func TestStopHook(t *testing.T) {
-	failing := domain.Report{Enabled: true, Results: []domain.GateResult{{Gate: "code", Findings: []domain.Finding{{Gate: "code", Rule: "secret", Message: "a key"}}}}}
+	failing := domain.Report{Enabled: true, Results: []domain.GateResult{{Gate: "hygiene", Findings: []domain.Finding{{Gate: "hygiene", Rule: "secret", Message: "a key"}}}}}
 	tests := []struct {
 		name    string
 		verdict usecase.StopVerdict
@@ -115,7 +115,7 @@ func TestStopHook(t *testing.T) {
 		want    string
 	}{
 		{"pass", usecase.StopVerdict{}, "", ""},
-		{"block", usecase.StopVerdict{Block: true, Attempt: 1, Report: failing}, "decision", "[code/secret]"},
+		{"block", usecase.StopVerdict{Block: true, Attempt: 1, Report: failing}, "decision", "[hygiene/secret]"},
 		{"escalate", usecase.StopVerdict{Escalate: true, Attempt: 4, Report: failing}, "systemMessage", "the work is NOT done"},
 		{"problem", usecase.StopVerdict{Block: true, Attempt: 2, Problem: "config removed"}, "decision", "BLOCKED: config removed"},
 	}

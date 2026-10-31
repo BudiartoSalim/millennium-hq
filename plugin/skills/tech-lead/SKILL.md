@@ -34,7 +34,7 @@ In this skill, `millennium-code-qc` means the engine command
 ## 0. Preflight
 
 1. `millennium-code-qc config validate`. If the repository is not opted in, stop and
-   suggest `/millennium:init` (new project) or `/millennium:adopt` (existing
+   suggest `/millennium:init-project` (new project) or `/millennium:adopt-project` (existing
    code); do not lead without gates.
 2. `git status`: start from a clean tree. If the user has uncommitted work,
    ask whether to commit, stash or include it.
@@ -101,7 +101,7 @@ Show the plan to the user before dispatching.
    `worktree.baseRef: "head"`), so uncommitted work is invisible to them.
    Commit the spec and any contract, then dispatch.
 2. Start every independent package in the same message: one
-   `millennium:engineer` Agent call per package, each in the background. Give
+   `millennium:software-engineer` Agent call per package, each in the background. Give
    each engineer only its package: the spec slice, its paths, the contract,
    and the spec path for reference. Not other packages' details.
 3. In the same message, start `millennium:qa-tester` in **acceptance** mode
@@ -144,7 +144,7 @@ commit, and nothing about how the code came to be:
 
 | Reviewer | When |
 |---|---|
-| `millennium:qa-engineer` (correctness-review) | always |
+| `millennium:correctness-reviewer` (correctness-review) | always |
 | `millennium:maintainability-reviewer` | always |
 | `millennium:qa-tester`, acceptance (run the tests) and exploratory | always |
 | `millennium:security-engineer`, security-review | when Risk names a trust boundary, or the diff adds input handling, auth, crypto, file or network access |
@@ -159,12 +159,12 @@ every finding in the spec's Decision log:
 
 ```
 | id | from | severity | finding | disposition | reason |
-| QA-1 | qa-engineer | high | empty cart total is NaN | fix | AC-3 |
+| CR-1 | correctness-reviewer | high | empty cart total is NaN | fix | AC-3 |
 | MR-2 | maintainability | low | helper name | reject | matches the package's existing naming |
 ```
 
 - **fix**: send it to the owning engineer. Every bug fix comes with a
-  regression test that fails without the fix; a qa-engineer proof test can be
+  regression test that fails without the fix; a correctness-reviewer proof test can be
   that test.
 - **defer**: only with a reason and a follow-up (an issue link). Critical or
   high security findings are never deferred without the user's explicit

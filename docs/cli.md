@@ -76,8 +76,8 @@ audit against.
 
 ## `millennium-code-qc discover`
 
-Inspects a repository that has no config yet, for `/millennium:adopt` and
-`/millennium:init`, and drafts a proposal:
+Inspects a repository that has no config yet, for `/millennium:adopt-project` and
+`/millennium:init-project`, and drafts a proposal:
 
 ```
 $ millennium-code-qc discover

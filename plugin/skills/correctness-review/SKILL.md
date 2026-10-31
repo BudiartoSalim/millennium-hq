@@ -1,13 +1,13 @@
 ---
 name: correctness-review
-description: Correctness review of a change against its spec - acceptance criteria met, edge cases, error paths, state and concurrency, and whether the tests actually prove the behaviour - with failing tests as proof. Use as the qa-engineer on every integrated change.
+description: Correctness review of a change against its spec - acceptance criteria met, edge cases, error paths, state and concurrency, and whether the tests actually prove the behaviour - with failing tests as proof. Use as the correctness-reviewer on every integrated change.
 user-invocable: false
 ---
 
 # Correctness review
 
 Follow the `review-protocol` skill for scope, findings and output; this skill
-says what to look for. Your `id` prefix is `QA`.
+says what to look for. Your `id` prefix is `CR`.
 
 ## 1. The spec, criterion by criterion
 

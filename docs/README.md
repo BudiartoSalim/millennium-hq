@@ -54,8 +54,8 @@ install Git for Windows: the hooks run through Git Bash.
    absolute path. Without an engine every hook blocks with a message saying
    so.
 
-3. **Opt a repository in.** In the repository, run `/millennium:adopt` for
-   existing code or `/millennium:init` for a new project. The agent looks at
+3. **Opt a repository in.** In the repository, run `/millennium:adopt-project` for
+   existing code or `/millennium:init-project` for a new project. The agent looks at
    the project, drafts `millennium.proposal.json` with you, and shows what the
    rules would find today. Then you apply it yourself, with the command the
    agent gives you (Claude Code's `!` prefix works):
