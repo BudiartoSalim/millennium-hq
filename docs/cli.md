@@ -1,16 +1,16 @@
 # Commands
 
 ```
-millennium gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
-millennium audit [--path PATH] [--proposal FILE] [--tier fast|full] [--format text|json]
-millennium discover [--format text|json]
-millennium scope --base REV --allow PATTERN [--allow PATTERN ...] [--format text|json]
-millennium hook
-millennium config validate
-millennium config explain PATH
-millennium config apply [--local] [--confirm DIGEST] [PROPOSAL]
-millennium config export [--local]
-millennium version
+millennium-code-qc gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
+millennium-code-qc audit [--path PATH] [--proposal FILE] [--tier fast|full] [--format text|json]
+millennium-code-qc discover [--format text|json]
+millennium-code-qc scope --base REV --allow PATTERN [--allow PATTERN ...] [--format text|json]
+millennium-code-qc hook
+millennium-code-qc config validate
+millennium-code-qc config explain PATH
+millennium-code-qc config apply [--local] [--confirm DIGEST] [PROPOSAL]
+millennium-code-qc config export [--local]
+millennium-code-qc version
 ```
 
 Run them anywhere inside the repository. Paths are relative to the current
@@ -28,7 +28,7 @@ treat 1 as a non-blocking error, so a check that could not run must not look
 like one that only warned. Any caller that treats non-zero as failure (a git
 hook, a CI step) works unchanged.
 
-## `millennium gate`
+## `millennium-code-qc gate`
 
 Checks a change: everything that differs from a base revision, staged,
 unstaged and untracked files alike. This is what the plugin's hooks and the
@@ -51,14 +51,14 @@ Existing code is judged leniently, new code strictly:
 Example:
 
 ```
-$ millennium gate
-millennium: BLOCKED (findings: 2, changed files: 3)
+$ millennium-code-qc gate
+millennium-code-qc: BLOCKED (findings: 2, changed files: 3)
   by rule: structure/function-length 1, structure/layer-import 1
   [structure/function-length] internal/application/usecase/sync.go:40: Sync.Execute has a length in lines of 72; the limit is 50
   [structure/layer-import] internal/domain/user.go:5: domain code must not import application code ("svc/internal/application/port"); domain may import no other layer
 ```
 
-## `millennium audit`
+## `millennium-code-qc audit`
 
 Checks existing code instead of a change, holding every file to the full
 rules, with no allowance for code that was already over a limit. Use it to plan
@@ -74,14 +74,14 @@ a refactor: the report's "by rule" line shows where the work is.
 An audit needs a config, or a proposal; without either there are no rules to
 audit against.
 
-## `millennium discover`
+## `millennium-code-qc discover`
 
 Inspects a repository that has no config yet, for `/millennium:adopt` and
 `/millennium:init`, and drafts a proposal:
 
 ```
-$ millennium discover
-millennium discover: 2 modules
+$ millennium-code-qc discover
+millennium-code-qc discover: 2 modules
   services/game/api (go.mod): go 42 files, 12 test files
     clean-architecture: 30 of 30 go files in its layers
   services/game/web (package.json): typescript 18 files, React
@@ -101,7 +101,7 @@ It reads file names and `package.json` only, runs nothing from the
 repository, and writes nothing. `--format json` prints the modules, the
 counts and the draft (`proposal`) as JSON.
 
-## `millennium scope`
+## `millennium-code-qc scope`
 
 Checks that a branch stays inside its work package. The tech lead runs it in
 an engineer's worktree before merging, so it holds however the files were
@@ -118,18 +118,18 @@ written.
 | `scope/acceptance-test-changed` | The branch changes an acceptance test. |
 | `scope/protected-path` | The branch changes `.millennium/` or the project's Claude settings. |
 
-## `millennium hook`
+## `millennium-code-qc hook`
 
 Handles one Claude Code hook event from stdin. The plugin's hooks call it; see
 [Hooks](hooks.md). It exits 0 with its answer on stdout, and 2 when it cannot
 decide, which blocks.
 
-## `millennium config validate`
+## `millennium-code-qc config validate`
 
 Validates `.millennium/config.json` and reports every problem at once. Exit
 status 2 when the config is invalid or missing.
 
-## `millennium config apply`
+## `millennium-code-qc config apply`
 
 Applies a proposal (default `millennium.proposal.json` at the repository
 root), a new config, dependency approvals or both, after showing what it
@@ -142,18 +142,18 @@ and [Approving a dependency](configuration.md#approving-a-dependency).
 | `--local` | Apply as this machine's local config, outside the repository. |
 | `--confirm DIGEST` | Confirm without a terminal, with the digest a previous run printed. A digest that does not match the proposal is refused. |
 
-## `millennium config export`
+## `millennium-code-qc config export`
 
 Prints the config (`--local`: the local config) as a proposal on stdout.
 
-## `millennium config explain PATH`
+## `millennium-code-qc config explain PATH`
 
 Shows which rules apply to one file: whether it is excluded, its language, the
 component that owns it and that component's root, its layer under each
 convention, and the limits. Use it when a finding is surprising.
 
 ```
-$ millennium config explain services/game/api/internal/domain/server.go
+$ millennium-code-qc config explain services/game/api/internal/domain/server.go
 services/game/api/internal/domain/server.go
   language:  go
   component: services/*/api (root "services/game/api")

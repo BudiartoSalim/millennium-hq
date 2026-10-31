@@ -6,7 +6,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$root/engine"
+cd "$root/code-qc"
 
 # The TypeScript analyzer's tests skip without their fixture, and a skip is
 # not a pass: refuse to start rather than report an incomplete run as done.
@@ -41,7 +41,7 @@ bash "$root/scripts/test-launcher.sh"
 echo "== self-audit"
 bin_dir="$(mktemp -d)"
 trap 'rm -rf "$bin_dir"' EXIT
-go build -o "$bin_dir/millennium" .
-(cd "$root" && "$bin_dir/millennium" audit)
+go build -o "$bin_dir/millennium-code-qc" .
+(cd "$root" && "$bin_dir/millennium-code-qc" audit)
 
 echo "verify: all checks passed"

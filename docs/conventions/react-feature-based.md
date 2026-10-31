@@ -61,10 +61,10 @@ Override any layer's paths per component, relative to the component root:
 
 Each `*` in a `features` path marks where one feature ends: with
 `src/modules/*`, `src/modules/billing` and `src/modules/profile` are separate
-features. `millennium config explain <file>` shows the layer of any file.
+features. `millennium-code-qc config explain <file>` shows the layer of any file.
 
 ## Adopting it in existing code
 
 As with every convention, only imports a change adds are held to the layer
 rules, so an existing cross-feature import does not block an unrelated
-change. `millennium audit --path <component>` lists them all for a refactor.
+change. `millennium-code-qc audit --path <component>` lists them all for a refactor.

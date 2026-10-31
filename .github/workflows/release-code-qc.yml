@@ -1,0 +1,96 @@
+# Publishes the engine binaries for a tag code-qc/vX.Y.Z, and only when a
+# rebuild of the tag matches the SHA-256 hashes in plugin/code-qc.lock, which a
+# reviewed change put there before the tag existed. So every published binary
+# is provably built from reviewed source. See docs/releasing.md.
+#
+# No third-party actions: the tag is cloned with git, and Go comes from the
+# official tarball, checked against a pinned SHA-256.
+name: release-code-qc
+
+on:
+  push:
+    tags: ["code-qc/v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-code-qc
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: go1.26.10
+  GO_SHA256: ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tag
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="Authorization: Basic $auth" \
+            git clone --quiet --depth 1 --branch "$TAG" "https://github.com/$REPO.git" src
+      - name: Install Go
+        run: |
+          set -euo pipefail
+          curl -fsSL --proto '=https' -o "$RUNNER_TEMP/go.tgz" "https://dl.google.com/go/$GO_VERSION.linux-amd64.tar.gz"
+          echo "$GO_SHA256  $RUNNER_TEMP/go.tgz" | sha256sum -c -
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/go.tgz"
+          echo "$RUNNER_TEMP/go/bin" >>"$GITHUB_PATH"
+      - name: Test the engine
+        working-directory: src/code-qc
+        run: go vet ./... && go test -count=1 ./...
+      - name: Rebuild and compare with the lock
+        working-directory: src
+        env:
+          TAG: ${{ github.ref_name }}
+        run: bash scripts/release-build.sh "${TAG#code-qc/v}" --check
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the tag
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="Authorization: Basic $auth" \
+            git clone --quiet --depth 1 --branch "$TAG" "https://github.com/$REPO.git" src
+      - name: Install Go
+        run: |
+          set -euo pipefail
+          curl -fsSL --proto '=https' -o "$RUNNER_TEMP/go.tgz" "https://dl.google.com/go/$GO_VERSION.linux-amd64.tar.gz"
+          echo "$GO_SHA256  $RUNNER_TEMP/go.tgz" | sha256sum -c -
+          tar -C "$RUNNER_TEMP" -xzf "$RUNNER_TEMP/go.tgz"
+          echo "$RUNNER_TEMP/go/bin" >>"$GITHUB_PATH"
+      - name: Rebuild and compare with the lock
+        working-directory: src
+        env:
+          TAG: ${{ github.ref_name }}
+        run: bash scripts/release-build.sh "${TAG#code-qc/v}" --check
+      - name: Publish the release
+        working-directory: src
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" dist/millennium-code-qc-* dist/SHA256SUMS --repo "$REPO" --verify-tag \
+            --title "millennium-code-qc ${TAG#code-qc/}" \
+            --notes "Engine binaries rebuilt from $TAG and verified against plugin/code-qc.lock. SHA-256 sums are in SHA256SUMS; the launcher checks them before every run."

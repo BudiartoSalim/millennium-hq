@@ -10,7 +10,7 @@ Follow the `review-protocol` skill for scope, findings and output. Your `id`
 prefix is `MR`. The gates already enforce function length, nesting,
 complexity, layer imports and formatting; judge what they cannot.
 
-Use `"${CLAUDE_PLUGIN_ROOT}/scripts/millennium" config explain <file>` to see
+Use `"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc" config explain <file>` to see
 which convention and layer the config assigns to a file.
 
 ## Architecture and conventions

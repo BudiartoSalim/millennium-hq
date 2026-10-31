@@ -4,7 +4,7 @@
   "components": [
     {
       "paths": [
-        "engine"
+        "code-qc"
       ],
       "languages": [
         "go"
@@ -15,7 +15,7 @@
     },
     {
       "paths": [
-        "engine/internal/infrastructure/helperanalyzer/scripts"
+        "code-qc/internal/infrastructure/helperanalyzer/scripts"
       ],
       "languages": [
         "python"

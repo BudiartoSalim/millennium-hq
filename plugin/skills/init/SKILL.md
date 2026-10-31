@@ -9,15 +9,15 @@ disable-model-invocation: true
 
 Mode requested: $ARGUMENTS
 
-You draft; the user decides and applies. In this skill, `millennium` means
-`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium"`.
+You draft; the user decides and applies. In this skill, `millennium-code-qc` means
+`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc"`.
 
 ## 1. Check where you are
 
 - `git rev-parse --show-toplevel`: millennium works per git repository. If
   this is not one, ask whether to `git init`.
-- `millennium config validate`: if a config exists, stop and say so.
-- `millennium discover`: if it finds substantial code (more than a handful of
+- `millennium-code-qc config validate`: if a config exists, stop and say so.
+- `millennium-code-qc discover`: if it finds substantial code (more than a handful of
   files), suggest `/millennium:adopt` instead, which maps conventions onto an
   existing layout.
 
@@ -65,7 +65,7 @@ where they apply:
 Validate the draft by dry-running it:
 
 ```
-millennium audit --proposal millennium.proposal.json --tier fast
+millennium-code-qc audit --proposal millennium.proposal.json --tier fast
 ```
 
 On an empty project this mostly confirms the toolchain: a `toolchain/*`
@@ -89,10 +89,10 @@ code goes through the normal workflow and its gates.
 Give the user the command to run themselves:
 
 ```
-millennium config apply                # committed
-millennium config apply --local        # local
+millennium-code-qc config apply                # committed
+millennium-code-qc config apply --local        # local
 ```
 
 It shows what it writes and asks them to confirm. Afterwards a new session
-picks up the hooks, and `/millennium:lead <task>` runs the first feature
+picks up the hooks, and `/millennium:tech-lead <task>` runs the first feature
 through the full workflow.

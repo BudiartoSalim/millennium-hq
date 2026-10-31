@@ -1,10 +1,10 @@
 # Local engine builds.
-/engine/millennium
-/engine/millennium.exe
+/code-qc/millennium-code-qc
+/code-qc/millennium-code-qc.exe
 /dist/
 
-# Proposals are drafts for `millennium config apply`, never committed.
+# Proposals are drafts for `millennium-code-qc config apply`, never committed.
 millennium.proposal.json
 
 # Engine binaries the launcher downloads when the plugin runs in place.
-/plugin/.engine/
+/plugin/.code-qc/

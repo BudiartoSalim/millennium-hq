@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "millennium project config",
-  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, react-feature-based needs typescript in its component, mypy needs python, the most specific component wins). engine/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
+  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, react-feature-based needs typescript in its component, mypy needs python, the most specific component wins). code-qc/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version"],

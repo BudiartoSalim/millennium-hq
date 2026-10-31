@@ -14,8 +14,8 @@ Agents cannot write records; you draft them into a proposal and the user
 applies it. A record is a claim that someone checked: never draft one for a
 check you did not do.
 
-In this skill, `millennium` means
-`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium"`.
+In this skill, `millennium-code-qc` means
+`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc"`.
 
 ## 1. Is it needed?
 
@@ -36,7 +36,7 @@ Add it in a worktree or scratch copy, never by hand-editing a lockfile:
   requirements with hashes (`pip-compile --generate-hashes`,
   `uv pip compile --generate-hashes`)
 
-Then `millennium gate --tier fast`: its `deps/unapproved-dependency` findings
+Then `millennium-code-qc gate --tier fast`: its `deps/unapproved-dependency` findings
 are the complete list of package versions to vet, and `deps/install-script`
 names any that run install scripts.
 
@@ -96,7 +96,7 @@ Tell the user what you recommend and why, list any check that failed or you
 could not do, and give them the command:
 
 ```
-millennium config apply
+millennium-code-qc config apply
 ```
 
 They run it themselves (from their terminal, or Claude Code's `!` prefix); it

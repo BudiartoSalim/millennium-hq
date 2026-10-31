@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium\" hook",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 30,
             "onFailure": "block"
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium\" hook",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 600
           }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium\" hook",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 600
           }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium\" hook",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 120
           }

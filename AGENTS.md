@@ -6,10 +6,12 @@ workflow, enforcement model, gate engine, conventions and build order. Read it
 before any structural change, and update it in the same change when a decision
 moves.
 
+In this repository, agents may change .millennium/ when the user asks. The proposal rule applies to projects using the plugin.
+
 ## Layout
 
 ```
-engine/                       gate engine, Go standard library only
+code-qc/                      millennium-code-qc, the code quality engine; Go standard library only
   main.go                     composition root ONLY
   internal/domain/            config, components, patterns, packs and layer
                               rules, limits, facts, verdict
@@ -27,8 +29,8 @@ plugin/                       what users install
   .claude-plugin/plugin.json  the plugin manifest
   agents/, skills/            the agents and the skills they preload (see docs/agents.md)
   hooks/hooks.json            hook wiring; every hook runs the launcher
-  scripts/millennium          the launcher: verifies and runs the locked engine release
-  engine.lock                 engine version and per-platform SHA-256, written by release-build.sh
+  scripts/millennium-code-qc          the launcher: verifies and runs the locked engine release
+  code-qc.lock                 engine version and per-platform SHA-256, written by release-build.sh
 .claude-plugin/marketplace.json  this repository as the millennium-hq marketplace
 .github/workflows/            the engine release workflow (docs/releasing.md)
 schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
@@ -38,6 +40,12 @@ scripts/release-build.sh      reproducible release builds and the engine lock
 scripts/test-launcher.sh      the launcher's tests (verify.sh runs them)
 docs/                         user documentation; docs/design.md is the design
 ```
+
+Names follow one rule: `millennium` is the product (the plugin, its skills,
+`.millennium/`, `millennium.proposal.json`, `millennium:allow`), and
+`millennium-code-qc` is this one tool (its command, `code-qc/`, Go module,
+launcher, `code-qc.lock`, `code-qc/v*` tags). "The engine" in the docs means
+`millennium-code-qc`. See Naming in `docs/design.md`.
 
 ## Non-negotiables
 

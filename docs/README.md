@@ -1,13 +1,14 @@
 # millennium documentation
 
 millennium makes quality and security the default outcome of agent-driven
-development. Rules that can be checked mechanically are enforced by a gate
-engine the agents cannot talk their way past; judgement calls go to
-fresh-context reviewer agents.
+development. Rules that can be checked mechanically are enforced by
+`millennium-code-qc`, a code quality engine the agents cannot talk their way
+past; judgement calls go to fresh-context reviewer agents. These docs call it
+"the engine".
 
 **Status: early development.** Everything described here is built: the
 gate engine, the hooks, `config apply`, the agents and skills, and the
-release pipeline. The first engine release (`engine/v0.1.0`) has not been
+release pipeline. The first engine release (`code-qc/v0.1.0`) has not been
 published yet; until it is, build the engine yourself (step 2 below).
 
 ## Guides
@@ -42,14 +43,14 @@ install Git for Windows: the hooks run through Git Bash.
 
 2. **The engine.** Once a release exists, the plugin's launcher downloads the
    engine for your platform on first use and refuses it unless its SHA-256
-   matches the plugin's `engine.lock`; nothing to do. Before the first
+   matches the plugin's `code-qc.lock`; nothing to do. Before the first
    release, build it from a clone of this repository (Go 1.25 or newer):
 
    ```
-   cd engine && go build -o millennium .
+   cd code-qc && go build -o millennium-code-qc .
    ```
 
-   and start Claude Code with `MILLENNIUM_ENGINE` set to the binary's
+   and start Claude Code with `MILLENNIUM_CODE_QC` set to the binary's
    absolute path. Without an engine every hook blocks with a message saying
    so.
 
@@ -60,7 +61,7 @@ install Git for Windows: the hooks run through Git Bash.
    agent gives you (Claude Code's `!` prefix works):
 
    ```
-   ! "<plugin>/scripts/millennium" config apply
+   ! "<plugin>/scripts/millennium-code-qc" config apply
    ```
 
    It shows every file it writes and every way it loosens the rules, and asks
@@ -72,7 +73,7 @@ install Git for Windows: the hooks run through Git Bash.
    QA, final gate):
 
    ```
-   /millennium:lead add a cart total endpoint that applies the active discount
+   /millennium:tech-lead add a cart total endpoint that applies the active discount
    ```
 
    See [Agents and skills](agents.md).
@@ -81,10 +82,10 @@ install Git for Windows: the hooks run through Git Bash.
    (put a built binary on your `PATH`, or use the launcher's full path):
 
    ```
-   millennium gate                     # this change, against HEAD
-   millennium gate --base main         # a whole branch
-   millennium audit --path services/game-control
-   millennium config explain services/game-control/api/internal/domain/server.go
+   millennium-code-qc gate                     # this change, against HEAD
+   millennium-code-qc gate --base main         # a whole branch
+   millennium-code-qc audit --path services/game-control
+   millennium-code-qc config explain services/game-control/api/internal/domain/server.go
    ```
 
    See [Commands](cli.md) and [Checks](checks.md).

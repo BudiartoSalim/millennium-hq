@@ -13,8 +13,8 @@ the same rule in the shell. You may Read documents by path (specs, READMEs,
 API descriptions such as `openapi.yaml`) and everything under the acceptance
 test directory.
 
-In this skill, `millennium` means
-`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium"`.
+In this skill, `millennium-code-qc` means
+`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc"`.
 
 ## Starting the software
 

@@ -10,7 +10,7 @@ are Claude Code's adapter.
 Run the tech lead in your main session:
 
 ```
-/millennium:lead add a cart total endpoint that applies the active discount
+/millennium:tech-lead add a cart total endpoint that applies the active discount
 ```
 
 The lead writes a spec with you, splits the work into packages for parallel
@@ -31,7 +31,7 @@ The workflow, in order:
    engineers at once unless you agree to more.
 4. **Engineers** in parallel, each in its own worktree; at the same time
    qa-tester writes the acceptance tests from the spec.
-5. **Integration**: per package `millennium scope` against its paths and the
+5. **Integration**: per package `millennium-code-qc scope` against its paths and the
    full gate, then a merge; then the full gate on the integrated branch.
 6. **Smoke test** by qa-tester.
 7. **Review panel** in parallel: correctness and maintainability always;
@@ -39,7 +39,7 @@ The workflow, in order:
 8. **Triage**: every finding fixed (with a regression test), deferred (with a
    follow-up) or rejected (with evidence), in the spec's decision log; at most
    three fix rounds before the lead comes back to you.
-9. **Final gate**: `millennium gate --base <base> --tier full --require-config`
+9. **Final gate**: `millennium-code-qc gate --base <base> --tier full --require-config`
    and the acceptance tests.
 10. **Summary**: changes, criteria mapped to tests, the decision log, anything
     disabled or waived, and proposals waiting for you.
@@ -74,9 +74,9 @@ The workflow, in order:
 
 | Skill | Invoked by | What it is |
 |---|---|---|
-| `lead` | you (`/millennium:lead <task>`), the tech-lead agent | The tech-lead playbook above. |
+| `tech-lead` | you (`/millennium:tech-lead <task>`), the tech-lead agent | The tech-lead playbook above. |
 | `init` | you (`/millennium:init [committed\|local]`) | Sets up a new project: languages, conventions, a draft config, an optional layout skeleton. |
-| `adopt` | you (`/millennium:adopt [committed\|local]`) | Onboards existing code: `millennium discover`, convention matching, a dry-run audit, the draft config. |
+| `adopt` | you (`/millennium:adopt [committed\|local]`) | Onboards existing code: `millennium-code-qc discover`, convention matching, a dry-run audit, the draft config. |
 | `vet-dependency` | you (`/millennium:vet-dependency npm express@4.21.2`), the lead | Vets a dependency and drafts its approval records into `millennium.proposal.json`. |
 | `engineering-standards` | engineer | Scope discipline, conventions, tests, dependencies, working with the gates. |
 | `review-protocol` | every reviewer | What a finding is, severities, and the JSON report format. |
@@ -129,6 +129,6 @@ verdict is `approved` only without critical, high or medium findings.
 ## The engine from an agent's shell
 
 The plugin has no `bin/` directory (claude.ai and Cowork refuse plugins that
-have one), so `millennium` is not on agents' `PATH`. The session-start
+have one), so `millennium-code-qc` is not on agents' `PATH`. The session-start
 context names the launcher's full path, and the skills use
-`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium"`, which Claude Code fills in.
+`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc"`, which Claude Code fills in.

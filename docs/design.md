@@ -18,6 +18,27 @@ reviewers whose findings the tech lead must explicitly dispose of.
 It generalises the per-repo setup in `server-scripts` (CLAUDE.md, `.claude/rules`,
 hooks, `/vet-dependency`) into something any project can install.
 
+## Naming
+
+`millennium` is the product; `millennium-code-qc` is one tool inside it, the
+code quality engine (`code-qc/`). The split leaves room for checks that are not
+about code: a later tool sits beside it as `millennium-<name>`, with its own
+directory, lock and tags, under the same plugin and config.
+
+| Names the product | Names this tool |
+|---|---|
+| Plugin `millennium`, marketplace `millennium-hq` | Command `millennium-code-qc`, Go module of the same name |
+| Skills `/millennium:*`, agents `millennium:*` | Directory `code-qc/`, launcher `plugin/scripts/millennium-code-qc` |
+| `.millennium/`, `millennium.proposal.json` | `plugin/code-qc.lock`, tags `code-qc/v*`, release files `millennium-code-qc-<os>-<arch>` |
+| `millennium:allow`, `MILLENNIUM_LOCAL_DIR`, `MILLENNIUM_STATE_DIR` | `MILLENNIUM_CODE_QC` |
+
+The engine also holds what is not strictly code quality: the `deps` gate, and
+the agent enforcement and rule changes (`hook`, `config apply`, `scope`). They
+stay in it until a second tool exists and shows what they must share.
+
+Skills and agents are named for who or what they are, not a bare role word
+that a sibling could also claim: `tech-lead`, not `lead`.
+
 ## Principles
 
 1. **Gate what can be gated.** Every rule is labelled either *gated* (a
@@ -26,8 +47,10 @@ hooks, `/vet-dependency`) into something any project can install.
 2. **Fail closed.** A missing tool, an unreadable config, or a network check that
    could not run is a block, never a silent pass.
 3. **Agents propose, humans decide.** No agent can change the rules it is
-   checked against. Config and other protected files change only through a
-   command the user runs.
+   checked against in a project using the plugin: config and other protected
+   files change only through a command the user runs. This repository is the
+   exception: here agents may change `.millennium/` when the user asks (see
+   `AGENTS.md`).
 4. **Thin and portable.** Users install Claude Code, git, and the toolchains of
    the languages they already use. Nothing else is required.
 5. **Strict supply chain.** The `server-scripts` stance (stdlib first, vet every
@@ -49,7 +72,7 @@ hooks, `/vet-dependency`) into something any project can install.
   React, required unit tests.
 - Focus: the agent workflow and the in-session gates.
 - **Out of scope:** CI templates and git hooks. The engine is a plain CLI, so a
-  project that wants CI enforcement can call `millennium gate --require-config`
+  project that wants CI enforcement can call `millennium-code-qc gate --require-config`
   from its own pipeline; that is the user's choice and not something v1 ships
   or supports. The tech lead's final CI-equivalent run is the last gate.
 
@@ -67,7 +90,7 @@ hooks, `/vet-dependency`) into something any project can install.
 
 Notes:
 
-- **The tech lead is a skill, not a mandatory layer.** `/millennium:lead <task>`
+- **The tech lead is a skill, not a mandatory layer.** `/millennium:tech-lead <task>`
   loads it into the main session, so the user sees and can overrule every
   triage decision. The same skill can be preloaded by a `tech-lead` agent for
   background runs. Sessions that do not invoke it work normally; the gates
@@ -208,7 +231,7 @@ Agents can draft configuration but never make it effective.
 /millennium:init or /millennium:adopt
   -> the engine discovers the project; an agent drafts millennium.proposal.json
      (an unprotected, git-ignored file that does nothing by itself)
-  -> the user runs: millennium config apply
+  -> the user runs: millennium-code-qc config apply
        validates the proposal, shows the diff, and lists every change that
        loosens the rules (a convention removed, a check disabled, a language
        dropped) before asking for confirmation
@@ -237,7 +260,7 @@ their reasons, so nothing is silently off:
 
 1. **Mode:** committed (`.millennium/config.json` in the repo, for projects the
    user owns) or local (see below).
-2. **Discovery (engine, deterministic):** `millennium discover` reports module
+2. **Discovery (engine, deterministic):** `millennium-code-qc discover` reports module
    roots (`go.mod`, `package.json`, `pyproject.toml`, `setup.py`,
    `requirements.txt`), code and test files per language, React use, code
    outside any module, and how many files each pack's default layout already
@@ -247,9 +270,9 @@ their reasons, so nothing is silently off:
    onto a differing layout with `layers` overrides, or leaves a module without
    a convention, with a reason. (Drafting whole custom packs, an import graph,
    and running a project's own lint commands through the gate are not built.)
-4. **Review and apply:** `millennium audit --proposal <file>` shows what the
+4. **Review and apply:** `millennium-code-qc audit --proposal <file>` shows what the
    rules find in today's code without applying anything; the user reviews it
-   and runs `millennium config apply`. `/millennium:init` is the same flow for
+   and runs `millennium-code-qc config apply`. `/millennium:init` is the same flow for
    a new project, with an optional layout skeleton.
 
 **Existing code does not block adoption (built).** Gates look at what a change
@@ -257,7 +280,7 @@ touches: new code meets every rule, existing functions that are modified must
 not get worse (longer, deeper, more complex), and only new imports are held to
 the layer rules.
 
-**Auditing existing code (built).** `millennium audit [--path PATH]` runs every
+**Auditing existing code (built).** `millennium-code-qc audit [--path PATH]` runs every
 check over existing code with no allowance for code that was already over a
 limit, and summarises findings per rule. It is the starting point for
 refactoring: the tech lead turns the report into work packages for parallel
@@ -271,8 +294,8 @@ user's machine at
 `<repo-key>` derives from git's common directory, so every worktree of a repo
 (including parallel engineers') resolves to the same config. A committed config
 always wins over a local one. Agents cannot write there; only the user creates
-or changes it, with `millennium config apply --local`. Local mode is not
-shared across machines; `millennium config export --local` and applying the
+or changes it, with `millennium-code-qc config apply --local`. Local mode is not
+shared across machines; `millennium-code-qc config export --local` and applying the
 export elsewhere move it.
 
 ## Monorepos: components (built)
@@ -281,7 +304,7 @@ Agreed over per-directory configs: one root file keeps the whole policy in one
 place to review and protect, and a pattern such as `services/*/api` covers new
 services automatically, where a forgotten per-directory file would leave a new
 service unchecked. Nested overrides can be added later without breaking
-existing configs. `millennium config explain <file>` shows which component,
+existing configs. `millennium-code-qc config explain <file>` shows which component,
 layer and limits apply to any file.
 
 A config can list components, each mapping paths to languages, conventions and,
@@ -427,7 +450,7 @@ pointed at a shared deployment.
 - Reproducible release builds (`CGO_ENABLED=0`, `-trimpath`, pinned Go version)
   for linux/darwin/windows on amd64/arm64, from this repository; no separate
   release repository.
-- The engine has its own tags (`engine/v0.1.0`), so a plugin release does not
+- The engine has its own tags (`code-qc/v0.1.0`), so a plugin release does not
   force an engine release.
 - The shipped plugin carries a lock file with the engine version and the
   SHA-256 of each platform's binary. A launcher script detects the OS and
@@ -439,7 +462,7 @@ pointed at a shared deployment.
   fails if any binary's hash differs from the committed one, which also proves
   every release was built from the reviewed source.
 - The release workflow has minimal permissions (write only in the publishing
-  job), actions pinned to full commit SHAs, and tag protection on `engine/v*`;
+  job), actions pinned to full commit SHAs, and tag protection on `code-qc/v*`;
   build-provenance attestation is optional.
 - Users with Go installed can build from source instead.
 - Binaries stay out of the plugin's top-level `bin/`, which claude.ai and Cowork
@@ -529,9 +552,9 @@ millennium-hq/
     agents/                      thin agent definitions that preload skills
     hooks/hooks.json             hook wiring, all calling the launcher
     skills/                      portable core (Agent Skills format)
-    scripts/millennium           launcher: verifies and runs the locked engine
-    engine.lock                  engine version and per-platform SHA-256
-  engine/                        Go source of the gate engine (stdlib only);
+    scripts/millennium-code-qc           launcher: verifies and runs the locked engine
+    code-qc.lock                  engine version and per-platform SHA-256
+  code-qc/                        Go source of the gate engine (stdlib only);
                                  convention packs and the TS and Python helpers
                                  are embedded in it, so they cannot be edited
                                  on disk
@@ -600,26 +623,27 @@ or sh shebang (such as `bin/*`).
   `requirements*.txt`. `pnpm-lock.yaml`, `yarn.lock`, `uv.lock`,
   `poetry.lock` and `Pipfile.lock` get pinning checks only, no approvals.
 - **Shell scripts without an extension** are found by their shebang in the
-  gates, but `millennium discover` counts files by extension only.
+  gates, but `millennium-code-qc discover` counts files by extension only.
 
-## Pending your approval
+## Approved dependencies
 
-- **TypeScript test fixture.** The TypeScript analyzer's tests need a
-  TypeScript compiler, so `typescript@6.0.3` is a test-only fixture pinned in
-  `scripts/fixtures/typescript/package-lock.json` (Microsoft, Apache-2.0, no
-  dependencies, no install scripts, published 2026-04-16). It is installed
-  outside the repository by `scripts/setup-fixtures.sh` and never shipped.
-  The repository's own `deps` gate blocks on it (`deps/unapproved-dependency`)
-  until you apply the approval drafted in `millennium.proposal.json`:
-  `millennium config apply` from the repository root.
+- **`typescript@6.0.3`, a test-only fixture (approved by the user,
+  2026-10-31).** The TypeScript analyzer's tests need a TypeScript compiler,
+  so it is pinned in `scripts/fixtures/typescript/package-lock.json`
+  (Microsoft, Apache-2.0, no dependencies, no install scripts, published
+  2026-04-16). It is installed outside the repository by
+  `scripts/setup-fixtures.sh` and never shipped. Its record is
+  `.millennium/deps/npm/typescript@6.0.3.json`.
+
+## Pending
+
 - **The first engine release.** Run the steps in
-  [releasing.md](releasing.md) to publish `engine/v0.1.0`; until then users
-  set `MILLENNIUM_ENGINE`.
+  [releasing.md](releasing.md) to publish `code-qc/v0.1.0`; until then users
+  set `MILLENNIUM_CODE_QC`.
 
 ## Open decisions
 
-1. **License.** The plugin has no license yet; `claude plugin validate`
-   notes that the plugin directory requires one. Your choice.
+None.
 
 ## Verified platform details
 
@@ -636,6 +660,11 @@ or sh shebang (such as `bin/*`).
   on the first session.
 - Subagent worktrees branch from the default branch unless
   `worktree.baseRef` is `"head"`, which `config apply` sets.
+- GitHub serves release assets for a tag containing a slash at the plain path
+  (`releases/download/code-qc/v0.1.0/<asset>`), so the lock's URL needs no
+  escaping; checked against a public project that tags this way.
+- Binaries built with the official `go1.26.10` tarball, which the workflow
+  uses, are byte-identical to those from a local install of the same version.
 
 ## Build order
 
@@ -645,7 +674,7 @@ or sh shebang (such as `bin/*`).
 2. **Done:** components, `config explain`, the Go analyzer, the TypeScript
    and Python analyzer helpers, the clean-architecture pack for all three
    (embedded in the engine), function limits with the existing-code rule,
-   `millennium audit`, and the user docs in `docs/`. The engine audits its own
+   `millennium-code-qc audit`, and the user docs in `docs/`. The engine audits its own
    source, and its Python helper, in `scripts/verify.sh`.
 3. **Done:** shell support: `bash -n`, strict mode, shellcheck on touched
    lines (`--norc`), shebang detection for extensionless scripts, and a
@@ -664,15 +693,15 @@ or sh shebang (such as `bin/*`).
    **4d done:** `disable` entries (one gate/rule, a reason, listed on every
    report; fail-closed rules cannot be disabled), gates that declare their
    rules, and undeclared rules treated as an engine bug.
-   **4e done:** `millennium hook` (PreToolUse guard for protected paths,
+   **4e done:** `millennium-code-qc hook` (PreToolUse guard for protected paths,
    acceptance tests and black-box qa-tester; Stop and SubagentStop run the
    fast tier, three attempts then an escalation to the user; SessionStart
-   context), `onFailure: "block"` on the guard, `millennium scope` for
+   context), `onFailure: "block"` on the guard, `millennium-code-qc scope` for
    engineer branches, and `plugin/hooks/hooks.json` with a first launcher.
    Verified: hooks run outside the sandbox, the sandbox already protects
    `.git/config` and `.git/hooks`, `!` commands are unsandboxed, and Stop
    hooks cannot block when they fail to run.
-   **4f done:** `millennium config apply` (strict proposal parsing, the
+   **4f done:** `millennium-code-qc config apply` (strict proposal parsing, the
    loosenings listed, confirmation by a typed yes at a terminal or a
    matching `--confirm` digest, piped input refused; writes the config,
    merged project settings, the AGENTS.md section and .gitignore) and
@@ -699,12 +728,12 @@ or sh shebang (such as `bin/*`).
 7. react-feature-based pack, qa-tester, `/millennium:init`, `/millennium:adopt`,
    local mode. **Done:** the react-feature-based pack with `isolated` layers
    (features may not import each other, aliases included), `millennium
-   discover`, `millennium audit --proposal` as a dry run, and the `init` and
+   discover`, `millennium-code-qc audit --proposal` as a dry run, and the `init` and
    `adopt` skills. Local mode was built in step 4f, qa-tester in step 6.
 8. `plugin/` layout, launcher and engine lock, release workflow. **Done:**
    the marketplace file, the launcher (download, SHA-256 check on every run,
    kept beside the plugin where sandboxed agents can run but not change it),
-   `engine.lock`, reproducible builds for six platforms
+   `code-qc.lock`, reproducible builds for six platforms
    (`scripts/release-build.sh`, verified byte-identical across build caches
    and checkout paths), and a release workflow without third-party actions
    that publishes only binaries matching the reviewed lock. Hooks moved to

@@ -11,7 +11,7 @@ gives editors autocompletion and validation. Point to it with `$schema`:
 { "$schema": "https://<where you host it>/millennium.schema.json", "version": 1 }
 ```
 
-`millennium config validate` checks the file against the engine itself, which
+`millennium-code-qc config validate` checks the file against the engine itself, which
 also enforces rules the schema cannot express.
 
 ## Two forms
@@ -72,7 +72,7 @@ How a file finds its component:
 The two forms cannot be mixed: with `components`, `languages` and
 `conventions` belong inside each component.
 
-Run `millennium config explain <file>` to see which component, layer and limits
+Run `millennium-code-qc config explain <file>` to see which component, layer and limits
 apply to any file.
 
 ## Settings
@@ -116,7 +116,7 @@ with a reason, and every report lists it:
 ```
 
 ```
-millennium: passed (gates: 6, changed files: 4)
+millennium-code-qc: passed (gates: 6, changed files: 4)
   disabled: structure/function-length (hid 3 findings): upstream style keeps 80-line handlers
 ```
 
@@ -157,7 +157,7 @@ built-in runner:
 `dependencyPolicy` has one value, `strict`, which the `deps` gate enforces;
 it exists so a later, looser policy has to be named in the config, where
 `config apply` lists it as a loosening. `paths.acceptanceTests` is enforced by
-the hooks and `millennium scope`; `run` is the recipe the qa-tester agent
+the hooks and `millennium-code-qc scope`; `run` is the recipe the qa-tester agent
 follows.
 
 ## How strictly the file is read
@@ -187,7 +187,7 @@ It may instead (or also) carry dependency approvals, see
 [Approving a dependency](#approving-a-dependency). You apply it:
 
 ```
-millennium config apply
+millennium-code-qc config apply
 ```
 
 It validates the proposal as strictly as a config, shows every file it will
@@ -271,7 +271,7 @@ For a repository you do not own, such as an open-source project you contribute
 to, keep the config on your machine instead:
 
 ```
-millennium config apply --local my-proposal.json
+millennium-code-qc config apply --local my-proposal.json
 ```
 
 The config goes to `<user config dir>/millennium/projects/<id>/config.json`
@@ -280,7 +280,7 @@ git directory, so every worktree of it uses the same config. Nothing in the
 repository changes. A committed config always wins over a local one. Sandboxed
 agents cannot write there, and the hooks deny their file tools.
 
-`millennium config export --local` prints the local config as a proposal, to
+`millennium-code-qc config export --local` prints the local config as a proposal, to
 back it up or apply it on another machine. A local config is lost when the
 directory is removed; it is not tied to the plugin's data directory.
 

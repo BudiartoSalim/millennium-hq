@@ -120,7 +120,7 @@ Runs on every changed script of a component that lists `shell`.
 | `shellcheck` | shellcheck reports a problem on a line the change touched (every line, for a new script or an audit). The code, such as `SC2086`, links to shellcheck's explanation. | Fix it, or suppress that one code with a written reason: `# shellcheck disable=SC2016 # printed for the user to copy`. |
 
 An existing script that already lacked strict mode is not blocked when it is
-edited; `millennium audit` lists it. shellcheck runs with `--norc`, so a
+edited; `millennium-code-qc audit` lists it. shellcheck runs with `--norc`, so a
 `.shellcheckrc` cannot switch checks off, and with `-x
 --source-path=SCRIPTDIR`, so `# shellcheck source=` paths resolve relative to
 the script. A library without a shebang or `# shellcheck shell=` directive is

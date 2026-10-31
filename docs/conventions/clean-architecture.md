@@ -104,13 +104,13 @@ component. Each override replaces the pack's paths for that layer:
 ```
 
 Use `composition` for the composition root. Check the result with
-`millennium config explain <file>`.
+`millennium-code-qc config explain <file>`.
 
 ## Adopting it in existing code
 
-`millennium gate` checks only imports a change adds, so an existing codebase
+`millennium-code-qc gate` checks only imports a change adds, so an existing codebase
 with violations can adopt the convention immediately; touched code is held to
-the rules. `millennium audit` lists every existing violation, which is the
+the rules. `millennium-code-qc audit` lists every existing violation, which is the
 refactoring backlog.
 
 ## Why these rules

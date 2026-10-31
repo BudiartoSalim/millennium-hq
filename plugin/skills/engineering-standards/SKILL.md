@@ -6,8 +6,8 @@ user-invocable: false
 
 # Engineering standards
 
-In this skill, `millennium` means the engine command
-`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium"`. Run it with that full path.
+In this skill, `millennium-code-qc` means the engine command
+`"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc"`. Run it with that full path.
 
 ## Before writing code
 
@@ -18,7 +18,7 @@ In this skill, `millennium` means the engine command
    smallest one and list it.
 2. Read the code you will change and its neighbours. Match their style,
    naming, error handling and test idiom.
-3. `millennium config explain <file>` tells you which component, convention,
+3. `millennium-code-qc config explain <file>` tells you which component, convention,
    layer and limits apply to a file.
 
 ## Writing code
@@ -68,7 +68,7 @@ The stop hook runs the fast tier whenever you stop, and sends you back with
 the findings while anything fails. Before reporting done, run:
 
 ```
-millennium gate --tier full
+millennium-code-qc gate --tier full
 ```
 
 in your worktree and fix every finding. `[gate/rule] file:line: message`
