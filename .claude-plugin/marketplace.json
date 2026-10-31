@@ -1,0 +1,12 @@
+{
+  "name": "millennium-hq",
+  "description": "millennium: quality and security gates for AI coding agents, with a tech-lead workflow.",
+  "owner": { "name": "budiarto" },
+  "plugins": [
+    {
+      "name": "millennium",
+      "source": "./plugin",
+      "description": "Quality and security gates agents cannot work around, and a tech-lead workflow with parallel engineers and fresh-context reviewers."
+    }
+  ]
+}

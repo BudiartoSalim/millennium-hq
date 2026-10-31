@@ -1,0 +1,13 @@
+# The engine release the launcher downloads, and the SHA-256 of each
+# platform's binary. Only a reviewed change updates it, written by
+# scripts/release-build.sh VERSION --lock; the release workflow rebuilds the
+# tag and refuses to publish binaries whose hashes differ from these.
+version 0.1.0
+go go1.26.10
+url https://github.com/BudiartoSalim/millennium-hq/releases/download/code-qc/v0.1.0
+sha256 linux-amd64 66c71267ccf50d8b54f511ea92b88055b884a1ba265fba69c2070b5536fd376b
+sha256 linux-arm64 9e101c4076f5ce8ac9a961d33fc120f419b9964178d869fb8cc8c42d8cd40ad2
+sha256 darwin-amd64 f4d45aeb1925b67ab12fa91aab0ffba71323d77c4ae5a566cb48194c1a6f5b61
+sha256 darwin-arm64 854721edf6896102a9c6d7bdbb914a82159acd0963e0a1ec412a083354a0229a
+sha256 windows-amd64 e63859ed8608736b5e3126e7f3a28e6e0eb649ab82dc2045a3fe941b9dfbef40
+sha256 windows-arm64 74fb3136b7417c71484b648efdab2958e05b37aa4f16f8ef698be349707d4ddd

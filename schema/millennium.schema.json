@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "millennium project config",
+  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, react-feature-based needs typescript in its component, mypy needs python, the most specific component wins). code-qc/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version"],
+  "anyOf": [
+    { "required": ["languages"], "not": { "required": ["components"] } },
+    { "required": ["components"], "not": { "anyOf": [{ "required": ["languages"] }, { "required": ["conventions"] }, { "required": ["test"] }] } }
+  ],
+  "$defs": {
+    "language": { "enum": ["go", "typescript", "python", "shell"] },
+    "convention": { "enum": ["clean-architecture", "react-feature-based"] },
+    "test": {
+      "type": "object",
+      "description": "How the component runs its tests when the built-in runner does not fit, and the only way for TypeScript: an argument list run from the component root without a shell, and the lcov report it writes.",
+      "additionalProperties": false,
+      "required": ["command", "lcov"],
+      "properties": {
+        "command": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "lcov": { "type": "string", "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$" }
+      }
+    },
+    "prefixPattern": {
+      "type": "string",
+      "description": "A path relative to the repository root, '.' for the root itself. '*' and '?' match within one segment.",
+      "pattern": "^(\\.|[A-Za-z0-9._*?@+ -]+(/[A-Za-z0-9._*?@+ -]+)*)$"
+    }
+  },
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional link to this schema for editors."
+    },
+    "version": {
+      "const": 1,
+      "description": "Config format version."
+    },
+    "languages": {
+      "type": "array",
+      "description": "Single-project form: languages whose checks run. Use components instead for a monorepo.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/language" }
+    },
+    "conventions": {
+      "type": "array",
+      "description": "Single-project form: convention packs to enforce.",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/convention" },
+      "default": []
+    },
+    "components": {
+      "type": "array",
+      "description": "Monorepo form: each component maps paths to languages and conventions. A file belongs to the most specific matching component.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["paths", "languages"],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "description": "Component roots, such as \"services/*/api\".",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/prefixPattern" }
+          },
+          "languages": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/language" }
+          },
+          "conventions": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/convention" },
+            "default": []
+          },
+          "layers": {
+            "type": "object",
+            "description": "Overrides a convention's layer paths for this component, relative to its root.",
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/prefixPattern" }
+            }
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this component is an exception, for example a legacy service with no conventions."
+          },
+          "test": { "$ref": "#/$defs/test" }
+        }
+      }
+    },
+    "test": { "$ref": "#/$defs/test" },
+    "exclude": {
+      "type": "array",
+      "description": "Paths no check reads, such as generated or vendored code. '**' matches any number of segments; a directory excludes everything inside it.",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "disable": {
+      "type": "array",
+      "description": "Rules switched off for this project, each with a reason that every report shows. Rules that report a check failing to run cannot be disabled.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "reason"],
+        "properties": {
+          "check": { "type": "string", "pattern": "^[a-z][a-z-]*/[a-z][a-z-]*$", "description": "gate/rule, such as structure/function-length" },
+          "reason": { "type": "string", "minLength": 10 }
+        }
+      },
+      "default": []
+    },
+    "testing": {
+      "description": "Testing discipline the gates enforce.",
+      "enum": ["tests-required"],
+      "default": "tests-required"
+    },
+    "dependencyPolicy": {
+      "description": "How strictly new dependencies are gated.",
+      "enum": ["strict"],
+      "default": "strict"
+    },
+    "python": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "typeCheck": {
+          "description": "Python type checker. When set to mypy, a missing mypy blocks.",
+          "enum": ["off", "mypy"],
+          "default": "off"
+        }
+      }
+    },
+    "shell": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lint": {
+          "description": "Shell linter. shellcheck is on by default and then required: a missing shellcheck blocks.",
+          "enum": ["shellcheck", "off"],
+          "default": "shellcheck"
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "acceptanceTests": {
+          "description": "Directory of qa-tester's black-box regression tests, relative to the repository root. The engineer agent cannot change it.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+          "default": "tests/acceptance"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "description": "How qa-tester starts the software under test.",
+      "additionalProperties": false,
+      "required": ["start", "healthUrl"],
+      "properties": {
+        "start": {
+          "description": "Command that starts the software.",
+          "type": "string",
+          "minLength": 1
+        },
+        "healthUrl": {
+          "description": "Health endpoint to wait for. Must be on localhost or a loopback address.",
+          "type": "string",
+          "pattern": "^https?://(localhost|127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|\\[::1\\])(:[0-9]{1,5})?(/.*)?$"
+        }
+      }
+    }
+  }
+}

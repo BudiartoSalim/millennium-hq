@@ -1,0 +1,10 @@
+{
+  "ecosystem": "npm",
+  "name": "typescript",
+  "version": "6.0.3",
+  "decision": "approved",
+  "reason": "Test-only fixture for the TypeScript analyzer's tests (scripts/fixtures/typescript), never shipped: the analyzer parses with each project's own typescript package, so its tests need one. Microsoft-published, Apache-2.0, zero dependencies, no install scripts, released 2026-04-16 (past the 7-day cooldown), installed with npm ci --ignore-scripts from the committed lockfile's sha512 integrity.",
+  "checked": "2026-10-25",
+  "transitive": null,
+  "securityPatch": ""
+}

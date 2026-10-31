@@ -1,0 +1,36 @@
+{
+  "$schema": "../schema/millennium.schema.json",
+  "version": 1,
+  "components": [
+    {
+      "paths": [
+        "code-qc"
+      ],
+      "languages": [
+        "go"
+      ],
+      "conventions": [
+        "clean-architecture"
+      ]
+    },
+    {
+      "paths": [
+        "code-qc/internal/infrastructure/helperanalyzer/scripts"
+      ],
+      "languages": [
+        "python"
+      ],
+      "reason": "the Python analyzer helper: a single script, so no layers, but the limits apply"
+    },
+    {
+      "paths": [
+        "scripts",
+        "plugin/scripts"
+      ],
+      "languages": [
+        "shell"
+      ],
+      "reason": "the repository's tooling scripts and the plugin's launcher"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+# LF everywhere, whatever core.autocrlf says: the engine, its helpers and the
+# hook scripts run under bash and Go on Linux, macOS and WSL, and a CR breaks
+# shebangs and shell scripts.
+* text=auto eol=lf

@@ -1,0 +1,33 @@
+{
+  "name": "clean-architecture",
+  "languages": ["go", "typescript", "python"],
+  "layers": [
+    {"name": "domain", "mayImport": [], "thirdParty": false, "tested": true},
+    {"name": "application", "mayImport": ["domain"], "thirdParty": false, "tested": true},
+    {"name": "infrastructure", "mayImport": ["domain", "application"], "thirdParty": true},
+    {"name": "interface", "mayImport": ["domain", "application"], "thirdParty": true}
+  ],
+  "paths": {
+    "go": {
+      "domain": ["internal/domain"],
+      "application": ["internal/application"],
+      "infrastructure": ["internal/infrastructure"],
+      "interface": ["internal/interface"],
+      "composition": ["main.go", "cmd"]
+    },
+    "typescript": {
+      "domain": ["src/domain"],
+      "application": ["src/application"],
+      "infrastructure": ["src/infrastructure"],
+      "interface": ["src/interface"],
+      "composition": ["src/main.ts", "src/index.ts"]
+    },
+    "python": {
+      "domain": ["*/domain", "*/domain.py"],
+      "application": ["*/application", "*/service.py", "*/services"],
+      "infrastructure": ["*/infrastructure"],
+      "interface": ["*/interface", "*/http_api.py"],
+      "composition": ["*/main.py", "*/__main__.py"]
+    }
+  }
+}

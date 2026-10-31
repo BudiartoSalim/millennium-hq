@@ -1,0 +1,15 @@
+{
+  "name": "react-feature-based",
+  "languages": ["typescript"],
+  "layers": [
+    {"name": "shared", "mayImport": [], "thirdParty": true, "tested": true},
+    {"name": "features", "mayImport": ["shared"], "thirdParty": true, "tested": true, "isolated": true}
+  ],
+  "paths": {
+    "typescript": {
+      "shared": ["src/components", "src/hooks", "src/lib", "src/utils", "src/types", "src/config", "src/stores", "src/testing"],
+      "features": ["src/features/*"],
+      "composition": ["src/app", "src/main.tsx", "src/main.ts", "src/index.tsx", "src/index.ts", "src/App.tsx"]
+    }
+  }
+}
