@@ -64,11 +64,28 @@ machine. Its hooks run in every repository, but outside an opted-in
 repository the engine only checks for a config and exits, so they never get
 in the way.
 
-If you would rather enable it only where you use it, install with
-`--scope project` in that repository. Opting a repository in with
-`config apply` also enables the plugin in the project's
-`.claude/settings.json`. Each person who works in the repository installs the
-plugin on their own machine.
+There is no special way to start a session with the plugin: an enabled
+plugin is part of every session in its scope, and you run `claude` as usual.
+Its skills do nothing until you invoke them, like any plugin's commands. Only
+its hooks run on their own, and only in opted-in repositories.
+
+**On only where you use it.** If you would rather the plugin be completely
+absent from other repositories:
+
+1. Install it, then disable it in `/plugin`, which turns it off for your
+   user.
+2. Opt a repository in. `config apply` writes
+   `"enabledPlugins": {"millennium@millennium-hq": true}` into the project's
+   `.claude/settings.json`, and project settings take precedence over user
+   settings.
+
+The plugin is then on in opted-in repositories and off everywhere else.
+Check it once: `/millennium:` should autocomplete in an opted-in repository
+and not elsewhere. Alternatively, install with `--scope project` in each
+repository.
+
+Each person who works in the repository installs the plugin on their own
+machine; the project's settings only enable it.
 
 ### Opt a repository in
 
@@ -106,6 +123,37 @@ release downloads it in the next session.
 `/plugin uninstall millennium@millennium-hq` removes the plugin.
 Repositories keep their `.millennium/` config, so the terminal commands still
 work, and reinstalling picks up where you left off.
+
+### Alongside your own instructions
+
+The plugin adds to what Claude Code loads; it replaces nothing. Your
+`CLAUDE.md` files (user, project, parent directories, `CLAUDE.local.md`), the
+project's `.claude/skills/` and `.claude/agents/`, and your own hooks all
+work as before.
+
+- **AGENTS.md.** Claude Code reads `CLAUDE.md`; it falls back to `AGENTS.md`
+  only when no `CLAUDE.md` applies, and a `CLAUDE.md` in a parent directory
+  is enough to stop that. `config apply` writes a "Quality gates
+  (millennium)" section into `AGENTS.md`, between markers it owns, and adds
+  an `@AGENTS.md` import to the project's `CLAUDE.md` if there is one. If you
+  create a `CLAUDE.md` later, give it that import yourself.
+- **Skill names.** The plugin's skills are namespaced (`/millennium:tech-lead`),
+  so a project skill with the same name (`/tech-lead`) does not clash. Do not
+  also copy millennium's skills into `.claude/skills/` in a repository that
+  uses the plugin: you would have two copies, and the copy cannot fill in
+  `${CLAUDE_PLUGIN_ROOT}`.
+
+**When your instructions conflict with millennium's**, what happens depends
+on the kind of rule:
+
+| Kind of rule | Example in your CLAUDE.md | What happens |
+|---|---|---|
+| Enforced by the engine | "tests are optional", "raise the limit in `.millennium/config.json` if it gets in the way", "suppress lint freely" | millennium wins, always. The gates block failing work, writes to `.millennium/` are denied, and a suppression without a reason is a finding. The agent is sent back until the gates pass. |
+| Workflow and judgement | "commit straight to main", "don't use subagents", "skip review for small changes" | The model decides. A skill you just invoked usually wins because it is specific and recent, but contradictory instructions can go either way, or the agent asks you. Nothing checks this. |
+
+So keep your instructions consistent with the config: remove rules the gates
+contradict, and change the config (through a proposal) when the gates are
+what is wrong.
 
 ### Try a change to the plugin
 
@@ -242,6 +290,10 @@ skills are written for Claude Code; read them this way:
   `millennium-code-qc gate --tier full --require-config` and fix every finding.
   Never edit `.millennium/` or work around a gate.
 ```
+
+Keep it outside the markers of the section `config apply` writes into
+`AGENTS.md` (step 4): that section lists the repository's gates and limits,
+and `config apply` replaces it on every run.
 
 Alternatively, set `CLAUDE_PLUGIN_ROOT` to the clone's `plugin/` directory in
 the environment you start the harness from, so the skills' commands run as
