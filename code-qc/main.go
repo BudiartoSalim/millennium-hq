@@ -180,10 +180,14 @@ func stateDir() string {
 	return filepath.Join(os.TempDir(), "millennium-state")
 }
 
-// engineCommand is how agents' shells reach the engine: hooks run with
-// CLAUDE_PLUGIN_ROOT set, and the plugin's launcher lives under it.
+// engineCommand is how agents' shells reach the engine: the plugin's
+// launcher, under the plugin root that Claude Code's hooks (CLAUDE_PLUGIN_ROOT)
+// or millennium's pi extension (MILLENNIUM_PLUGIN_ROOT) pass in.
 func engineCommand() string {
-	root := os.Getenv("CLAUDE_PLUGIN_ROOT")
+	root := os.Getenv("MILLENNIUM_PLUGIN_ROOT")
+	if root == "" {
+		root = os.Getenv("CLAUDE_PLUGIN_ROOT")
+	}
 	if root == "" {
 		return "millennium-code-qc"
 	}

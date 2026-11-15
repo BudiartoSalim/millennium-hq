@@ -132,3 +132,5 @@ The plugin has no `bin/` directory (claude.ai and Cowork refuse plugins that
 have one), so `millennium-code-qc` is not on agents' `PATH`. The session-start
 context names the launcher's full path, and the skills use
 `"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc"`, which Claude Code fills in.
+In pi, the `millennium` section of the system prompt names the command, and
+the agents run through the `millennium_agent` tool; see [pi](pi.md).

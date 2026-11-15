@@ -23,6 +23,7 @@ published yet; until it is, build the engine yourself (step 2 below).
 | [Feature-based React](conventions/react-feature-based.md) | Shared code, isolated features and the app layer, and how to map an existing layout |
 | [Hooks](hooks.md) | What the plugin's hooks enforce in every session, and their limits |
 | [Agents and skills](agents.md) | The tech-lead workflow, each agent and skill, and the reviewer report format |
+| [pi](pi.md) | Installing and using millennium in pi, and what pi cannot enforce |
 | [Releasing](releasing.md) | How engine releases are built, locked and published |
 | [Design](design.md) | Why things are the way they are, and what is planned |
 
@@ -40,6 +41,10 @@ install Git for Windows: the hooks run through Git Bash.
    /plugin marketplace add BudiartoSalim/millennium-hq
    /plugin install millennium@millennium-hq
    ```
+
+   In pi, install the package instead (`pi install
+   git:github.com/BudiartoSalim/millennium-hq`); the steps below are the same
+   with `/skill:<name>` for `/millennium:<name>`. See [pi](pi.md).
 
 2. **The engine.** Once a release exists, the plugin's launcher downloads the
    engine for your platform on first use and refuses it unless its SHA-256

@@ -1,7 +1,7 @@
 # millennium-hq
 
 Source of millennium, a quality- and security-first multi-agent plugin for AI
-coding harnesses, Claude Code first. `docs/design.md` is the design: roles,
+coding harnesses: Claude Code first, and pi through an extension. `docs/design.md` is the design: roles,
 workflow, enforcement model, gate engine, conventions and build order. Read it
 before any structural change, and update it in the same change when a decision
 moves.
@@ -17,7 +17,7 @@ code-qc/                      millennium-code-qc, the code quality engine; Go st
                               rules, limits, facts, verdict
   internal/application/
     port/                     interfaces the core needs
-    gate/                     the checks (toolchain, structure, shell, code, build, tests, deps); each reports findings
+    gate/                     the checks (toolchain, structure, shell, hygiene, build, tests, deps); each reports findings
     usecase/                  load config, run gates, audit, explain, guard, stop, scope, apply, discover
   internal/infrastructure/    analysiscache, approvals, buildtools, configfile, gitrepo, goanalyzer,
                               helperanalyzer (TypeScript and Python helpers, embedded), manifests,
@@ -25,6 +25,12 @@ code-qc/                      millennium-code-qc, the code quality engine; Go st
                               shellanalyzer, shelltools (bash -n, shellcheck), statestore,
                               testrunner, toolpath
   internal/interface/cli/     argument parsing, rendering, exit codes
+pi/                           the pi extension: pi events -> the engine's hook protocol, and the
+                              millennium_agent tool; TypeScript, Node standard library only
+                              (docs/pi.md). Its tests run with node --test; verify.sh links the
+                              TypeScript fixture in for type checking
+package.json, .npmrc          this repository as a pi package: a manifest only, never
+                              dependencies or scripts (pi runs npm install in the clone)
 plugin/                       what users install
   .claude-plugin/plugin.json  the plugin manifest
   agents/, skills/            the agents and the skills they preload (see docs/agents.md)
@@ -54,7 +60,9 @@ millennium imposes on its users: Clean Architecture, required unit tests, gated 
 unexplained suppressions.
 
 **Zero third-party dependencies.** The engine uses the Go standard library
-only; helpers use only their runtime's standard library; CI actions are
+only; helpers and the pi extension use only their runtime's standard library
+(the extension declares the pi and Node APIs it uses instead of importing
+their type packages); CI actions are
 pinned to full commit SHAs. Adding anything needs the user's explicit
 approval, recorded in `docs/design.md`.
 
@@ -126,7 +134,8 @@ outside the repository with install scripts disabled; `verify.sh` refuses to
 run without it rather than report skipped tests as passed.
 
 It runs gofmt, go vet for linux, darwin and windows, the full test suite, the
-launcher's tests, and the engine auditing its own source against `.millennium/config.json` in the
+launcher's tests, the pi extension's type check and tests, and the engine
+auditing its own source against `.millennium/config.json` in the
 full tier, so every executable line of the engine's domain and application
 code must run in a test: a rule
 the engine would enforce on a user's code fails this repository too. Fix the

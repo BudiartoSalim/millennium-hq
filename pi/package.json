@@ -1,0 +1,16 @@
+{
+  "name": "millennium-pi",
+  "private": true,
+  "description": "millennium's pi extension: the guard, the gates when an agent finishes, the session briefing and the millennium_agent tool. Node standard library only; the TypeScript compiler is a dev tool for type checking.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}

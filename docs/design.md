@@ -55,8 +55,8 @@ reviewer of a change is `<topic>-reviewer` with a `<topic>-review` skill;
    files change only through a command the user runs. This repository is the
    exception: here agents may change `.millennium/` when the user asks (see
    `AGENTS.md`).
-4. **Thin and portable.** Users install Claude Code, git, and the toolchains of
-   the languages they already use. Nothing else is required.
+4. **Thin and portable.** Users install Claude Code (or pi), git, and the
+   toolchains of the languages they already use. Nothing else is required.
 5. **Strict supply chain.** The `server-scripts` stance (stdlib first, vet every
    dependency, exact pins, lockfiles, no install scripts) is the default, and the
    procedural parts of it become gates.
@@ -69,7 +69,8 @@ reviewer of a change is `<topic>-reviewer` with a `<topic>-review` skill;
 
 ## Scope of v1
 
-- Harness: Claude Code.
+- Harness: Claude Code, and pi through an extension (added 2026-11-13; see
+  "pi" below).
 - Languages: TypeScript (Node backend and React), Go, Python, and shell (bash),
   which much infrastructure automation depends on.
 - Conventions: Clean Architecture for backend code, feature-based structure for
@@ -203,6 +204,8 @@ Honest limits: a command the user approves to run unsandboxed is outside the
 sandbox (the setup docs recommend disabling unsandboxed commands); a loosening
 the user confirms without reading goes through; other harnesses get the
 portable layers only (AGENTS.md, skills) until they offer comparable hooks.
+pi offers them: its extension runs the hooks' layer, but pi has no sandbox,
+so the second layer is missing there (see "pi" below).
 
 Additional rules:
 
@@ -471,6 +474,42 @@ pointed at a shared deployment.
 - Users with Go installed can build from source instead.
 - Binaries stay out of the plugin's top-level `bin/`, which claude.ai and Cowork
   refuse to install; skills reference the launcher through `${CLAUDE_PLUGIN_ROOT}`.
+- pi installs the whole repository as a git package (`pi install
+  git:github.com/BudiartoSalim/millennium-hq`); the root `package.json` only
+  names the extension and the skills, and has no dependencies or scripts,
+  because pi runs `npm install` in the clone. The same launcher and lock
+  fetch the engine.
+
+## pi
+
+Decided with the user on 2026-11-13. pi has an extension API with the hook
+points millennium needs, but no subagents and no sandbox.
+
+- **One adapter, the same engine.** The extension (`pi/src/`, TypeScript, Node
+  standard library only) translates pi's `tool_call`, `agent_before_settle` and
+  `session_start` events into the engine's hook protocol (Claude Code's format)
+  and runs the launcher. Every decision stays in the engine.
+- **Agents: millennium's own tool**, not pi's example subagent extension
+  (third-party code) and not a single-session workflow (which would lose
+  fresh-context review and black-box QA). `millennium_agent` starts each agent
+  as a `pi --print --mode json` process from the same `plugin/agents/*.md`, with
+  the agent's skills appended to its system prompt, its tools mapped to pi's,
+  its role in its environment for the guard, and a worktree under
+  `.pi/worktrees/` when the agent is isolated in Claude Code. Agents load the
+  extension explicitly and get no agent tool themselves.
+- **No sandbox: accepted and documented.** Shell writes to protected paths are
+  caught by pattern matching only; the docs recommend a container for hard
+  guarantees. Tamper detection after the fact was considered and rejected: it
+  adds engine work and someone with shell access could forge its record.
+- **Protected in every harness:** `.pi/settings.json` and `.pi/extensions/`,
+  since a project extension runs inside pi and could switch the guard off.
+- **Skills stay single-source.** Instead of pi copies, the session's
+  `millennium` system prompt section says how to read the Claude Code terms
+  (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`, `/millennium:`, agents, SendMessage).
+- **Type checking without dependencies.** The extension declares the parts of
+  pi's API and of Node it uses (`pi-api.ts`, `node.d.ts`) instead of depending
+  on pi's packages or `@types/node`; tests run against the real Node, and the
+  extension was run end to end against pi 1.5.2 with its scripted test model.
 
 ## Convention packs
 
@@ -551,6 +590,8 @@ procedure. Turned into gates or added:
 ```
 millennium-hq/
   .claude-plugin/marketplace.json  this repository as the millennium-hq marketplace
+  package.json, .npmrc           this repository as a pi package (manifest only)
+  pi/                            the pi extension (TypeScript, Node stdlib only)
   plugin/                        what users install
     .claude-plugin/plugin.json   Claude Code adapter
     agents/                      thin agent definitions that preload skills
@@ -628,6 +669,11 @@ or sh shebang (such as `bin/*`).
   `poetry.lock` and `Pipfile.lock` get pinning checks only, no approvals.
 - **Shell scripts without an extension** are found by their shebang in the
   gates, but `millennium-code-qc discover` counts files by extension only.
+- **pi** has no sandbox, so shell commands are kept off protected paths by
+  pattern matching only; an extension the user installs can change a tool
+  call after the guard; only pi's built-in tools are guarded; `millennium_agent`
+  waits for its agents rather than running them in the background. pi on
+  Windows is untested.
 
 ## Approved dependencies
 
@@ -637,7 +683,10 @@ or sh shebang (such as `bin/*`).
   (Microsoft, Apache-2.0, no dependencies, no install scripts, published
   2026-04-16). It is installed outside the repository by
   `scripts/setup-fixtures.sh` and never shipped. Its record is
-  `.millennium/deps/npm/typescript@6.0.3.json`.
+  `.millennium/deps/npm/typescript@6.0.3.json`. Since 2026-11-13 the same
+  version is the pi extension's dev dependency (`pi/package-lock.json`), for
+  type checking only; `verify.sh` links the fixture's install there, and pi
+  never installs dev dependencies.
 
 ## Pending
 
@@ -669,6 +718,15 @@ None.
   escaping; checked against a public project that tags this way.
 - Binaries built with the official `go1.26.10` tarball, which the workflow
   uses, are byte-identical to those from a local install of the same version.
+- pi 1.5.2 (checked end to end with its scripted test model): `tool_call`
+  handlers may mutate `event.input` and see codemode's nested calls;
+  `agent_before_settle` returning `continue: true` with a `custom_message` entry
+  sends the agent back; a `before_agent_start` handler adding to
+  `systemPromptOptions.sections` reaches the model and the transcript, while a
+  returned `systemPrompt` reaches only the model; `--session <path>` creates
+  the session file when missing and continues it later; tool parameters may
+  be plain JSON Schema; `pi install` of a git package runs `npm install
+  --omit=dev` at the clone's root; print mode waits for piped stdin to end.
 
 ## Build order
 
@@ -741,3 +799,11 @@ None.
    and checkout paths), and a release workflow without third-party actions
    that publishes only binaries matching the reviewed lock. Hooks moved to
    shell form for Windows (Git Bash).
+9. pi support (after the user asked for it, 2026-11-13). **Done:** the pi
+   package manifest, the extension (guard, gates when an agent finishes,
+   session briefing, `millennium_agent`), `.pi/settings.json` and
+   `.pi/extensions/` protected, `.pi/worktrees/` git-ignored by `config
+   apply`, and `MILLENNIUM_PLUGIN_ROOT` for the engine command. The extension
+   is a component of this repository's config, so the self-audit type-checks
+   it and runs its tests with full coverage. The first engine release,
+   `code-qc/v0.1.0`, includes these engine changes.

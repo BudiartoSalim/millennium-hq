@@ -1,0 +1,11 @@
+{
+  "name": "millennium",
+  "private": true,
+  "description": "millennium for pi: quality and security gates agents cannot work around, and a multi-agent workflow. Install with `pi install git:github.com/BudiartoSalim/millennium-hq`.",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./pi/src/index.ts"],
+    "skills": ["./plugin/skills"]
+  }
+}
