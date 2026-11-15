@@ -690,9 +690,7 @@ or sh shebang (such as `bin/*`).
 
 ## Pending
 
-- **The first engine release.** Run the steps in
-  [releasing.md](releasing.md) to publish `code-qc/v0.1.0`; until then users
-  set `MILLENNIUM_CODE_QC`.
+None. The first engine release, `code-qc/v0.1.0`, is published.
 
 ## Open decisions
 
