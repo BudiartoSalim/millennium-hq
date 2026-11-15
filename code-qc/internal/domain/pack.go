@@ -6,6 +6,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // CompositionRoot is the reserved layer name for the code that wires
@@ -27,10 +28,30 @@ type PackLayer struct {
 	Isolated bool
 }
 
-// Pack is a validated convention pack: layers, their dependency rules, and
-// where each layer lives per language. Build one with NewPack.
+// PackOrigin says where a pack comes from.
+type PackOrigin string
+
+// Pack origins.
+const (
+	// PackBuiltin packs ship inside the engine.
+	PackBuiltin PackOrigin = "builtin"
+	// PackProject packs live in the repository's .millennium/conventions.
+	PackProject PackOrigin = "project"
+	// PackLocal packs live beside a local config, outside the repository.
+	PackLocal PackOrigin = "local"
+)
+
+// MaxGuideRunes bounds a pack's guide. Guides are part of every agent's
+// briefing, and Claude Code replaces hook context longer than 10,000
+// characters with a file path, so a guide must leave room for the rest.
+const MaxGuideRunes = 8000
+
+// Pack is a validated convention pack: layers, their dependency rules,
+// where each layer lives per language, default function limits, and the
+// guide agents follow. Build one with NewPack.
 type Pack struct {
-	Name Convention
+	Name   Convention
+	Origin PackOrigin
 	// Languages are the languages the convention governs. Others, such as
 	// shell for a layered architecture, are outside its scope.
 	Languages []Language
@@ -38,14 +59,26 @@ type Pack struct {
 	// Paths maps a language to layer name to path patterns relative to the
 	// component root.
 	Paths map[Language]map[string][]Pattern
+	// Limits are the function limits of the pack's components, unless a
+	// component sets its own.
+	Limits Limits
+	// Suggest names packages whose presence in a module's package.json
+	// makes discover suggest this pack over packs without such a hint.
+	Suggest []string
+	// Guide is the convention in prose, for agents (Markdown).
+	Guide string
 }
 
-// PackInput is an unvalidated pack as read from its definition file.
+// PackInput is an unvalidated pack as read from its files.
 type PackInput struct {
 	Name      string
+	Origin    PackOrigin
 	Languages []string
 	Layers    []PackLayer
 	Paths     map[string]map[string][]string
+	Limits    LimitsInput
+	Suggest   []string
+	Guide     string
 }
 
 // Errors from Pack.For.
@@ -63,7 +96,9 @@ var (
 // engine bug, but it is reported like any config problem.
 func NewPack(in PackInput) (Pack, error) {
 	v := &validator{}
-	name := parseChoice(v, "name", &in.Name, Conventions(), "")
+	if !ValidConventionName(in.Name) {
+		v.addf("name: %q is not a convention name (lowercase letters, digits and dashes, at most %d characters)", in.Name, MaxConventionName)
+	}
 	languages := parseList(v, "languages", in.Languages, Languages())
 	if len(languages) == 0 {
 		v.add("languages: a pack must govern at least one language")
@@ -74,11 +109,37 @@ func NewPack(in PackInput) (Pack, error) {
 		lang := parseChoice(v, "paths", &rawLang, Languages(), "")
 		paths[lang] = v.layerPaths("paths."+rawLang, layers, known)
 	}
+	v.limits("limits", in.Limits)
+	v.guide(in.Guide)
+	for _, dep := range in.Suggest {
+		if strings.TrimSpace(dep) == "" {
+			v.add("suggest.dependencies: a package name cannot be empty")
+		}
+	}
 	if len(v.problems) > 0 {
 		return Pack{}, fmt.Errorf("pack %q: %w", in.Name, &ConfigError{Problems: v.problems})
 	}
-	return Pack{Name: name, Languages: languages, Layers: in.Layers, Paths: paths}, nil
+	return Pack{
+		Name: Convention(in.Name), Origin: in.Origin, Languages: languages, Layers: in.Layers, Paths: paths,
+		Limits: DefaultLimits().With(in.Limits), Suggest: in.Suggest, Guide: in.Guide,
+	}, nil
 }
+
+func (v *validator) guide(text string) {
+	switch n := utf8.RuneCountInString(text); {
+	case strings.TrimSpace(text) == "":
+		v.add("guide: every pack needs a guide.md telling agents how to follow the convention")
+	case n > MaxGuideRunes:
+		v.addf("guide: %d characters is more than the %d every agent's briefing can hold", n, MaxGuideRunes)
+	}
+}
+
+// Governs reports whether the pack applies to lang.
+func (p Pack) Governs(lang Language) bool { return slices.Contains(p.Languages, lang) }
+
+// HasLayer reports whether the pack defines the layer, the composition root
+// included.
+func (p Pack) HasLayer(name string) bool { return name == CompositionRoot || p.layer(name) != nil }
 
 func (v *validator) packLayers(layers []PackLayer) []string {
 	var names []string

@@ -12,6 +12,7 @@ type configDTO struct {
 	Conventions      []string       `json:"conventions"`
 	Components       []componentDTO `json:"components"`
 	Test             *testDTO       `json:"test"`
+	Limits           *limitsDTO     `json:"limits"`
 	Exclude          []string       `json:"exclude"`
 	Disable          []disableDTO   `json:"disable"`
 	Testing          *string        `json:"testing"`
@@ -29,6 +30,25 @@ type componentDTO struct {
 	Layers      map[string][]string `json:"layers"`
 	Reason      string              `json:"reason"`
 	Test        *testDTO            `json:"test"`
+	Limits      *limitsDTO          `json:"limits"`
+}
+
+// limitsDTO is a component's own function limits and why it needs them.
+type limitsDTO struct {
+	FunctionLines *int   `json:"functionLines"`
+	Nesting       *int   `json:"nesting"`
+	Cognitive     *int   `json:"cognitive"`
+	Reason        string `json:"reason"`
+}
+
+func (l *limitsDTO) toDomain() *domain.LimitOverride {
+	if l == nil {
+		return nil
+	}
+	return &domain.LimitOverride{
+		Values: domain.LimitsInput{FunctionLines: l.FunctionLines, Nesting: l.Nesting, Cognitive: l.Cognitive},
+		Reason: l.Reason,
+	}
 }
 
 type disableDTO struct {
@@ -80,6 +100,7 @@ func (d configDTO) toInput() domain.ConfigInput {
 		Conventions:      d.Conventions,
 		Exclude:          d.Exclude,
 		Test:             d.Test.toDomain(),
+		Limits:           d.Limits.toDomain(),
 		Disable:          disabledChecks(d.Disable),
 		Testing:          d.Testing,
 		DependencyPolicy: d.DependencyPolicy,
@@ -89,7 +110,7 @@ func (d configDTO) toInput() domain.ConfigInput {
 		for i, c := range d.Components {
 			in.Components[i] = domain.ComponentInput{
 				Paths: c.Paths, Languages: c.Languages, Conventions: c.Conventions, Layers: c.Layers, Reason: c.Reason,
-				Test: c.Test.toDomain(),
+				Test: c.Test.toDomain(), Limits: c.Limits.toDomain(),
 			}
 		}
 	}

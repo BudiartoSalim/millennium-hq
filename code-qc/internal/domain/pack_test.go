@@ -23,6 +23,7 @@ func cleanArchitectureInput() PackInput {
 			"interface":      {"internal/interface"},
 			"composition":    {"main.go", "cmd"},
 		}},
+		Guide: "Business rules live in domain.",
 	}
 }
 
@@ -46,7 +47,13 @@ func TestNewPackRejects(t *testing.T) {
 		modify func(*PackInput)
 		want   string
 	}{
-		{"unknown convention", func(in *PackInput) { in.Name = "mvc" }, `name: "mvc"`},
+		{"bad name", func(in *PackInput) { in.Name = "Clean_Architecture" }, `name: "Clean_Architecture" is not a convention name`},
+		{"name too long", func(in *PackInput) { in.Name = strings.Repeat("a", 41) }, "is not a convention name"},
+		{"no guide", func(in *PackInput) { in.Guide = " \n" }, "every pack needs a guide.md"},
+		{"guide too long", func(in *PackInput) { in.Guide = strings.Repeat("é", MaxGuideRunes+1) }, "8001 characters is more than the 8000"},
+		{"limit too low", func(in *PackInput) { in.Limits.Nesting = ptr(0) }, "limits.nesting: 0 must be between 1 and 1000"},
+		{"limit too high", func(in *PackInput) { in.Limits.Cognitive = ptr(1001) }, "limits.cognitive: 1001"},
+		{"empty suggestion", func(in *PackInput) { in.Suggest = []string{"react", " "} }, "suggest.dependencies: a package name cannot be empty"},
 		{"reserved layer name", func(in *PackInput) { in.Layers = append(in.Layers, PackLayer{Name: "composition"}) }, `"composition" is not a usable layer name`},
 		{"duplicate layer", func(in *PackInput) { in.Layers = append(in.Layers, PackLayer{Name: "domain"}) }, `"domain" is defined twice`},
 		{"unknown dependency", func(in *PackInput) { in.Layers[0].MayImport = []string{"web"} }, `layers.domain.mayImport: "web"`},
@@ -188,6 +195,7 @@ func TestIsolatedLayerKeepsSiblingsApart(t *testing.T) {
 		Paths: map[string]map[string][]string{"typescript": {
 			"shared": {"src/components"}, "features": {"src/features/*"}, "composition": {"src/app"},
 		}},
+		Guide: "Features never import each other.",
 	})
 	if err != nil {
 		t.Fatal(err)

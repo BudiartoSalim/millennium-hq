@@ -9,7 +9,73 @@ import (
 
 	"millennium-code-qc/internal/application/port"
 	"millennium-code-qc/internal/domain"
+	"millennium-code-qc/internal/infrastructure/packs"
 )
+
+func testLoader(path string) *Loader {
+	builtin, err := packs.Builtin()
+	if err != nil {
+		panic(err)
+	}
+	return NewLoader(path, builtin, domain.PackProject)
+}
+
+const flatPack = `{"format": 1, "name": "flat", "languages": ["go"],
+  "layers": [{"name": "core", "mayImport": [], "thirdParty": false, "tested": true, "isolated": false}],
+  "paths": {"go": {"core": ["core"]}}, "limits": {"cognitive": 10}}`
+
+// writePack writes a pack folder into the conventions folder beside the
+// config at configPath.
+func writePack(t *testing.T, configPath, name, pack, guide string) {
+	t.Helper()
+	dir := filepath.Join(PacksPath(configPath), name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for file, data := range map[string]string{"pack.json": pack, "guide.md": guide} {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLoadResolvesProjectPacksAndLimits(t *testing.T) {
+	path := writeConfig(t, `{"version": 1, "components": [
+		{"paths": ["api"], "languages": ["go"], "conventions": ["flat"]},
+		{"paths": ["gen"], "languages": ["go"], "conventions": ["clean-architecture"],
+		 "limits": {"functionLines": 120, "reason": "generated parsers are long"}}]}`)
+	writePack(t, path, "flat", flatPack, "Keep it flat.")
+	cfg, err := testLoader(path).Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.LimitsFor(cfg.Components[0]); got.Cognitive != 10 || cfg.Packs["flat"].Origin != domain.PackProject {
+		t.Fatalf("limits %+v, packs %+v", got, cfg.Packs)
+	}
+	if got := cfg.LimitsFor(cfg.Components[1]); got.FunctionLines != 120 || got.Cognitive != 15 {
+		t.Fatalf("component limits = %+v", got)
+	}
+	catalog, err := testLoader(path).Packs()
+	if err != nil || len(catalog) != 3 {
+		t.Fatalf("catalog = %v, %v", catalog.Names(), err)
+	}
+}
+
+func TestLoadRejectsBrokenOrUnknownPacks(t *testing.T) {
+	path := writeConfig(t, `{"version": 1, "languages": ["go"], "conventions": ["flat"]}`)
+	if _, err := testLoader(path).Load(); err == nil || !strings.Contains(err.Error(), "convention flat does not exist") {
+		t.Fatalf("an unknown convention: %v", err)
+	}
+	writePack(t, path, "flat", flatPack, "")
+	if _, err := testLoader(path).Load(); err == nil || !strings.Contains(err.Error(), "every pack needs a guide.md") {
+		t.Fatalf("a broken pack: %v", err)
+	}
+	shadow := writeConfig(t, `{"version": 1, "languages": ["go"]}`)
+	writePack(t, shadow, "clean-architecture", strings.Replace(flatPack, `"flat"`, `"clean-architecture"`, 1), "Mine.")
+	if _, err := testLoader(shadow).Load(); err == nil || !strings.Contains(err.Error(), "is built in") {
+		t.Fatalf("a project pack named like a built-in one: %v", err)
+	}
+}
 
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
@@ -29,7 +95,7 @@ func TestLoadValidConfig(t *testing.T) {
 		"paths": {"acceptanceTests": "qa/acceptance"},
 		"run": {"start": "make run", "healthUrl": "http://127.0.0.1:8080/health"}
 	}`)
-	cfg, err := NewLoader(path).Load()
+	cfg, err := testLoader(path).Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -40,7 +106,7 @@ func TestLoadValidConfig(t *testing.T) {
 }
 
 func TestLoadMissingConfig(t *testing.T) {
-	_, err := NewLoader(filepath.Join(t.TempDir(), "absent.json")).Load()
+	_, err := testLoader(filepath.Join(t.TempDir(), "absent.json")).Load()
 	if !errors.Is(err, port.ErrConfigNotFound) {
 		t.Fatalf("err = %v, want ErrConfigNotFound", err)
 	}
@@ -66,7 +132,7 @@ func TestLoadRejects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewLoader(writeConfig(t, tt.content)).Load()
+			_, err := testLoader(writeConfig(t, tt.content)).Load()
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want it to mention %q", err, tt.want)
 			}
@@ -80,7 +146,7 @@ func TestLoadRejects(t *testing.T) {
 func TestLoadRejectsOversizedConfig(t *testing.T) {
 	padding := strings.Repeat(" ", maxConfigBytes)
 	path := writeConfig(t, `{"version":1,"languages":["go"]}`+padding)
-	if _, err := NewLoader(path).Load(); err == nil || !strings.Contains(err.Error(), "larger than") {
+	if _, err := testLoader(path).Load(); err == nil || !strings.Contains(err.Error(), "larger than") {
 		t.Fatalf("err = %v, want size error", err)
 	}
 }
@@ -92,10 +158,10 @@ func TestLoadRejectsNonRegularFiles(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlinks unavailable here: %v", err)
 	}
-	if _, err := NewLoader(link).Load(); err == nil || !strings.Contains(err.Error(), "regular file") {
+	if _, err := testLoader(link).Load(); err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("err = %v, want regular-file error for a symlink", err)
 	}
-	if _, err := NewLoader(dir).Load(); err == nil || !strings.Contains(err.Error(), "regular file") {
+	if _, err := testLoader(dir).Load(); err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("err = %v, want regular-file error for a directory", err)
 	}
 }
@@ -110,7 +176,7 @@ func TestLoadMonorepoConfig(t *testing.T) {
 		],
 		"exclude": ["**/node_modules/**"]
 	}`)
-	cfg, err := NewLoader(path).Load()
+	cfg, err := testLoader(path).Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -121,7 +187,7 @@ func TestLoadMonorepoConfig(t *testing.T) {
 	if tts.Reason != "file-based layers" || len(tts.Layers["domain"]) != 1 {
 		t.Fatalf("component fields not decoded: %+v", tts)
 	}
-	if _, err := NewLoader(writeConfig(t, `{"version":1,"components":[{"paths":["a"],"languages":["go"],"layer":{}}]}`)).Load(); err == nil ||
+	if _, err := testLoader(writeConfig(t, `{"version":1,"components":[{"paths":["a"],"languages":["go"],"layer":{}}]}`)).Load(); err == nil ||
 		!strings.Contains(err.Error(), `unknown field "layer"`) {
 		t.Fatalf("a misspelt component field must be rejected, got %v", err)
 	}

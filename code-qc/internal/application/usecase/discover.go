@@ -3,9 +3,9 @@ package usecase
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
+	"sort"
 
 	"millennium-code-qc/internal/application/port"
 	"millennium-code-qc/internal/domain"
@@ -23,11 +23,11 @@ type DiscoverResult struct {
 type Discover struct {
 	repo   port.Repository
 	source port.SourceReader
-	packs  port.PackSource
+	packs  port.PackCatalog
 }
 
 // NewDiscover returns the discover use-case.
-func NewDiscover(repo port.Repository, source port.SourceReader, packs port.PackSource) *Discover {
+func NewDiscover(repo port.Repository, source port.SourceReader, packs port.PackCatalog) *Discover {
 	return &Discover{repo: repo, source: source, packs: packs}
 }
 
@@ -38,43 +38,45 @@ func (u *Discover) Execute(ctx context.Context) (DiscoverResult, error) {
 	if err != nil {
 		return DiscoverResult{}, fmt.Errorf("list files: %w", err)
 	}
-	var packs []domain.Pack
-	for _, name := range domain.Conventions() {
-		pack, err := u.packs.Pack(name)
-		if err != nil {
-			if errors.Is(err, port.ErrPackUnavailable) {
-				continue
-			}
-			return DiscoverResult{}, err
-		}
-		packs = append(packs, pack)
+	catalog, err := u.packs.Packs()
+	if err != nil {
+		return DiscoverResult{}, fmt.Errorf("read the convention packs: %w", err)
 	}
-	d := domain.Discover(domain.DiscoverInput{Files: files, React: u.usesReact, Packs: packs})
+	d := domain.Discover(domain.DiscoverInput{Files: files, Dependencies: u.dependencies, Packs: catalog.Packs()})
 	components := d.Suggest()
 	if len(components) > 0 {
 		version := domain.ConfigVersion
-		if _, err := domain.NewConfig(domain.ConfigInput{Version: &version, Components: components}); err != nil {
+		cfg, err := domain.NewConfig(domain.ConfigInput{Version: &version, Components: components})
+		if err == nil {
+			_, err = cfg.Resolve(catalog)
+		}
+		if err != nil {
 			return DiscoverResult{}, fmt.Errorf("cannot draft a config for this layout: %w", err)
 		}
 	}
 	return DiscoverResult{Discovery: d, Components: components}, nil
 }
 
-// usesReact reports whether the package.json at root depends on react. An
-// unreadable or broken package.json counts as no.
-func (u *Discover) usesReact(root string) bool {
+// dependencies lists the packages the package.json at root depends on, dev
+// dependencies included. An unreadable or broken package.json lists none.
+func (u *Discover) dependencies(root string) []string {
 	data, err := u.source.ReadWorking(path.Join(root, "package.json"))
 	if err != nil {
-		return false
+		return nil
 	}
 	var manifest struct {
 		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
 	}
 	if json.Unmarshal(data, &manifest) != nil {
-		return false
+		return nil
 	}
-	_, dep := manifest.Dependencies["react"]
-	_, dev := manifest.DevDependencies["react"]
-	return dep || dev
+	var names []string
+	for _, deps := range []map[string]string{manifest.Dependencies, manifest.DevDependencies} {
+		for name := range deps {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }

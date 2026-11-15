@@ -55,7 +55,7 @@ lines a change touched; `audit` checks the whole codebase. Seven gates:
 | Gate | What it enforces |
 |---|---|
 | `toolchain` | The tools the checks need are installed. A missing tool blocks instead of skipping the check. |
-| `structure` | Function limits (50 lines, nesting depth 3, cognitive complexity 15) and the layer import rules of your architecture. |
+| `structure` | Function limits (by default 50 lines, nesting depth 3, cognitive complexity 15) and the layer import rules of your conventions. |
 | `shell` | `bash -n` and shellcheck on changed scripts. |
 | `hygiene` | No secrets or credentials, no risky constructs (`eval`, shell execution, TLS verification off, unsafe deserialisation, raw HTML, TypeScript `any`), no suppression without a reason, no TODO without an issue link. |
 | `build` | gofmt and `go vet`, the project's own `tsc` with strict mode not weakened, and mypy if you enable it. |
@@ -129,9 +129,20 @@ and QA. Every skill uses the portable Agent Skills format.
 
 ### Conventions and monorepos
 
-- **Architecture conventions as rules:** Clean Architecture (domain,
-  application, adapters) and feature-based React. You can map their layers
-  onto the layout you already have instead of restructuring.
+- **Conventions are data, not code.** A convention is a pack: a
+  `pack.json` with the rules the gates enforce (layers, what each may
+  import, which need tests, function limits) and a `guide.md` every agent is
+  given. Clean Architecture and feature-based React are built in. Your own
+  convention, or a variation of a built-in one, is a pack in
+  `.millennium/conventions/`: no engine change, no release. Run
+  `millennium-code-qc convention new <name> --from <pack>` to start from a
+  copy.
+- **Agents know your conventions without being told.** The guides of the
+  conventions a repository uses are part of every session's and every
+  subagent's briefing.
+- **Map, don't restructure.** You can map a convention's layers onto the
+  layout you already have, and give a component its own limits, with a
+  reason.
 - **One config for a monorepo:** components map paths to languages and
   conventions, and the most specific path wins.
   `millennium-code-qc config explain <file>` shows which rules apply to a
@@ -356,7 +367,7 @@ macOS.
 | [Hooks](docs/hooks.md) | What runs in every session, and its limits |
 | [Agents and skills](docs/agents.md) | The workflow, each agent and skill, the reviewer report format |
 | [pi](docs/pi.md) | Using millennium-hq in pi |
-| [Conventions](docs/conventions/) | Clean Architecture and feature-based React |
+| [Conventions](docs/conventions/) | Clean Architecture and feature-based React, and [writing your own](docs/conventions/writing-a-convention.md) |
 | [Design](docs/design.md) | Why things are the way they are |
 
 ## Contributing

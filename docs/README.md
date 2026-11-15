@@ -8,8 +8,8 @@ past; judgement calls go to fresh-context reviewer agents. These docs call it
 
 **Status: early development.** Everything described here is built: the
 gate engine, the hooks, `config apply`, the agents and skills, the pi
-extension, and the release pipeline. The first engine release is
-`code-qc/v0.1.0`.
+extension, and the release pipeline. The current engine release is
+`code-qc/v0.2.0`.
 
 ## Guides
 
@@ -22,6 +22,7 @@ extension, and the release pipeline. The first engine release is
 | [Checks](checks.md) | What each check enforces, and how to fix its findings |
 | [Clean Architecture](conventions/clean-architecture.md) | The layers, their import rules, and how to map an existing layout |
 | [Feature-based React](conventions/react-feature-based.md) | Shared code, isolated features and the app layer, and how to map an existing layout |
+| [Writing a convention](conventions/writing-a-convention.md) | Convention packs: the format, and how to create, propose and apply your own |
 | [Hooks](hooks.md) | What the plugin's hooks enforce in every session, and their limits |
 | [Agents and skills](agents.md) | The tech-lead workflow, each agent and skill, and the reviewer report format |
 | [pi](pi.md) | Installing and using millennium in pi, and what pi cannot enforce |

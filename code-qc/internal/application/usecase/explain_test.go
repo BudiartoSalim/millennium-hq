@@ -8,18 +8,44 @@ import (
 	"millennium-code-qc/internal/domain"
 )
 
-type fakePacks struct{}
+// fakePacks is a pack catalog: a built-in clean-architecture with Go paths
+// only, and a react-feature-based suggested for React modules.
+type fakePacks struct{ err error }
 
-func (fakePacks) Pack(name domain.Convention) (domain.Pack, error) {
-	if name != domain.ConventionCleanArchitecture {
-		return domain.Pack{}, port.ErrPackUnavailable
+func (f fakePacks) Packs() (domain.Catalog, error) {
+	if f.err != nil {
+		return nil, f.err
 	}
-	return domain.NewPack(domain.PackInput{
-		Name:      "clean-architecture",
-		Languages: []string{"go", "python"},
-		Layers:    []domain.PackLayer{{Name: "domain"}},
-		Paths:     map[string]map[string][]string{"go": {"domain": {"internal/domain"}}},
+	return testPacks(), nil
+}
+
+func testPacks() domain.Catalog {
+	clean, err := domain.NewPack(domain.PackInput{
+		Name: "clean-architecture", Origin: domain.PackBuiltin, Languages: []string{"go", "python"},
+		Layers: []domain.PackLayer{{Name: "domain"}},
+		Paths:  map[string]map[string][]string{"go": {"domain": {"internal/domain"}}},
+		Guide:  "Business rules live in domain.",
 	})
+	if err != nil {
+		panic(err)
+	}
+	react, err := domain.NewPack(domain.PackInput{
+		Name: "react-feature-based", Origin: domain.PackBuiltin, Languages: []string{"typescript"},
+		Layers:  []domain.PackLayer{{Name: "features", Isolated: true}},
+		Paths:   map[string]map[string][]string{"typescript": {"features": {"src/features/*"}}},
+		Suggest: []string{"react"}, Guide: "Features never import each other.",
+	})
+	if err != nil {
+		panic(err)
+	}
+	return domain.Catalog{clean.Name: clean, react.Name: react}
+}
+
+// withCleanArchitecture gives cfg the clean-architecture pack only, so any
+// other convention it names has no pack.
+func withCleanArchitecture(cfg domain.Config) domain.Config {
+	cfg.Packs = domain.Catalog{"clean-architecture": testPacks()["clean-architecture"]}
+	return cfg
 }
 
 func explain(t *testing.T, path string) Explanation {
@@ -31,7 +57,7 @@ func explain(t *testing.T, path string) Explanation {
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
-	out, err := NewExplainFile(NewLoadConfig(fakeSource{cfg: cfg}, &fakeRepo{}), fakePacks{}).Execute(t.Context(), path)
+	out, err := NewExplainFile(NewLoadConfig(fakeSource{cfg: withCleanArchitecture(cfg)}, &fakeRepo{})).Execute(t.Context(), path)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -53,7 +79,7 @@ func TestExplainFile(t *testing.T) {
 
 func TestExplainFileProblemsAndMisses(t *testing.T) {
 	web := explain(t, "web/src/App.tsx")
-	if len(web.Layers) != 1 || web.Layers[0].Problem != "not available in this engine version" {
+	if len(web.Layers) != 1 || web.Layers[0].Problem != "no pack for this convention is available" {
 		t.Fatalf("web layers = %+v", web.Layers)
 	}
 	outside := explain(t, "docs/notes.txt")
@@ -66,7 +92,7 @@ func TestExplainFileProblemsAndMisses(t *testing.T) {
 }
 
 func TestExplainFileNeedsAConfigAndAValidPath(t *testing.T) {
-	uc := NewExplainFile(NewLoadConfig(fakeSource{err: port.ErrConfigNotFound}, &fakeRepo{}), fakePacks{})
+	uc := NewExplainFile(NewLoadConfig(fakeSource{err: port.ErrConfigNotFound}, &fakeRepo{}))
 	if _, err := uc.Execute(t.Context(), "a.go"); !errors.Is(err, ErrConfigRequired) {
 		t.Fatalf("err = %v, want ErrConfigRequired", err)
 	}

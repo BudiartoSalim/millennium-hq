@@ -34,11 +34,11 @@ func (f *fakeRunner) Command(_ context.Context, dir string, recipe domain.TestRe
 	return f.result("command " + dir + " " + strings.Join(recipe.Command, " "))
 }
 
-// testedPacks marks domain as tested, infrastructure as not.
-type testedPacks struct{}
-
-func (testedPacks) Pack(domain.Convention) (domain.Pack, error) {
-	return domain.NewPack(domain.PackInput{
+// testedPacks has a clean-architecture pack that marks domain as tested,
+// infrastructure as not.
+func testedPacks(t *testing.T) domain.Catalog {
+	t.Helper()
+	pack, err := domain.NewPack(domain.PackInput{
 		Name:      "clean-architecture",
 		Languages: []string{"go", "typescript", "python"},
 		Layers:    []domain.PackLayer{{Name: "domain", Tested: true}, {Name: "infrastructure", MayImport: []string{"domain"}, ThirdParty: true}},
@@ -47,7 +47,12 @@ func (testedPacks) Pack(domain.Convention) (domain.Pack, error) {
 			"python":     {"domain": {"*/domain.py"}},
 			"typescript": {"domain": {"src/domain"}},
 		},
+		Guide: "Business rules live in domain.",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domain.Catalog{"clean-architecture": pack}
 }
 
 func testsConfig(t *testing.T) domain.Config {
@@ -62,6 +67,7 @@ func testsConfig(t *testing.T) domain.Config {
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
+	cfg.Packs = testedPacks(t)
 	return cfg
 }
 
@@ -74,7 +80,7 @@ func runTests(t *testing.T, runner *fakeRunner, source *fakeSource, tier domain.
 		domain.LanguagePython:     fakeAnalyzer{facts: map[string]domain.FileFacts{"logic": logic}},
 		domain.LanguageTypeScript: fakeAnalyzer{facts: map[string]domain.FileFacts{"logic": logic}},
 	}
-	g := NewTests(analyzers, testedPacks{}, source, runner, fakeFinder{"svc": "go.mod"})
+	g := NewTests(analyzers, source, runner, fakeFinder{"svc": "go.mod"})
 	findings, err := g.Run(t.Context(), port.GateInput{Config: testsConfig(t), Changes: domain.ChangeSet{Base: base, Files: files}, Tier: tier})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

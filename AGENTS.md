@@ -21,9 +21,10 @@ code-qc/                      millennium-code-qc, the code quality engine; Go st
     usecase/                  load config, run gates, audit, explain, guard, stop, scope, apply, discover
   internal/infrastructure/    analysiscache, approvals, buildtools, configfile, gitrepo, goanalyzer,
                               helperanalyzer (TypeScript and Python helpers, embedded), manifests,
-                              packs (embedded convention packs), projectfiles, registry,
+                              packs (convention packs: the built-in ones embedded, the project's
+                              read from .millennium/conventions), projectfiles, registry,
                               shellanalyzer, shelltools (bash -n, shellcheck), statestore,
-                              testrunner, toolpath
+                              strictfile (bounded, strict reads of rule files), testrunner, toolpath
   internal/interface/cli/     argument parsing, rendering, exit codes
 pi/                           the pi extension: pi events -> the engine's hook protocol, and the
                               millennium_agent tool; TypeScript, Node standard library only
@@ -39,7 +40,8 @@ plugin/                       what users install
   code-qc.lock                 engine version and per-platform SHA-256, written by release-build.sh
 .claude-plugin/marketplace.json  this repository as the millennium-hq marketplace
 .github/workflows/            the engine release workflow (docs/releasing.md)
-schema/millennium.schema.json JSON Schema of a project's .millennium/config.json
+schema/                      JSON Schemas of a project's .millennium/config.json and of a
+                              convention pack's pack.json
 .millennium/config.json       this repository's own config: the engine audits itself
 scripts/verify.sh             the full local check
 scripts/release-build.sh      reproducible release builds and the engine lock
@@ -94,7 +96,10 @@ per-caller special cases.
   imports `domain` only, adapters and `interface` import inward, and only
   `main.go` sees everything.
 - Enumerations are typed strings with an allowlist function (`Languages()`,
-  `Conventions()`), and validation lives in `domain`.
+  `ShellLints()`), and validation lives in `domain`. Conventions are not an
+  enumeration: the engine names none, and a config's conventions are
+  resolved against the pack catalog (`domain.Catalog`, built-in packs plus
+  the project's).
 - Sentinel errors live in the use-case package, or in `port` when adapters must
   return them; wrap with `%w`; map them to output only in `interface/cli`.
 - **Exit status:** 0 only for a pass or a repository that is not opted in;
@@ -104,7 +109,9 @@ per-caller special cases.
 - Config changes touch four places in one change: the domain, the DTO in
   `infrastructure/configfile`, `schema/millennium.schema.json`, and
   `docs/configuration.md`. `schema_sync_test.go` fails when the first three
-  drift.
+  drift. Pack format changes likewise touch the domain, the DTO in
+  `infrastructure/packs`, `schema/millennium-pack.schema.json` (its own
+  `schema_sync_test.go`), and `docs/conventions/writing-a-convention.md`.
 - **Every user-facing change updates `docs/` in the same change**: a new
   command or flag in `docs/cli.md`, a new check or rule in `docs/checks.md`, a
   convention in `docs/conventions/`. A user must be able to learn every

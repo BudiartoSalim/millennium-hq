@@ -10,8 +10,8 @@ import (
 // against these lists, and the run treats an undeclared rule as a bug.
 func TestEveryGateDeclaresItsRules(t *testing.T) {
 	gates := []port.Gate{
-		NewToolchain(nil), NewStructure(nil, nil, nil), NewShell(nil, nil),
-		NewHygiene(nil, nil), NewBuild(nil, nil), NewTests(nil, nil, nil, nil, nil), NewDeps(nil, nil, nil, nil, nil, nil),
+		NewToolchain(nil), NewStructure(nil, nil), NewShell(nil, nil),
+		NewHygiene(nil, nil), NewBuild(nil, nil), NewTests(nil, nil, nil, nil), NewDeps(nil, nil, nil, nil, nil, nil),
 	}
 	for _, g := range gates {
 		rules := g.Rules()

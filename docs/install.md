@@ -226,7 +226,7 @@ have reviewed:
 
 ```
 git clone https://github.com/BudiartoSalim/millennium-hq ~/tools/millennium-hq
-cd ~/tools/millennium-hq && git checkout code-qc/v0.1.0
+cd ~/tools/millennium-hq && git checkout code-qc/v0.2.0
 ```
 
 The engine command is the launcher in the clone:

@@ -11,6 +11,13 @@ component, typically a web app:
 **Status:** enforced for TypeScript (`.ts`, `.tsx`). Plain `.js`/`.jsx` files
 are not read.
 
+It is a built-in [convention pack](writing-a-convention.md):
+`millennium-code-qc convention show react-feature-based` prints its rules, its function
+limits (the defaults: 50 lines, nesting depth 3, cognitive complexity 15) and
+the guide every agent is given. To vary it, copy it under a new name with
+`millennium-code-qc convention new <name> --from react-feature-based`. `discover` suggests it for
+modules whose `package.json` depends on `react`.
+
 ## Layers
 
 | Layer | Default paths (from the component root) | May import | Third-party | Tests required |

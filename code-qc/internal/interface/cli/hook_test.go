@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"millennium-code-qc/internal/application/usecase"
 	"millennium-code-qc/internal/domain"
@@ -226,5 +227,56 @@ func TestPreToolUseDeniesWritesToLocalConfigs(t *testing.T) {
 	if code, out := runHook(t, read, map[string]any{"hook_event_name": "PreToolUse", "cwd": "/r", "tool_name": "Read",
 		"tool_input": map[string]any{"file_path": "/home/u/.config/millennium/projects/ab/config.json"}}); code != 0 || out != nil {
 		t.Fatalf("reading a local config is fine: exit %d, output %v", code, out)
+	}
+}
+
+func briefedConfig(t *testing.T, guides ...string) domain.Config {
+	t.Helper()
+	cfg, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Components: []domain.ComponentInput{
+		{Paths: []string{"api"}, Languages: []string{"go"}, Conventions: []string{"flat"}},
+		{Paths: []string{"tools"}, Languages: []string{"go"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Packs = domain.Catalog{}
+	for i, guide := range guides {
+		pack := samplePack(t)
+		pack.Name, pack.Guide = domain.Convention([]string{"flat", "wide", "tall"}[i]), guide
+		cfg.Packs[pack.Name] = pack
+	}
+	return cfg
+}
+
+func TestBriefingCarriesTheGuides(t *testing.T) {
+	h := &harness{config: fakeConfig{enabled: true, cfg: briefedConfig(t, "Keep it flat.")}}
+	code, out := runHook(t, h, map[string]any{"hook_event_name": "SubagentStart", "cwd": "/r", "agent_type": "millennium:qa-tester"})
+	specific, _ := out["hookSpecificOutput"].(map[string]any)
+	context := fmt.Sprint(specific["additionalContext"])
+	if code != 0 || specific["hookEventName"] != "SubagentStart" {
+		t.Fatalf("exit %d, output %v", code, out)
+	}
+	for _, want := range []string{"Conventions, by component: api: flat;", "<convention-guide name=\"flat\">\nKeep it flat.\n</convention-guide>"} {
+		if !strings.Contains(context, want) {
+			t.Errorf("context lacks %q:\n%s", want, context)
+		}
+	}
+	if strings.Contains(context, "tools:") {
+		t.Error("components without conventions are not listed")
+	}
+}
+
+func TestBriefingNamesTheGuidesThatDoNotFit(t *testing.T) {
+	long := strings.Repeat("x", domain.MaxGuideRunes)
+	got := briefing("", briefedConfig(t, long, "Short.", long))
+	if n := utf8.RuneCountInString(got); n > maxBriefingRunes {
+		t.Fatalf("the briefing has %d characters, more than %d", n, maxBriefingRunes)
+	}
+	if !strings.Contains(got, "<convention-guide name=\"flat\">") || !strings.Contains(got, "<convention-guide name=\"wide\">") ||
+		!strings.Contains(got, "The guides of tall did not fit here: read each with `millennium-code-qc convention show <name>`") {
+		t.Fatalf("briefing:\n%.600s", got)
+	}
+	if plain := briefing("", domain.Config{}); strings.Contains(plain, "Conventions") {
+		t.Fatalf("no conventions, no guides: %s", plain)
 	}
 }

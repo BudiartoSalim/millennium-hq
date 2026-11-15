@@ -49,7 +49,7 @@ func (a *App) apply(deps Deps, path string, target usecase.ApplyTarget, confirm 
 	if err != nil {
 		return fmt.Errorf("read the proposal: %w", err)
 	}
-	plan, err := deps.Apply.Prepare(data, target)
+	plan, err := deps.Apply.Prepare(data, filepath.Dir(path), target)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,10 @@ func (a *App) describePlan(path string, plan usecase.ApplyPlan) {
 			fmt.Fprintf(a.stderr, "  - %s\n", l)
 		}
 	}
-	if plan.Config != nil {
+	for _, p := range plan.Packs {
+		fmt.Fprintf(a.stderr, "\nConvention %s, its rules (pack.json; its guide.md has %d characters):\n%s", p.Pack.Name, len([]rune(p.Pack.Guide)), p.Files.Pack)
+	}
+	if plan.Canonical != nil {
 		fmt.Fprintf(a.stderr, "\nThe config it applies:\n%s\n", plan.Canonical)
 	}
 }

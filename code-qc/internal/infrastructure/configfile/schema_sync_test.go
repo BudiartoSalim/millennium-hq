@@ -102,6 +102,7 @@ func TestSchemaPropertiesMatchDecoder(t *testing.T) {
 		{"component", child(t, root, "properties", "components", "items"), reflect.TypeFor[componentDTO]()},
 		{"test", child(t, root, "$defs", "test"), reflect.TypeFor[testDTO]()},
 		{"disable", child(t, root, "properties", "disable", "items"), reflect.TypeFor[disableDTO]()},
+		{"limits", child(t, root, "$defs", "limits"), reflect.TypeFor[limitsDTO]()},
 	}
 	for _, obj := range objects {
 		if got, want := propertyNames(t, obj.node), jsonTags(obj.dto); !slices.Equal(got, want) {
@@ -119,7 +120,6 @@ func TestSchemaEnumsMatchDomain(t *testing.T) {
 		domain []string
 	}{
 		{"language", child(t, root, "$defs", "language"), asStrings(domain.Languages())},
-		{"convention", child(t, root, "$defs", "convention"), asStrings(domain.Conventions())},
 		{"testing", child(t, props, "testing"), asStrings(domain.TestingProfiles())},
 		{"dependencyPolicy", child(t, props, "dependencyPolicy"), asStrings(domain.DependencyPolicies())},
 		{"python.typeCheck", child(t, props, "python", "properties", "typeCheck"), asStrings(domain.PythonTypeChecks())},
@@ -179,10 +179,25 @@ func TestSchemaEnumListsUseSharedDefinitions(t *testing.T) {
 		{"conventions", child(t, props, "conventions", "items"), "#/$defs/convention"},
 		{"components[].languages", child(t, component, "languages", "items"), "#/$defs/language"},
 		{"components[].conventions", child(t, component, "conventions", "items"), "#/$defs/convention"},
+		{"limits", child(t, props, "limits"), "#/$defs/limits"},
+		{"components[].limits", child(t, component, "limits"), "#/$defs/limits"},
 	}
 	for _, r := range refs {
 		if got := r.node["$ref"]; got != r.want {
 			t.Errorf("%s: $ref %v, want %s", r.name, got, r.want)
 		}
+	}
+}
+
+// Convention names are open: any pack can define one, so the schema checks
+// their shape, not a list.
+func TestSchemaConventionNameMatchesDomain(t *testing.T) {
+	convention := child(t, loadSchema(t), "$defs", "convention")
+	if convention["pattern"] != domain.ConventionNamePattern || convention["maxLength"] != float64(domain.MaxConventionName) {
+		t.Errorf("convention: schema pattern %v and maxLength %v, domain %q and %d",
+			convention["pattern"], convention["maxLength"], domain.ConventionNamePattern, domain.MaxConventionName)
+	}
+	if _, listed := convention["enum"]; listed {
+		t.Error("convention names are not a fixed list")
 	}
 }

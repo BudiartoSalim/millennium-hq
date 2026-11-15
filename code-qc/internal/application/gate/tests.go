@@ -10,21 +10,20 @@ import (
 )
 
 // Tests holds changed logic to its tests. In every tier, changed production
-// code in a tested layer (domain and application, under clean-architecture)
-// must come with a change to its tests. In the full tier the suites of the
+// code in a tested layer (one its convention pack marks as tested, such as
+// domain and application under clean-architecture) must come with a change to its tests. In the full tier the suites of the
 // touched modules also run, must pass, and must execute every changed
 // executable line of that code.
 type Tests struct {
 	analyzers map[domain.Language]port.Analyzer
-	packs     port.PackSource
 	source    port.SourceReader
 	runner    port.TestRunner
 	finder    port.FileFinder
 }
 
 // NewTests returns the tests gate.
-func NewTests(analyzers map[domain.Language]port.Analyzer, packs port.PackSource, source port.SourceReader, runner port.TestRunner, finder port.FileFinder) *Tests {
-	return &Tests{analyzers: analyzers, packs: packs, source: source, runner: runner, finder: finder}
+func NewTests(analyzers map[domain.Language]port.Analyzer, source port.SourceReader, runner port.TestRunner, finder port.FileFinder) *Tests {
+	return &Tests{analyzers: analyzers, source: source, runner: runner, finder: finder}
 }
 
 // Rules lists the rules the gate reports.
@@ -68,7 +67,7 @@ func (g *Tests) candidates(ctx context.Context, in port.GateInput) []candidate {
 	var out []candidate
 	for _, file := range in.Changes.Files {
 		lang, match, ok := ownedCode(in.Config, file)
-		if !ok || domain.IsTestPath(lang, file.Path) || !g.inTestedLayer(lang, match, file.Path) {
+		if !ok || domain.IsTestPath(lang, file.Path) || !inTestedLayer(in.Config.Packs, lang, match, file.Path) {
 			continue
 		}
 		if g.needsTests(ctx, lang, file.Path) {
@@ -89,9 +88,9 @@ func ownedCode(cfg domain.Config, file domain.ChangedFile) (domain.Language, dom
 	return lang, match, err == nil && owned && match.Component.Has(lang)
 }
 
-func (g *Tests) inTestedLayer(lang domain.Language, match domain.ComponentMatch, p string) bool {
+func inTestedLayer(packs domain.Catalog, lang domain.Language, match domain.ComponentMatch, p string) bool {
 	for _, convention := range match.Component.Conventions {
-		if layering, err := layeringFor(g.packs, convention, lang, match); err == nil && layering.Tested(p) {
+		if layering, err := layeringFor(packs, convention, lang, match); err == nil && layering.Tested(p) {
 			return true
 		}
 	}

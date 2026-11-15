@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -65,7 +66,7 @@ type moduleJSON struct {
 	Markers []string       `json:"markers"`
 	Files   map[string]int `json:"files"`
 	Tests   int            `json:"tests"`
-	React   bool           `json:"react"`
+	Hints   []string       `json:"hints"`
 	Fits    []fitJSON      `json:"fits"`
 }
 
@@ -91,7 +92,7 @@ func proposalJSON(components []domain.ComponentInput) draftJSON {
 func discoveryJSON(r usecase.DiscoverResult) map[string]any {
 	modules := make([]moduleJSON, len(r.Discovery.Modules))
 	for i, m := range r.Discovery.Modules {
-		modules[i] = moduleJSON{Root: rootLabel(m.Root), Markers: nonNil(m.Markers), Files: languageCounts(m.Files), Tests: m.Tests, React: m.React, Fits: []fitJSON{}}
+		modules[i] = moduleJSON{Root: rootLabel(m.Root), Markers: nonNil(m.Markers), Files: languageCounts(m.Files), Tests: m.Tests, Hints: conventionNames(m.Hints), Fits: []fitJSON{}}
 		for _, f := range m.Fits {
 			modules[i].Fits = append(modules[i].Fits, fitJSON{string(f.Convention), string(f.Language), f.InLayer, f.Total, f.Fits()})
 		}
@@ -111,8 +112,8 @@ func writeDiscovery(w io.Writer, r usecase.DiscoverResult) error {
 		if m.Tests > 0 {
 			fmt.Fprintf(&b, ", %d test files", m.Tests)
 		}
-		if m.React {
-			b.WriteString(", React")
+		if len(m.Hints) > 0 {
+			fmt.Fprintf(&b, ", its dependencies suggest %s", strings.Join(conventionNames(m.Hints), ", "))
 		}
 		b.WriteString("\n")
 		for _, f := range m.Fits {
@@ -177,7 +178,7 @@ func proposedConfig(deps Deps, file string) (*domain.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read the proposal: %w", err)
 	}
-	plan, err := deps.Apply.Prepare(data, usecase.ApplyCommitted)
+	plan, err := deps.Apply.Prepare(data, filepath.Dir(file), usecase.ApplyCommitted)
 	if err != nil {
 		return nil, err
 	}
@@ -185,4 +186,12 @@ func proposedConfig(deps Deps, file string) (*domain.Config, error) {
 		return nil, errors.New("the proposal has no config to audit against")
 	}
 	return plan.Config, nil
+}
+
+func conventionNames(names []domain.Convention) []string {
+	out := make([]string, len(names))
+	for i, name := range names {
+		out[i] = string(name)
+	}
+	return out
 }

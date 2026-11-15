@@ -26,8 +26,8 @@ var discovered = usecase.DiscoverResult{
 	Discovery: domain.Discovery{
 		Modules: []domain.Module{
 			{Root: "api", Markers: []string{"go.mod"}, Files: map[domain.Language]int{domain.LanguageGo: 3}, Tests: 1,
-				Fits: []domain.PackFit{{Convention: domain.ConventionCleanArchitecture, Language: domain.LanguageGo, InLayer: 2, Total: 2}}},
-			{Root: "", Markers: []string{"package.json"}, Files: map[domain.Language]int{}, React: true},
+				Fits: []domain.PackFit{{Convention: "clean-architecture", Language: domain.LanguageGo, InLayer: 2, Total: 2}}},
+			{Root: "", Markers: []string{"package.json"}, Files: map[domain.Language]int{}, Hints: []domain.Convention{"react-feature-based"}},
 		},
 		Loose: map[domain.Language]int{domain.LanguageShell: 1},
 	},
@@ -41,7 +41,7 @@ func TestDiscoverText(t *testing.T) {
 	}
 	assertContainsAll(t, h.stdout.String(), []string{
 		"2 modules", "api (go.mod): go 3 files, 1 test files", "clean-architecture: 2 of 2 go files in its layers",
-		". (package.json): no code, React", "outside any module: shell 1 files", `"conventions": [`, "millennium-code-qc audit --proposal",
+		". (package.json): no code, its dependencies suggest react-feature-based", "outside any module: shell 1 files", `"conventions": [`, "millennium-code-qc audit --proposal",
 	})
 	empty := &harness{}
 	if code := empty.run(t, "discover"); code != 0 || !strings.Contains(empty.stdout.String(), "No code found") {
@@ -61,7 +61,8 @@ func TestDiscoverJSON(t *testing.T) {
 	if err := json.Unmarshal(h.stdout.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Modules) != 2 || out.Modules[1].Root != "." || !out.Modules[0].Fits[0].Fits || out.Proposal.Config.Components[0].Paths[0] != "api" {
+	if len(out.Modules) != 2 || out.Modules[1].Root != "." || !out.Modules[0].Fits[0].Fits || out.Proposal.Config.Components[0].Paths[0] != "api" ||
+		out.Modules[1].Hints[0] != "react-feature-based" {
 		t.Fatalf("output = %s", h.stdout.String())
 	}
 }

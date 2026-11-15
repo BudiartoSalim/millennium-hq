@@ -5,30 +5,35 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"path/filepath"
+	"sort"
 
 	"millennium-code-qc/internal/application/port"
 	"millennium-code-qc/internal/domain"
 	"millennium-code-qc/internal/infrastructure/approvals"
+	"millennium-code-qc/internal/infrastructure/packs"
+	"millennium-code-qc/internal/infrastructure/strictfile"
 )
 
 // ProposalVersion is the only proposal format version this engine reads.
 const ProposalVersion = 1
 
 // proposalDTO is a change an agent drafts and only the user applies:
-// {"version": 1, "config": {...}, "approvals": [...]}, with at least one of
-// config and approvals.
+// {"version": 1, "config": {...}, "packs": {"<name>": "<folder>"},
+// "approvals": [...]}, with at least one of config, packs and approvals.
 type proposalDTO struct {
 	Version   int               `json:"version"`
 	Config    json.RawMessage   `json:"config"`
+	Packs     map[string]string `json:"packs"`
 	Approvals []json.RawMessage `json:"approvals"`
 }
 
-// Codec reads proposals and writes configs and approval records.
+// Codec reads proposals and writes configs, packs and approval records.
 type Codec struct{}
 
-// ParseProposal validates a proposal as strictly as a config file.
-func (Codec) ParseProposal(data []byte) (port.Proposal, error) {
+// ParseProposal validates a proposal as strictly as a config file. The pack
+// folders it names are read relative to dir, the proposal's folder.
+func (Codec) ParseProposal(data []byte, dir string) (port.Proposal, error) {
 	p, err := decodeProposal(data)
 	if err != nil {
 		return port.Proposal{}, err
@@ -41,6 +46,9 @@ func (Codec) ParseProposal(data []byte) (port.Proposal, error) {
 		}
 		out.Config, out.Canonical = &cfg, canonical
 	}
+	if out.Packs, err = readProposedPacks(p.Packs, dir); err != nil {
+		return port.Proposal{}, err
+	}
 	for i, raw := range p.Approvals {
 		approval, err := approvals.Decode(raw)
 		if err != nil {
@@ -51,27 +59,46 @@ func (Codec) ParseProposal(data []byte) (port.Proposal, error) {
 	return out, nil
 }
 
+// readProposedPacks reads each named pack folder, in name order. A folder is
+// a relative path below the proposal's folder, and its pack must carry the
+// name the proposal gives it.
+func readProposedPacks(named map[string]string, dir string) ([]port.ProposedPack, error) {
+	names := make([]string, 0, len(named))
+	for name := range named {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out []port.ProposedPack
+	for _, name := range names {
+		folder := named[name]
+		if !filepath.IsLocal(filepath.FromSlash(folder)) {
+			return nil, fmt.Errorf("proposal packs.%s: %q must be a folder below the proposal's own, without '..'", name, folder)
+		}
+		pack, files, err := packs.ReadFolder(filepath.Join(dir, filepath.FromSlash(folder)), domain.PackProject)
+		if err != nil {
+			return nil, fmt.Errorf("proposal packs.%s: %w", name, err)
+		}
+		if string(pack.Name) != name {
+			return nil, fmt.Errorf("proposal packs.%s: the folder holds pack %q", name, pack.Name)
+		}
+		out = append(out, port.ProposedPack{Pack: pack, Files: port.PackFiles(files)})
+	}
+	return out, nil
+}
+
 func decodeProposal(data []byte) (proposalDTO, error) {
 	if len(data) > maxConfigBytes {
 		return proposalDTO{}, fmt.Errorf("the proposal is larger than %d bytes", maxConfigBytes)
 	}
-	if err := rejectDuplicateKeys(data); err != nil {
-		return proposalDTO{}, fmt.Errorf("proposal: %w", err)
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	var p proposalDTO
-	if err := dec.Decode(&p); err != nil {
-		return proposalDTO{}, fmt.Errorf("proposal: parse: %w", err)
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return proposalDTO{}, errors.New("proposal: unexpected data after the proposal object")
+	if err := strictfile.DecodeJSON(data, &p); err != nil {
+		return proposalDTO{}, fmt.Errorf("proposal: %w", err)
 	}
 	if p.Version != ProposalVersion {
 		return proposalDTO{}, fmt.Errorf("proposal: version %d is not supported; this engine reads version %d", p.Version, ProposalVersion)
 	}
-	if len(p.Config) == 0 && len(p.Approvals) == 0 {
-		return proposalDTO{}, errors.New(`proposal: it needs "config", "approvals" or both`)
+	if len(p.Config) == 0 && len(p.Packs) == 0 && len(p.Approvals) == 0 {
+		return proposalDTO{}, errors.New(`proposal: it needs "config", "packs", "approvals" or several of them`)
 	}
 	return p, nil
 }
@@ -95,6 +122,12 @@ func parseProposalConfig(raw json.RawMessage) (domain.Config, []byte, error) {
 
 // FormatApproval renders an approval record file.
 func (Codec) FormatApproval(a domain.Approval) ([]byte, error) { return approvals.Format(a) }
+
+// FormatPack renders a pack's files, every limit spelled out.
+func (Codec) FormatPack(pack domain.Pack) (port.PackFiles, error) {
+	files, err := packs.Encode(pack)
+	return port.PackFiles(files), err
+}
 
 // FormatProposal wraps config JSON as a proposal, for exporting a config
 // so that applying it again reproduces it.

@@ -52,7 +52,7 @@ the plugin's launcher, exactly as the Claude Code hooks do.
 
 | pi event | What happens |
 |---|---|
-| `session_start` | The engine briefs an opted-in session (the same text as Claude Code's SessionStart hook). The briefing, plus how to read the skills in pi, becomes a `millennium` section of every run's system prompt. |
+| `session_start` | The engine briefs an opted-in session (the same text as Claude Code's SessionStart hook, with the guides of the repository's conventions). The briefing, plus how to read the skills in pi, becomes a `millennium` section of every run's system prompt. Agents started by `millennium_agent` load the extension, so they get it too. |
 | `tool_call` | The guard checks `read`, `edit`, `write`, `grep`, `find`, `ls`, `bash` and `powershell`, including calls a codemode script makes. A call the guard cannot check (no engine, a timeout, unexpected output) is blocked. |
 | `agent_before_settle` | When an agent finishes, the fast tier of the gates runs. While it fails, the findings go back to the agent and pi continues the run, up to 3 times in a row; then you get a warning that the work is **not** done. |
 

@@ -50,9 +50,12 @@ its component lists.
 
 ### Limits
 
-Every function must meet these limits:
+Every function must meet these limits. The values shown are the defaults;
+a convention pack can set its own, and a component can override them with a
+reason (see [Function limits](configuration.md#function-limits)).
+`config explain <file>` shows the limits in force for a file.
 
-| Rule | Limit | Notes |
+| Rule | Default limit | Notes |
 |---|---|---|
 | `function-length` | 50 lines, from the first line of the function to its last | Test files are exempt: table-driven tests are long by nature. |
 | `nesting-depth` | 3 levels | Each `if`, loop, `switch`, `select` and function literal opens a level; `else if` does not. |
@@ -107,7 +110,7 @@ by `audit`. The layers and their rules come from the convention: see
 | `analysis-failed` | A file cannot be read or parsed: a syntax error, a symlink, a file larger than 4 MiB, a Go file without `go.mod`, a TypeScript project whose dependencies are not installed or whose TypeScript is 7 or newer, Python older than 3.10. | Fix the cause the message names. Exclude generated or vendored files in the config. |
 | `component-ambiguous` | Two components match a file equally. | Make one component's pattern more specific. |
 | `analysis-unavailable` | A component lists a language whose code checks this engine version does not have. | None: the code cannot pass until an analyzer for it ships. |
-| `convention-unavailable` | A component selects a convention this engine version does not have, or one with no rules for the component's language. | None yet; remove the convention only if you accept losing its rules. |
+| `convention-unavailable` | A component's convention has no pack (only possible when the config was not loaded through the engine), or its pack governs the component's language but has no layer paths for it. | Add the language's paths to the pack, or remove the language from the pack's `languages`. |
 
 ## `shell`
 

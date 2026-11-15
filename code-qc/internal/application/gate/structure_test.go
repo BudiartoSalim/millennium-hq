@@ -59,18 +59,20 @@ func (f *fakeSource) ChangedLines(_ context.Context, rev, path string) (domain.L
 	return domain.LineSet{}, nil
 }
 
-type fakePacks struct{}
-
-func (fakePacks) Pack(name domain.Convention) (domain.Pack, error) {
-	if name != domain.ConventionCleanArchitecture {
-		return domain.Pack{}, port.ErrPackUnavailable
-	}
-	return domain.NewPack(domain.PackInput{
+// structurePacks has a clean-architecture pack with Go rules only.
+func structurePacks(t *testing.T) domain.Catalog {
+	t.Helper()
+	pack, err := domain.NewPack(domain.PackInput{
 		Name:      "clean-architecture",
 		Languages: []string{"go", "typescript", "python"},
 		Layers:    []domain.PackLayer{{Name: "domain"}, {Name: "infrastructure", MayImport: []string{"domain"}, ThirdParty: true}},
 		Paths:     map[string]map[string][]string{"go": {"domain": {"internal/domain"}, "infrastructure": {"internal/infrastructure"}}},
+		Guide:     "Business rules live in domain.",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domain.Catalog{"clean-architecture": pack}
 }
 
 func structureConfig(t *testing.T) domain.Config {
@@ -85,6 +87,7 @@ func structureConfig(t *testing.T) domain.Config {
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
+	cfg.Packs = structurePacks(t)
 	return cfg
 }
 
@@ -101,7 +104,7 @@ func runStructure(t *testing.T, source *fakeSource, base string, files ...domain
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: map[string]domain.FileFacts{
 		"clean": cleanFile, "long": longFile, "badimport": badImport,
 	}}}
-	g := NewStructure(analyzers, fakePacks{}, source)
+	g := NewStructure(analyzers, source)
 	in := port.GateInput{Config: structureConfig(t), Changes: domain.ChangeSet{Base: base, Files: files}}
 	findings, err := g.Run(t.Context(), in)
 	if err != nil {
@@ -157,12 +160,12 @@ func TestStructureUnavailableConventionBlocksOncePerComponent(t *testing.T) {
 	source := &fakeSource{working: map[string]string{"web/a.go": "clean", "web/b.go": "clean"}}
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: map[string]domain.FileFacts{"clean": cleanFile}}}
 	in := port.GateInput{Config: cfg, Changes: domain.ChangeSet{Files: []domain.ChangedFile{modified("web/a.go"), modified("web/b.go")}}}
-	findings, err := NewStructure(analyzers, fakePacks{}, source).Run(t.Context(), in)
+	findings, err := NewStructure(analyzers, source).Run(t.Context(), in)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(findings) != 1 || findings[0].Rule != "convention-unavailable" ||
-		!strings.Contains(findings[0].Message, "convention react-feature-based is not available") {
+		!strings.Contains(findings[0].Message, "no pack for convention react-feature-based is available") {
 		t.Fatalf("want one convention-unavailable finding, got %+v", findings)
 	}
 }
@@ -199,5 +202,21 @@ func TestStructureSkipsDeletedFilesAndReportsUnreadableOnes(t *testing.T) {
 	findings := runStructure(t, &fakeSource{}, "", modified("svc/internal/domain/link.go"))
 	if len(findings) != 1 || findings[0].Rule != "analysis-failed" || !strings.Contains(findings[0].Message, "not a regular file") {
 		t.Fatalf("an unreadable file must block, got %+v", findings)
+	}
+}
+
+func TestStructureAppliesTheComponentsLimits(t *testing.T) {
+	cfg, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Components: []domain.ComponentInput{
+		{Paths: []string{"gen"}, Languages: []string{"go"}, Limits: &domain.LimitOverride{
+			Values: domain.LimitsInput{FunctionLines: ptr(100)}, Reason: "generated parsers are long"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: map[string]domain.FileFacts{"long": longFile}}}
+	source := &fakeSource{working: map[string]string{"gen/a.go": "long", "other/a.go": "long"}}
+	in := port.GateInput{Config: cfg, Changes: domain.ChangeSet{Files: []domain.ChangedFile{modified("gen/a.go")}}}
+	if findings, err := NewStructure(analyzers, source).Run(t.Context(), in); err != nil || len(findings) != 0 {
+		t.Fatalf("an 80-line function passes a 100-line limit: %+v, %v", findings, err)
 	}
 }

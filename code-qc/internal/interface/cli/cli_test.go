@@ -24,12 +24,13 @@ func (f *fakeGates) Execute(_ context.Context, in usecase.RunGatesInput) (domain
 }
 
 type fakeConfig struct {
+	cfg     domain.Config
 	enabled bool
 	err     error
 }
 
 func (f fakeConfig) Execute(context.Context) (domain.Config, bool, error) {
-	return domain.Config{}, f.enabled, f.err
+	return f.cfg, f.enabled, f.err
 }
 
 type fakeAudit struct {
@@ -73,6 +74,7 @@ type harness struct {
 	scope          *fakeScope
 	applier        *fakeApplier
 	discover       *fakeDiscover
+	conventions    *fakeConventions
 	root           string
 	localDir       string
 	terminal       bool
@@ -109,10 +111,13 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	if h.discover == nil {
 		h.discover = &fakeDiscover{}
 	}
+	if h.conventions == nil {
+		h.conventions = &fakeConventions{}
+	}
 	deps := func(_ context.Context, dir string) (Deps, error) {
 		h.gotDir = dir
 		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
-			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath}, h.depsErr
+			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath}, h.depsErr
 	}
 	app := New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps)
 	app.terminal = func() bool { return h.terminal }

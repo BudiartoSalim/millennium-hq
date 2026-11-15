@@ -81,7 +81,8 @@ apply to any file.
 |---|---|---|---|
 | `version` | yes | | Config format version; must be `1`. |
 | `languages` | single-project form | | Languages to check: `go`, `typescript`, `python`, `shell`. |
-| `conventions` | no | `[]` | Convention packs: `clean-architecture`, `react-feature-based`. |
+| `conventions` | no | `[]` | Convention packs: the built-in `clean-architecture` and `react-feature-based`, or the project's own (see [Convention packs](#convention-packs)). |
+| `limits` | no | the conventions' | Single-project form: function limits that replace the conventions' own (see [Function limits](#function-limits)). |
 | `components` | monorepo form | | See above. |
 | `exclude` | no | `[]` | Paths no check reads. `**` matches any number of segments; a directory excludes everything inside it. |
 | `test` | no | | Single-project form: the test recipe (below). |
@@ -99,10 +100,50 @@ Component fields:
 |---|---|---|
 | `paths` | yes | Component roots. `"."` is the repository root. |
 | `languages` | yes | Languages of this component. |
-| `conventions` | no | Convention packs for this component. |
-| `layers` | no | Overrides a convention's layer paths, relative to the component root, for layouts that differ from the pack's default. |
+| `conventions` | no | Convention packs for this component. Each must govern at least one of its languages. |
+| `layers` | no | Overrides a convention's layer paths, relative to the component root, for layouts that differ from the pack's default. Each key must be a layer of one of the component's conventions, or `composition`. |
 | `reason` | no | Why the component is an exception; shown by `config explain`. |
 | `test` | no | The component's test recipe (below). |
+| `limits` | no | The component's own function limits, with a reason (below). |
+
+### Convention packs
+
+A convention is a **pack**: `pack.json`, the rules the gates enforce (layers,
+what each may import, which need tests, default paths, function limits), and
+`guide.md`, what every agent is told about the convention. The engine knows
+no convention by name; it applies whichever packs exist:
+
+- **Built in:** `clean-architecture` and `react-feature-based`, shipped
+  inside the engine.
+- **The project's own:** `.millennium/conventions/<name>/`, beside the
+  config, protected like it. A local config's packs live beside it, in
+  `<local config dir>/conventions/<name>/`.
+
+`millennium-code-qc convention list` lists them and `convention show <name>`
+prints one. A name in `conventions` that no pack has is a config error.
+[Writing a convention](conventions/writing-a-convention.md) covers the pack
+format and how to create one; you add a pack the way you change the config,
+with a proposal.
+
+### Function limits
+
+Every function must stay within three limits: length in lines, nesting
+depth and cognitive complexity (see [Checks](checks.md#limits)). They come
+from, in order:
+
+1. the component's own `limits`, field by field;
+2. its conventions' packs: the strictest value among them;
+3. the engine's defaults: 50 lines, nesting depth 3, cognitive complexity 15.
+
+```json
+{ "paths": ["services/parser"], "languages": ["go"], "conventions": ["clean-architecture"],
+  "limits": { "functionLines": 120, "reason": "generated parser tables are long by design" } }
+```
+
+A component's `limits` need a `reason` of at least ten letters, and at least
+one limit; each limit is a whole number from 1 to 1000. Raising a limit is a
+loosening `config apply` lists. `config explain <file>` shows the limits in
+force for a file.
 
 ### Disabling a check
 
@@ -184,8 +225,10 @@ No agent can change the rules it is checked against. Agents write a
 }
 ```
 
-It may instead (or also) carry dependency approvals, see
-[Approving a dependency](#approving-a-dependency). You apply it:
+It may instead (or also) carry convention packs, see
+[Proposing a convention pack](#proposing-a-convention-pack), and dependency
+approvals, see [Approving a dependency](#approving-a-dependency). You apply
+it:
 
 ```
 millennium-code-qc config apply
@@ -195,7 +238,8 @@ It validates the proposal as strictly as a config, shows every file it will
 write, lists every way it **loosens** the rules compared with the current
 config (a language, component or convention dropped, a path excluded, a check
 disabled, mypy or shellcheck switched off, component or acceptance-test paths
-moved), and asks you to type `yes`. Without a terminal, for example from
+moved, a limit raised, a convention pack's rules weakened), and asks you to
+type `yes`. Without a terminal, for example from
 Claude Code's `!` prefix, it prints a digest instead; re-run with
 `--confirm <digest>` after reading the summary. Piped input is refused.
 
@@ -213,11 +257,46 @@ For a config in the repository, it writes:
   lead's work rather than the default branch;
 - a managed section in `AGENTS.md` describing the gates to every agent, plus an
   `@AGENTS.md` import in `CLAUDE.md` when the repository has one;
-- `millennium.proposal.json` and the agent worktrees (`.claude/worktrees/`, and
+- the proposed convention packs in `.millennium/conventions/<name>/`;
+- `millennium.proposal.json`, the `millennium.proposal/` folder of draft
+  packs, and the agent worktrees (`.claude/worktrees/`, and
   `.pi/worktrees/` for [pi](pi.md)) in `.gitignore`.
 
-The applied default proposal is removed. Inside an agent's sandbox the command
+The applied default proposal is removed; its draft packs stay in
+`millennium.proposal/` until you delete them. Inside an agent's sandbox the command
 cannot write `.millennium`, and the hooks deny agents from running it at all.
+
+## Proposing a convention pack
+
+A proposal adds or replaces project packs with `packs`, naming each pack's
+folder relative to the proposal:
+
+```json
+{
+  "version": 1,
+  "packs": { "hexagonal": "millennium.proposal/conventions/hexagonal" },
+  "config": { "version": 1, "languages": ["go"], "conventions": ["hexagonal"] }
+}
+```
+
+`millennium-code-qc convention new hexagonal --from clean-architecture`
+writes such a folder to start from. `config apply`:
+
+- reads each folder as strictly as an applied pack, and refuses a pack named
+  like a built-in one;
+- checks the proposed config, or the current one when the proposal has none,
+  against the packs it would leave in place;
+- prints each pack's `pack.json`, and lists what it loosens: a layer or
+  language removed, a layer that may now import more or third-party code,
+  no longer needs tests or is no longer isolated, changed layer paths, and
+  raised limits;
+- includes the packs' files in the confirmation digest, so a pack edited
+  after you read the summary cannot be applied under it;
+- writes them to `.millennium/conventions/<name>/` (or beside the local
+  config with `--local`), and refreshes the `AGENTS.md` section.
+
+A pack the proposal does not name stays as it is. To remove one, stop using
+it in the config, then delete its folder yourself.
 
 ## Approving a dependency
 

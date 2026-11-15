@@ -2,12 +2,12 @@
 # platform's binary. Only a reviewed change updates it, written by
 # scripts/release-build.sh VERSION --lock; the release workflow rebuilds the
 # tag and refuses to publish binaries whose hashes differ from these.
-version 0.1.0
+version 0.2.0
 go go1.26.10
-url https://github.com/BudiartoSalim/millennium-hq/releases/download/code-qc/v0.1.0
-sha256 linux-amd64 2aefb47aff4b33c32b624960bd2d2c77749021d96fb0c10832ababfaa41cd1cd
-sha256 linux-arm64 3753c594129e30f3d42fbe983e162761539c7f18793284eede9eb0c14d76c76c
-sha256 darwin-amd64 f40a6bfee771d81265cd6966d6ec069e96ac1cf40d4af981ea784813109dbea3
-sha256 darwin-arm64 dedd389755bb0edb741ca5973e3daad44a86352d45bbb79453fc93fd24c42a8e
-sha256 windows-amd64 65e5ca0905a47413b1904a762552c7fe3d340b01841ab2ad9808ca7d9ffc750c
-sha256 windows-arm64 dafbc0bbf73d0e6e3665569a578d83adac932e2a75f056a7f5d62fccede0f5ee
+url https://github.com/BudiartoSalim/millennium-hq/releases/download/code-qc/v0.2.0
+sha256 linux-amd64 c94878ebdb517fcc6cd5204c61cb396ddc6e2c8a3950bc4340a3064df65f69c8
+sha256 linux-arm64 f90503a89fabadb4cf63ed9b86821f80265b53f3c91c298f6ed7f5886529f937
+sha256 darwin-amd64 5fe1db7c8803e10a5490cfdfe4e5a2e11b05b3c34c45f4cf97c508e0187081f3
+sha256 darwin-arm64 a1cc824c9f269f8a868e899a2f241ba6faaac7ea946b671e5285f47bf424ae92
+sha256 windows-amd64 41bd6555e2036951456cd1ebe4598d816818e55121a808446e74c4059054d9b6
+sha256 windows-arm64 6fc7ab912eb93a3b9dc425a12239fcf186195003007df0991319a744f618481a

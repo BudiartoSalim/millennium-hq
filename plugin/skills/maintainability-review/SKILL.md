@@ -15,15 +15,11 @@ which convention and layer the config assigns to a file.
 
 ## Architecture and conventions
 
-- **Clean Architecture**: is each piece in the right layer, not only allowed
-  to import what it does? Business rules in domain, not in handlers or SQL.
-  Use cases orchestrate and depend on ports they own. Infrastructure adapts,
-  without policy. The interface layer only translates. The composition root
-  only wires. A port shaped around one adapter's API is a leak.
-- **Feature-based React**: a feature owns its components, hooks and state;
-  shared code lives in the shared area, not reached into across features.
-  Server state and UI state are not mixed; effects are not used for derived
-  data.
+- **The convention's guide**: the guide of each convention the repository
+  uses is in your session context (or `millennium-code-qc convention show
+  <name>` prints it). Review against it, its Reviewing section first: is each
+  piece in the right layer, not only allowed to import what it does? Does
+  any rule leak into a layer that should not know it?
 - **Consistency**: does the change follow the patterns the surrounding code
   already uses (errors, logging, configuration, naming)? A new pattern needs a
   reason.

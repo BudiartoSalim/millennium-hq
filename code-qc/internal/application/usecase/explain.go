@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"millennium-code-qc/internal/application/port"
 	"millennium-code-qc/internal/domain"
 )
 
@@ -35,12 +34,11 @@ type LayerAssignment struct {
 // when a finding is surprising.
 type ExplainFile struct {
 	config *LoadConfig
-	packs  port.PackSource
 }
 
 // NewExplainFile returns the explain use-case.
-func NewExplainFile(config *LoadConfig, packs port.PackSource) *ExplainFile {
-	return &ExplainFile{config: config, packs: packs}
+func NewExplainFile(config *LoadConfig) *ExplainFile {
+	return &ExplainFile{config: config}
 }
 
 // Execute explains the repository-relative path.
@@ -65,8 +63,9 @@ func (u *ExplainFile) Execute(ctx context.Context, path string) (Explanation, er
 		return out, nil
 	}
 	out.Component = &match
+	out.Limits = cfg.LimitsFor(match.Component)
 	for _, convention := range match.Component.Conventions {
-		if assignment, applies := u.assign(convention, out.Language, match, path); applies {
+		if assignment, applies := assign(cfg.Packs, convention, out.Language, match, path); applies {
 			out.Layers = append(out.Layers, assignment)
 		}
 	}
@@ -75,15 +74,11 @@ func (u *ExplainFile) Execute(ctx context.Context, path string) (Explanation, er
 
 // assign places the file under one convention; false means the convention
 // does not govern the file's language, so it says nothing about the file.
-func (u *ExplainFile) assign(convention domain.Convention, lang domain.Language, match domain.ComponentMatch, path string) (LayerAssignment, bool) {
+func assign(packs domain.Catalog, convention domain.Convention, lang domain.Language, match domain.ComponentMatch, path string) (LayerAssignment, bool) {
 	assignment := LayerAssignment{Convention: convention}
-	pack, err := u.packs.Pack(convention)
-	if errors.Is(err, port.ErrPackUnavailable) {
-		assignment.Problem = "not available in this engine version"
-		return assignment, true
-	}
-	if err != nil {
-		assignment.Problem = err.Error()
+	pack, ok := packs[convention]
+	if !ok {
+		assignment.Problem = "no pack for this convention is available"
 		return assignment, true
 	}
 	layering, err := pack.For(lang, match)

@@ -14,12 +14,28 @@ as untrusted.
 
 | Event | What happens |
 |---|---|
-| `SessionStart` | In an opted-in repository, tells the session how its work is checked, so agents do not discover the gates by tripping over them. |
+| `SessionStart`, `SubagentStart` | In an opted-in repository, tells the session, and every subagent as it starts, how its work is checked, so agents do not discover the gates by tripping over them. The briefing includes the guide of each convention the repository uses (see [Convention guides](#convention-guides)). |
 | `PreToolUse` (file edits, reads, searches, shell) | Guards the call (below). A denial reaches the agent with the reason. If the hook itself fails, times out or cannot start, the tool call is blocked (`onFailure: "block"`). |
 | `Stop`, `SubagentStop` | Runs the **fast tier** of `millennium-code-qc gate` in the agent's working directory (an engineer's worktree for a subagent). While anything fails, the agent is sent back with the findings, up to 3 times in a row; after that the turn ends with a warning to you that the work is **not** done. The gates are never passed. |
 
 The counter of blocked stops is kept per session and agent in the plugin's
 data directory, where sandboxed agents cannot write.
+
+## Convention guides
+
+Every convention pack carries a `guide.md`: what belongs in each layer and
+what reviewers look for, the part of a convention no gate can check (see
+[Writing a convention](conventions/writing-a-convention.md)). The briefing
+lists each component's conventions and includes their guides, so every
+agent, the qa-tester included, knows the conventions without anyone pasting
+them in.
+
+Claude Code caps the context a hook adds at 10,000 characters and shows a
+longer one only as a file path with a preview. So the briefing includes
+whole guides while they fit, and names the rest with the command that
+prints them (`millennium-code-qc convention show <name>`); a guide has at
+most 8,000 characters. Keep guides short when a repository uses several
+conventions.
 
 ## The guard
 

@@ -101,40 +101,36 @@ func TestStructureGateEdges(t *testing.T) {
 		domain.LanguageShell: fakeAnalyzer{facts: map[string]domain.FileFacts{"#!/bin/bash\n": {}}},
 	}
 	cfg := singleConfig(t, "go", "shell", "python")
-	run := func(source *fakeSource, packs port.PackSource, base string, files ...domain.ChangedFile) []string {
-		findings, err := NewStructure(analyzers, packs, source).Run(t.Context(), port.GateInput{Config: cfg, Changes: domain.ChangeSet{Base: base, Files: files}})
+	resolved := cfg
+	resolved.Packs = structurePacks(t)
+	run := func(source *fakeSource, cfg domain.Config, base string, files ...domain.ChangedFile) []string {
+		findings, err := NewStructure(analyzers, source).Run(t.Context(), port.GateInput{Config: cfg, Changes: domain.ChangeSet{Base: base, Files: files}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return rules(findings)
 	}
 	shebang := &fakeSource{working: map[string]string{"bin/deploy": "#!/bin/bash\n"}}
-	if got := run(shebang, fakePacks{}, "", added("bin/deploy"), added("bin/missing")); len(got) != 0 {
+	if got := run(shebang, resolved, "", added("bin/deploy"), added("bin/missing")); len(got) != 0 {
 		t.Fatalf("extensionless files: %q", got)
 	}
 	baseErr := &fakeSource{working: map[string]string{"internal/domain/a.go": "long"}, readAtErr: errInjected}
-	if got := run(baseErr, fakePacks{}, "tree", modified("internal/domain/a.go")); !slices.Equal(got, []string{"structure/analysis-failed"}) {
+	if got := run(baseErr, resolved, "tree", modified("internal/domain/a.go")); !slices.Equal(got, []string{"structure/analysis-failed"}) {
 		t.Fatalf("a base read failure: %q", got)
 	}
 	newFile := &fakeSource{working: map[string]string{"internal/domain/a.go": "long"}}
-	if got := run(newFile, fakePacks{}, "tree", modified("internal/domain/a.go")); !slices.Equal(got, []string{"structure/function-length"}) {
+	if got := run(newFile, resolved, "tree", modified("internal/domain/a.go")); !slices.Equal(got, []string{"structure/function-length"}) {
 		t.Fatalf("a modified file absent at base is new code: %q", got)
 	}
-	if got := run(newFile, brokenPacks{}, "", added("internal/domain/a.go")); !slices.Contains(got, "structure/convention-unavailable") {
-		t.Fatalf("a broken pack source must block: %q", got)
+	if got := run(newFile, cfg, "", added("internal/domain/a.go")); !slices.Contains(got, "structure/convention-unavailable") {
+		t.Fatalf("a convention without its pack must block: %q", got)
 	}
 	python := &fakeSource{working: map[string]string{"pkg/domain.py": "x"}}
 	pyAnalyzers := map[domain.Language]port.Analyzer{domain.LanguagePython: fakeAnalyzer{facts: map[string]domain.FileFacts{"x": {}}}}
-	findings, err := NewStructure(pyAnalyzers, fakePacks{}, python).Run(t.Context(), port.GateInput{Config: cfg, Changes: domain.ChangeSet{Files: []domain.ChangedFile{added("pkg/domain.py")}}})
-	if err != nil || len(findings) != 1 || !strings.Contains(findings[0].Message, "has no python rules") {
+	findings, err := NewStructure(pyAnalyzers, python).Run(t.Context(), port.GateInput{Config: resolved, Changes: domain.ChangeSet{Files: []domain.ChangedFile{added("pkg/domain.py")}}})
+	if err != nil || len(findings) != 1 || !strings.Contains(findings[0].Message, "has no python layer paths") {
 		t.Fatalf("a pack without rules for the language: %+v, %v", findings, err)
 	}
-}
-
-type brokenPacks struct{}
-
-func (brokenPacks) Pack(domain.Convention) (domain.Pack, error) {
-	return domain.Pack{}, errInjected
 }
 
 func TestTestsGateEdges(t *testing.T) {
@@ -156,7 +152,7 @@ func TestTestsGateEdges(t *testing.T) {
 	failing := &fakeSource{working: map[string]string{"svc/internal/domain/user.go": "logic"}, changedErr: errInjected}
 	runnerWithFile := &fakeRunner{results: map[string]port.TestResult{"go svc": {Coverage: domain.Coverage{"svc/internal/domain/user.go": {1: 1}}}}}
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: map[string]domain.FileFacts{"logic": logic}}}
-	g := NewTests(analyzers, testedPacks{}, failing, runnerWithFile, fakeFinder{"svc": "go.mod"})
+	g := NewTests(analyzers, failing, runnerWithFile, fakeFinder{"svc": "go.mod"})
 	in := port.GateInput{Config: testsConfig(t), Tier: domain.TierFull, Changes: domain.ChangeSet{Base: "tree", Files: []domain.ChangedFile{
 		modified("svc/internal/domain/user.go"), added("svc/internal/domain/user_test.go")}}}
 	if _, err := g.Run(t.Context(), in); !errors.Is(err, errInjected) {
@@ -168,8 +164,10 @@ func TestSuitesAtTheRepositoryRoot(t *testing.T) {
 	runner := &fakeRunner{results: map[string]port.TestResult{"go ": {Failed: true, Summary: "boom"}}}
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: map[string]domain.FileFacts{"logic": logic}}}
 	source := &fakeSource{working: map[string]string{"main.go": "logic"}}
-	g := NewTests(analyzers, testedPacks{}, source, runner, fakeFinder{"": "go.mod"})
-	findings, err := g.Run(t.Context(), port.GateInput{Config: singleConfig(t, "go"), Tier: domain.TierFull, Changes: domain.ChangeSet{Files: []domain.ChangedFile{added("main.go")}}})
+	g := NewTests(analyzers, source, runner, fakeFinder{"": "go.mod"})
+	cfg := singleConfig(t, "go")
+	cfg.Packs = testedPacks(t)
+	findings, err := g.Run(t.Context(), port.GateInput{Config: cfg, Tier: domain.TierFull, Changes: domain.ChangeSet{Files: []domain.ChangedFile{added("main.go")}}})
 	if err != nil || len(findings) != 1 || !strings.Contains(findings[0].Message, "tests of the repository root failed: boom") {
 		t.Fatalf("findings = %+v, %v", findings, err)
 	}
@@ -182,7 +180,7 @@ func TestTestsGateSkipsWhatItCannotJudge(t *testing.T) {
 	runner := &fakeRunner{results: map[string]port.TestResult{"python tts": {Coverage: domain.Coverage{}}}}
 	source := &fakeSource{working: map[string]string{"tts/pkg/domain.py": "logic"}}
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: fakeAnalyzer{facts: map[string]domain.FileFacts{"logic": logic}}}
-	g := NewTests(analyzers, testedPacks{}, source, runner, fakeFinder{})
+	g := NewTests(analyzers, source, runner, fakeFinder{})
 	findings, err := g.Run(t.Context(), port.GateInput{Config: testsConfig(t), Tier: domain.TierFull, Changes: domain.ChangeSet{Files: []domain.ChangedFile{
 		added("tts/pkg/domain.py"), {Path: "svc/internal/domain/gone.go", Kind: domain.ChangeDeleted}}}})
 	if err != nil || len(findings) != 0 || !slices.Equal(runner.calls, []string{"python tts"}) {

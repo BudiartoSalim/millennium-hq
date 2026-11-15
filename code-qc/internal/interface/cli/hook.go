@@ -9,6 +9,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"millennium-code-qc/internal/application/usecase"
 	"millennium-code-qc/internal/domain"
@@ -45,8 +46,8 @@ func (a *App) hook(ctx context.Context) int {
 			return a.preToolUse(ctx, deps, in)
 		case "Stop", "SubagentStop":
 			return a.stopHook(ctx, deps, in)
-		case "SessionStart":
-			return a.sessionStart(ctx, deps)
+		case "SessionStart", "SubagentStart":
+			return a.brief(ctx, deps, in.Event)
 		}
 		return nil
 	})
@@ -188,14 +189,55 @@ func sessionContext(engine string) string {
 		"rule changes are proposals the user applies with `millennium-code-qc config apply`. Use `%[1]s config explain <file>` when a finding is surprising.", engine)
 }
 
-func (a *App) sessionStart(ctx context.Context, deps Deps) error {
-	_, enabled, err := deps.Config.Execute(ctx)
+// maxBriefingRunes keeps the briefing under Claude Code's 10,000-character
+// cap on hook context, beyond which it shows the agent only a preview.
+const maxBriefingRunes = 9500
+
+// briefing is the session context with the guides of the conventions the
+// repository uses, whole guides only, as many as fit; the rest are named
+// with the command that prints them.
+func briefing(engine string, cfg domain.Config) string {
+	var b strings.Builder
+	b.WriteString(sessionContext(engine))
+	guides := cfg.Guides()
+	if len(guides) == 0 {
+		return b.String()
+	}
+	if engine == "" {
+		engine = "millennium-code-qc"
+	}
+	b.WriteString("\n\nConventions, by component:")
+	for _, c := range cfg.Components {
+		if len(c.Conventions) > 0 {
+			fmt.Fprintf(&b, " %s: %s;", c.Name(), strings.Join(conventionNames(c.Conventions), ", "))
+		}
+	}
+	b.WriteString(" follow each convention's guide when working on its components.")
+	var omitted []string
+	for _, pack := range guides {
+		block := fmt.Sprintf("\n\n<convention-guide name=%q>\n%s\n</convention-guide>", pack.Name, strings.TrimSpace(pack.Guide))
+		if utf8.RuneCountInString(b.String())+utf8.RuneCountInString(block) > maxBriefingRunes-200 {
+			omitted = append(omitted, string(pack.Name))
+			continue
+		}
+		b.WriteString(block)
+	}
+	if len(omitted) > 0 {
+		fmt.Fprintf(&b, "\n\nThe guides of %s did not fit here: read each with `%s convention show <name>` before working on its components.", strings.Join(omitted, ", "), engine)
+	}
+	return b.String()
+}
+
+// brief tells a new session or subagent in an opted-in repository how its
+// work is checked, with the guides of the repository's conventions.
+func (a *App) brief(ctx context.Context, deps Deps, event string) error {
+	cfg, enabled, err := deps.Config.Execute(ctx)
 	if err != nil || !enabled {
 		// A broken config is reported by the gates on the first stop.
 		return nil
 	}
 	return a.writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{
-		"hookEventName": "SessionStart", "additionalContext": sessionContext(deps.EngineCommand),
+		"hookEventName": event, "additionalContext": briefing(deps.EngineCommand, cfg),
 	}})
 }
 

@@ -22,6 +22,8 @@ type Component struct {
 	Reason string
 	// Test overrides the built-in test runner; nil uses it.
 	Test *TestRecipe
+	// Limits overrides its conventions' function limits; nil keeps them.
+	Limits *LimitOverride
 }
 
 // ComponentInput is an unvalidated component as read from a file.
@@ -32,6 +34,7 @@ type ComponentInput struct {
 	Layers      map[string][]string
 	Reason      string
 	Test        *TestRecipe
+	Limits      *LimitOverride
 }
 
 // Name identifies the component in messages by its first pattern.
@@ -122,11 +125,11 @@ func (v *validator) components(in ConfigInput) []Component {
 			v.add("languages: at least one language is required, or list components")
 		}
 		return []Component{v.component("", ComponentInput{
-			Paths: []string{"."}, Languages: in.Languages, Conventions: in.Conventions, Test: in.Test,
+			Paths: []string{"."}, Languages: in.Languages, Conventions: in.Conventions, Test: in.Test, Limits: in.Limits,
 		})}
 	}
-	if in.Languages != nil || in.Conventions != nil || in.Test != nil {
-		v.add("languages, conventions and test belong inside each component when components are listed")
+	if in.Languages != nil || in.Conventions != nil || in.Test != nil || in.Limits != nil {
+		v.add("languages, conventions, test and limits belong inside each component when components are listed")
 	}
 	if len(in.Components) == 0 {
 		v.add("components: at least one component is required")
@@ -148,20 +151,35 @@ func (v *validator) component(prefix string, in ComponentInput) Component {
 	component := Component{
 		Patterns:    v.patterns(prefix+"paths", in.Paths, PrefixPattern),
 		Languages:   parseList(v, prefix+"languages", in.Languages, Languages()),
-		Conventions: parseList(v, prefix+"conventions", in.Conventions, Conventions()),
+		Conventions: v.conventionNames(prefix+"conventions", in.Conventions),
 		Layers:      v.layers(prefix+"layers", in.Layers),
 		Reason:      in.Reason,
 		Test:        v.testRecipe(prefix+"test", in.Test),
+		Limits:      v.limitOverride(prefix+"limits", in.Limits),
 	}
 	// Every path was invalid and already reported; a placeholder keeps Name
 	// usable while the remaining problems are collected.
 	if len(component.Patterns) == 0 {
 		component.Patterns = []Pattern{RootPattern()}
 	}
-	if slices.Contains(component.Conventions, ConventionReactFeatureBased) && !component.Has(LanguageTypeScript) {
-		v.addf("%sconventions: %q needs %q in languages", prefix, ConventionReactFeatureBased, LanguageTypeScript)
-	}
 	return component
+}
+
+// conventionNames validates the shape of each name; whether a pack exists
+// for it is Resolve's question.
+func (v *validator) conventionNames(field string, raw []string) []Convention {
+	out := make([]Convention, 0, len(raw))
+	for _, name := range raw {
+		switch {
+		case !ValidConventionName(name):
+			v.addf("%s: %q is not a convention name (lowercase letters, digits and dashes, at most %d characters)", field, name, MaxConventionName)
+		case slices.Contains(out, Convention(name)):
+			v.addf("%s: %q is listed more than once", field, name)
+		default:
+			out = append(out, Convention(name))
+		}
+	}
+	return out
 }
 
 func (v *validator) testRecipe(field string, in *TestRecipe) *TestRecipe {
