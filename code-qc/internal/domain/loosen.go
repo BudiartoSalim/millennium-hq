@@ -8,9 +8,10 @@ import (
 // Loosenings lists every way next checks less than current: a language,
 // component, convention or test recipe gone, more paths excluded, a check
 // disabled, an optional checker switched off, component or acceptance-test
-// paths moved. `config apply` shows these before it asks for confirmation,
-// so a weaker rule set is never applied by accident. A first config
-// loosens nothing.
+// paths moved, a limit raised, a convention pack's rules weakened. `config
+// apply` shows these before it asks for confirmation, so a weaker rule set
+// is never applied by accident. A first config loosens nothing. Both
+// configs must be resolved, so their packs can be compared.
 func Loosenings(current *Config, next Config) []string {
 	if current == nil {
 		return nil
@@ -21,7 +22,7 @@ func Loosenings(current *Config, next Config) []string {
 			out = append(out, fmt.Sprintf("language %s is no longer checked", lang))
 		}
 	}
-	out = append(out, componentLoosenings(current.Components, next)...)
+	out = append(out, componentLoosenings(*current, next)...)
 	for _, p := range next.Exclude {
 		if !slices.ContainsFunc(current.Exclude, func(c Pattern) bool { return c.String() == p.String() }) {
 			out = append(out, fmt.Sprintf("%s is newly excluded from every check", p))
@@ -32,18 +33,27 @@ func Loosenings(current *Config, next Config) []string {
 			out = append(out, fmt.Sprintf("%s is newly disabled: %s", d.Check, d.Reason))
 		}
 	}
-	return append(out, settingLoosenings(*current, next)...)
+	out = append(out, settingLoosenings(*current, next)...)
+	for _, name := range current.Packs.Names() {
+		if pack, ok := next.Packs[name]; ok {
+			out = append(out, packLoosenings(current.Packs[name], pack)...)
+		}
+	}
+	return out
 }
 
-func componentLoosenings(current []Component, next Config) []string {
+func componentLoosenings(current Config, next Config) []string {
 	var out []string
-	for _, c := range current {
+	for _, c := range current.Components {
 		i := slices.IndexFunc(next.Components, func(n Component) bool { return n.Name() == c.Name() })
 		if i < 0 {
 			out = append(out, fmt.Sprintf("component %s is removed", c.Name()))
 			continue
 		}
 		out = append(out, changedComponent(c, next.Components[i], next)...)
+		for _, raised := range current.LimitsFor(c).Raised(next.LimitsFor(next.Components[i])) {
+			out = append(out, fmt.Sprintf("component %s: %s", c.Name(), raised))
+		}
 	}
 	return out
 }
@@ -95,4 +105,51 @@ func patternsKey(patterns []Pattern) string {
 		names[i] = p.String()
 	}
 	return fmt.Sprint(names)
+}
+
+// packLoosenings lists what a convention pack of the same name loses:
+// languages, layers, import restrictions, required tests, isolation, or its
+// layer paths. Raised limits are reported per component, where they apply.
+func packLoosenings(current, next Pack) []string {
+	var out []string
+	for _, lang := range current.Languages {
+		if !next.Governs(lang) {
+			out = append(out, fmt.Sprintf("convention %s no longer governs %s", current.Name, lang))
+		}
+	}
+	for _, layer := range current.Layers {
+		after := next.layer(layer.Name)
+		if after == nil {
+			out = append(out, fmt.Sprintf("convention %s removes layer %s", current.Name, layer.Name))
+			continue
+		}
+		out = append(out, layerLoosenings(current.Name, layer, *after)...)
+	}
+	if fmt.Sprint(current.Paths) != fmt.Sprint(next.Paths) {
+		out = append(out, fmt.Sprintf("convention %s changes its layer paths", current.Name))
+	}
+	return out
+}
+
+func layerLoosenings(pack Convention, before, after PackLayer) []string {
+	var out []string
+	for _, dep := range after.MayImport {
+		if !slices.Contains(before.MayImport, dep) {
+			out = append(out, fmt.Sprintf("convention %s: layer %s may now import %s", pack, before.Name, dep))
+		}
+	}
+	flags := []struct {
+		lost bool
+		what string
+	}{
+		{!before.ThirdParty && after.ThirdParty, "may now import third-party code"},
+		{before.Tested && !after.Tested, "no longer needs tests"},
+		{before.Isolated && !after.Isolated, "is no longer isolated"},
+	}
+	for _, f := range flags {
+		if f.lost {
+			out = append(out, fmt.Sprintf("convention %s: layer %s %s", pack, before.Name, f.what))
+		}
+	}
+	return out
 }

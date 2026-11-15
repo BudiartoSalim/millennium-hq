@@ -19,18 +19,17 @@ In this skill, `millennium-code-qc` means the engine command
 2. Read the code you will change and its neighbours. Match their style,
    naming, error handling and test idiom.
 3. `millennium-code-qc config explain <file>` tells you which component, convention,
-   layer and limits apply to a file.
+   layer and limits apply to a file. The guide of each convention the
+   repository uses is in your session context; if a guide is only named
+   there, read it with `millennium-code-qc convention show <name>`.
 
 ## Writing code
 
 - **Stay inside your paths.** A change outside them blocks the merge. If the
   package cannot be done without touching another path, stop and report it.
-- **Follow the convention the config assigns.** For Clean Architecture:
-  domain imports nothing from other layers, application depends on ports it
-  declares, infrastructure implements them, the composition root wires them,
-  and the interface layer only translates. For feature-based React: a feature
-  owns its components, hooks and state, and features do not import each
-  other's internals.
+- **Follow the convention the config assigns, as its guide describes.** The
+  gates check the import rules and limits; the guide says what belongs in
+  each layer, which no gate can check.
 - **Small functions.** The gates limit length, nesting and cognitive
   complexity; split by meaning, not just to get under a number.
 - **Handle errors where they can be handled**, and say what failed and with

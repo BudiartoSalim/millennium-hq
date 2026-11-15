@@ -39,7 +39,7 @@ func TestNewConfigSingleProjectIsOneRootComponent(t *testing.T) {
 		t.Fatalf("want one component, got %+v", cfg.Components)
 	}
 	c := cfg.Components[0]
-	if c.Name() != "." || !c.Has(LanguageGo) || !slices.Equal(c.Conventions, []Convention{ConventionCleanArchitecture}) {
+	if c.Name() != "." || !c.Has(LanguageGo) || !slices.Equal(c.Conventions, []Convention{"clean-architecture"}) {
 		t.Fatalf("root component = %+v", c)
 	}
 }
@@ -78,10 +78,9 @@ func TestNewConfigRejects(t *testing.T) {
 		{"no languages", func(in *ConfigInput) { in.Languages = nil }, "at least one language"},
 		{"unknown language", func(in *ConfigInput) { in.Languages = []string{"cobol"} }, `languages: "cobol" is not one of`},
 		{"duplicate language", func(in *ConfigInput) { in.Languages = []string{"go", "go"} }, `"go" is listed more than once`},
-		{"unknown convention", func(in *ConfigInput) { in.Conventions = []string{"mvc"} }, `conventions: "mvc"`},
+		{"bad convention name", func(in *ConfigInput) { in.Conventions = []string{"MVC"} }, `conventions: "MVC" is not a convention name`},
 		{"explicit empty testing", func(in *ConfigInput) { in.Testing = ptr("") }, `testing: "" is not one of`},
 		{"unknown dependency policy", func(in *ConfigInput) { in.DependencyPolicy = ptr("lax") }, `dependencyPolicy: "lax"`},
-		{"react without typescript", func(in *ConfigInput) { in.Conventions = []string{"react-feature-based"} }, `needs "typescript"`},
 		{"bad exclude pattern", func(in *ConfigInput) { in.Exclude = []string{"../x"} }, "exclude: pattern"},
 		{"mypy without python", func(in *ConfigInput) { in.PythonTypeCheck = ptr("mypy") }, `needs "python"`},
 		{"run without start", func(in *ConfigInput) {

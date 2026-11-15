@@ -29,9 +29,12 @@ Ask only what you cannot infer:
   they own, local for one they do not.
 - **What it is**: a backend service, a web app, a CLI, a monorepo of several.
 - **Languages** per part: Go, TypeScript, Python, shell.
-- **Conventions**: `clean-architecture` for backends and services,
-  `react-feature-based` for React apps, none for scripts and small tools.
-  Explain each in a sentence; the convention docs have the layouts.
+- **Conventions**: `millennium-code-qc convention list` lists the packs.
+  The built-in ones are `clean-architecture` for backends and services and
+  `react-feature-based` for React apps; none for scripts and small tools.
+  Explain each in a sentence (`millennium-code-qc convention show <name>`
+  prints its rules and guide). If the user wants a variation of one, or a
+  convention of their own, see Custom conventions below.
 - **Monorepo or single project**: one component per service or app, with
   `paths` patterns such as `services/*/api` that cover future services too.
 
@@ -72,10 +75,21 @@ On an empty project this mostly confirms the toolchain: a `toolchain/*`
 finding names a tool to install (gofmt, node, python, shellcheck) before the
 gates can run.
 
+### Custom conventions
+
+A convention is a pack: `pack.json` (layers, import rules, tested layers,
+default paths, function limits) and `guide.md` (what agents are told).
+`millennium-code-qc convention new <name> --from <pack>` copies an existing
+pack to `millennium.proposal/conventions/<name>/`. Edit both files with the
+user, then add `"packs": {"<name>": "millennium.proposal/conventions/<name>"}`
+to the proposal and name the convention in the config. There is no
+extending: a variation is a copy under a new name.
+
 ## 4. Lay out the project (optional)
 
 Offer to create the convention's directory skeleton so the first code lands
-in the right layer: for Clean Architecture in Go, `internal/domain`,
+in the right layer, from the default paths `millennium-code-qc convention
+show <name>` lists: for Clean Architecture in Go, `internal/domain`,
 `internal/application`, `internal/infrastructure`, `internal/interface` and
 `main.go`; for feature-based React, `src/app`, `src/features`,
 `src/components`, `src/lib`. For npm projects, add an `.npmrc` with

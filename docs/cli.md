@@ -10,6 +10,9 @@ millennium-code-qc config validate
 millennium-code-qc config explain PATH
 millennium-code-qc config apply [--local] [--confirm DIGEST] [PROPOSAL]
 millennium-code-qc config export [--local]
+millennium-code-qc convention list [--local]
+millennium-code-qc convention show [--local] NAME
+millennium-code-qc convention new [--local] [--from PACK] NAME
 millennium-code-qc version
 ```
 
@@ -84,7 +87,7 @@ $ millennium-code-qc discover
 millennium-code-qc discover: 2 modules
   services/game/api (go.mod): go 42 files, 12 test files
     clean-architecture: 30 of 30 go files in its layers
-  services/game/web (package.json): typescript 18 files, React
+  services/game/web (package.json): typescript 18 files, its dependencies suggest react-feature-based
     react-feature-based: 4 of 15 typescript files in its layers
   outside any module: shell 3 files
 ```
@@ -92,9 +95,14 @@ millennium-code-qc discover: 2 modules
 followed by the draft proposal. A module root is a directory with `go.mod`,
 `package.json`, `pyproject.toml`, `setup.py` or `requirements.txt`. A
 convention is drafted where its default layout places at least half of a
-module's non-test files in a layer (react-feature-based for modules whose
-`package.json` depends on React, clean-architecture otherwise); other modules
-get no convention and a reason. Each top-level directory with code outside
+module's non-test files in a layer, the one placing the most where several
+do. A pack whose `suggest.dependencies` names a package in the module's
+`package.json` (react-feature-based names `react`) is preferred: such a
+module is matched only against the packs it hints at, and other modules only
+against packs without hints. The project's own packs in
+`.millennium/conventions/` take part. Modules that fit no pack get no
+convention and a reason. In JSON, each module's `hints` lists the packs its
+dependencies suggest. Each top-level directory with code outside
 any module, such as `scripts`, gets a component of its own.
 
 It reads file names and `package.json` only, runs nothing from the
@@ -136,10 +144,13 @@ status 2 when the config is invalid or missing.
 ## `millennium-code-qc config apply`
 
 Applies a proposal (default `millennium.proposal.json` at the repository
-root), a new config, dependency approvals or both, after showing what it
-writes and what it loosens; see
-[Configuration](configuration.md#changing-the-config-proposals-and-config-apply)
-and [Approving a dependency](configuration.md#approving-a-dependency).
+root), a new config, convention packs, dependency approvals, or several of
+them, after showing what it writes and what it loosens; see
+[Configuration](configuration.md#changing-the-config-proposals-and-config-apply),
+[Proposing a convention pack](configuration.md#proposing-a-convention-pack)
+and [Approving a dependency](configuration.md#approving-a-dependency). Pack
+folders named in the proposal are read relative to the proposal's own
+folder.
 
 | Flag | Meaning |
 |---|---|
@@ -164,6 +175,43 @@ services/game/api/internal/domain/server.go
   clean-architecture: layer domain
   limits:    function length 50 lines (test files exempt), nesting depth 3, cognitive complexity 15
 ```
+
+## `millennium-code-qc convention list`
+
+Lists every convention pack a config can name: its name, where it comes from
+(`builtin`, `project` for `.millennium/conventions`, `local` beside a local
+config) and the languages it governs. `--local` lists the packs beside this
+machine's local config instead of the repository's.
+
+```
+$ millennium-code-qc convention list
+clean-architecture       builtin  go, typescript, python
+hexagonal                project  go
+react-feature-based      builtin  typescript
+```
+
+## `millennium-code-qc convention show NAME`
+
+Prints one pack: its languages, function limits, discovery hints, each layer
+with what it may import, whether it may import third-party code, needs tests
+or is isolated, the default paths per language, and its guide. Agents use it
+to read a guide that did not fit in their briefing.
+
+## `millennium-code-qc convention new NAME`
+
+Writes a new pack to edit, copied from an existing one, to
+`millennium.proposal/conventions/NAME/` (git-ignored), and prints a proposal
+that adds it; see [Writing a convention](conventions/writing-a-convention.md).
+It refuses a name a pack already has, and an existing draft. Flags may come
+before or after NAME.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--from PACK` | `clean-architecture` | The pack to copy. |
+| `--local` | off | Look up names among the packs beside the local config. |
+
+Agents may run it: it writes only the draft. Only `config apply` adds the
+pack to the rules.
 
 ## JSON reports
 

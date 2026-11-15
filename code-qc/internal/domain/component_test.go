@@ -23,8 +23,19 @@ func TestComponentsValidation(t *testing.T) {
 		{"no languages", monorepo(ComponentInput{Paths: []string{"api"}}), "components[0].languages: at least one language"},
 		{"bad path", monorepo(ComponentInput{Paths: []string{"../api"}, Languages: []string{"go"}}), "components[0].paths: pattern"},
 		{"recursive path", monorepo(ComponentInput{Paths: []string{"**/api"}, Languages: []string{"go"}}), `"**" is not allowed here`},
-		{"react without typescript", monorepo(ComponentInput{Paths: []string{"web"}, Languages: []string{"go"}, Conventions: []string{"react-feature-based"}}),
-			`components[0].conventions: "react-feature-based" needs "typescript"`},
+		{"duplicate convention", monorepo(ComponentInput{Paths: []string{"web"}, Languages: []string{"go"}, Conventions: []string{"layers", "layers"}}),
+			`components[0].conventions: "layers" is listed more than once`},
+		{"limits without reason", monorepo(ComponentInput{Paths: []string{"api"}, Languages: []string{"go"}, Limits: &LimitOverride{Values: LimitsInput{Cognitive: ptr(20)}}}),
+			"components[0].limits.reason: say why"},
+		{"empty limits", monorepo(ComponentInput{Paths: []string{"api"}, Languages: []string{"go"}, Limits: &LimitOverride{Reason: "generated parsers are long"}}),
+			"components[0].limits: set at least one"},
+		{"limit out of range", monorepo(ComponentInput{Paths: []string{"api"}, Languages: []string{"go"}, Limits: &LimitOverride{Values: LimitsInput{FunctionLines: ptr(5000)}, Reason: "generated parsers are long"}}),
+			"components[0].limits.functionLines: 5000 must be between 1 and 1000"},
+		{"top-level limits with components", func() ConfigInput {
+			in := monorepo(ComponentInput{Paths: []string{"api"}, Languages: []string{"go"}})
+			in.Limits = &LimitOverride{Values: LimitsInput{Nesting: ptr(4)}, Reason: "generated parsers are long"}
+			return in
+		}(), "languages, conventions, test and limits belong inside each component"},
 		{"empty layer override", monorepo(ComponentInput{Paths: []string{"api"}, Languages: []string{"go"}, Layers: map[string][]string{"domain": {}}}),
 			"components[0].layers.domain: at least one path"},
 		{"both forms", func() ConfigInput {

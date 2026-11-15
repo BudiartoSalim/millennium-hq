@@ -32,18 +32,24 @@ func Languages() []Language {
 	return []Language{LanguageGo, LanguageTypeScript, LanguagePython, LanguageShell}
 }
 
-// Convention is a convention pack a project can select.
+// Convention names a convention pack. The engine knows no convention by
+// name: which ones exist depends on the packs it ships and the project's
+// own (see Catalog).
 type Convention string
 
-// Supported conventions.
+// ConventionNamePattern is the shape of a convention's name: lowercase
+// words joined by dashes. MaxConventionName keeps it short enough for a
+// folder and a message.
 const (
-	ConventionCleanArchitecture Convention = "clean-architecture"
-	ConventionReactFeatureBased Convention = "react-feature-based"
+	ConventionNamePattern = `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`
+	MaxConventionName     = 40
 )
 
-// Conventions lists every supported convention in a stable order.
-func Conventions() []Convention {
-	return []Convention{ConventionCleanArchitecture, ConventionReactFeatureBased}
+var conventionName = regexp.MustCompile(ConventionNamePattern)
+
+// ValidConventionName reports whether name can name a convention.
+func ValidConventionName(name string) bool {
+	return len(name) <= MaxConventionName && conventionName.MatchString(name)
 }
 
 // TestingProfile is the testing discipline the gates enforce.
@@ -119,6 +125,10 @@ type Config struct {
 	ShellLint        ShellLint
 	AcceptanceTests  string
 	Run              *RunRecipe
+	// Packs are the packs the components' conventions name, set by
+	// Resolve. A config that was not resolved has none, and every
+	// convention it names is then unavailable to the gates.
+	Packs Catalog
 }
 
 // RunRecipe tells qa-tester how to start the software under test and where
@@ -137,6 +147,7 @@ type ConfigInput struct {
 	Conventions      []string
 	Components       []ComponentInput
 	Test             *TestRecipe
+	Limits           *LimitOverride
 	Exclude          []string
 	Disable          []DisabledCheck
 	Testing          *string

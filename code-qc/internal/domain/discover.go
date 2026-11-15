@@ -38,8 +38,9 @@ type Module struct {
 	// the test files among them.
 	Files map[Language]int
 	Tests int
-	// React is set when the module's package.json depends on react.
-	React bool
+	// Hints are the packs whose suggest list names a package the module's
+	// package.json depends on, such as react for react-feature-based.
+	Hints []Convention
 	Fits  []PackFit
 }
 
@@ -51,6 +52,9 @@ type Discovery struct {
 	// LooseDirs groups the loose files below a top-level directory by that
 	// directory; files at the repository root are in Loose only.
 	LooseDirs []LooseDir
+	// general are the packs without a suggest list, which any module may
+	// fit.
+	general []Convention
 }
 
 // LooseDir is a top-level directory holding code that is in no module.
@@ -59,12 +63,12 @@ type LooseDir struct {
 	Files map[Language]int
 }
 
-// DiscoverInput is what discover reads: every file of the working tree, and
-// which module roots use React.
+// DiscoverInput is what discover reads: every file of the working tree, the
+// packages each module root depends on, and the packs to try.
 type DiscoverInput struct {
-	Files []string
-	React func(root string) bool
-	Packs []Pack
+	Files        []string
+	Dependencies func(root string) []string
+	Packs        []Pack
 }
 
 // Discover finds the module roots of a repository and what they hold. It
@@ -75,12 +79,17 @@ func Discover(in DiscoverInput) Discovery {
 		loose: map[Language]int{}, looseDirs: map[string]map[Language]int{},
 	}
 	for _, root := range d.roots {
-		d.modules[root] = &Module{Root: root, Files: map[Language]int{}, React: in.React(root)}
+		d.modules[root] = &Module{Root: root, Files: map[Language]int{}, Hints: hints(in.Packs, in.Dependencies(root))}
 	}
 	for _, f := range in.Files {
 		d.add(f)
 	}
 	out := Discovery{Loose: d.loose}
+	for _, pack := range in.Packs {
+		if len(pack.Suggest) == 0 {
+			out.general = append(out.general, pack.Name)
+		}
+	}
 	for _, dir := range sortedKeys(d.looseDirs) {
 		out.LooseDirs = append(out.LooseDirs, LooseDir{Dir: dir, Files: d.looseDirs[dir]})
 	}
@@ -167,6 +176,17 @@ func dirOf(f string) string {
 	return ""
 }
 
+// hints lists the packs whose suggest list names one of deps.
+func hints(packs []Pack, deps []string) []Convention {
+	var out []Convention
+	for _, pack := range packs {
+		if slices.ContainsFunc(pack.Suggest, func(dep string) bool { return slices.Contains(deps, dep) }) {
+			out = append(out, pack.Name)
+		}
+	}
+	return out
+}
+
 func packFits(packs []Pack, root string, files []string) []PackFit {
 	var fits []PackFit
 	match := ComponentMatch{Component: Component{Patterns: []Pattern{RootPattern()}}, Root: root}
@@ -209,7 +229,7 @@ func (d Discovery) Suggest() []ComponentInput {
 			continue
 		}
 		c := ComponentInput{Paths: []string{rootPath(m.Root)}, Languages: m.languageNames()}
-		c.Conventions, c.Reason = m.bestConvention()
+		c.Conventions, c.Reason = m.bestConvention(d.general)
 		components = append(components, c)
 	}
 	for _, dir := range d.LooseDirs {
@@ -248,28 +268,32 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// bestConvention picks react-feature-based for a React module whose layout
-// fits it, else clean-architecture where it fits; with neither, no
-// convention and the reason why.
-func (m Module) bestConvention() ([]string, string) {
-	preferred := []Convention{ConventionCleanArchitecture}
-	if m.React {
-		preferred = []Convention{ConventionReactFeatureBased}
+// bestConvention picks the best-fitting pack among the module's hints, or,
+// without hints, among the packs that need none; with no fit, no convention
+// and the reason why.
+func (m Module) bestConvention(general []Convention) ([]string, string) {
+	candidates := general
+	if len(m.Hints) > 0 {
+		candidates = m.Hints
 	}
+	var best *PackFit
 	var seen []string
-	for _, convention := range preferred {
-		for _, fit := range m.Fits {
-			if fit.Convention != convention {
-				continue
-			}
-			if fit.Fits() {
-				return []string{string(convention)}, ""
-			}
-			seen = append(seen, fmt.Sprintf("%s holds %d of %d %s files", convention, fit.InLayer, fit.Total, fit.Language))
+	for i, fit := range m.Fits {
+		if !slices.Contains(candidates, fit.Convention) {
+			continue
 		}
+		if fit.Fits() && (best == nil || fit.share() > best.share()) {
+			best = &m.Fits[i]
+		}
+		seen = append(seen, fmt.Sprintf("%s holds %d of %d %s files", fit.Convention, fit.InLayer, fit.Total, fit.Language))
+	}
+	if best != nil {
+		return []string{string(best.Convention)}, ""
 	}
 	if len(seen) == 0 {
 		return []string{}, "no convention pack governs this module's languages"
 	}
 	return []string{}, "the default layout does not fit: " + strings.Join(seen, "; ") + "; map the layers or adopt the layout"
 }
+
+func (f PackFit) share() float64 { return float64(f.InLayer) / float64(f.Total) }

@@ -41,7 +41,7 @@ func TestDiscoverDraftsAValidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Discovery.Modules) != 3 || !got.Discovery.Modules[2].React || got.Discovery.Modules[1].React {
+	if len(got.Discovery.Modules) != 3 || !slices.Equal(got.Discovery.Modules[2].Hints, []domain.Convention{"react-feature-based"}) || len(got.Discovery.Modules[1].Hints) != 0 {
 		t.Fatalf("modules = %+v", got.Discovery.Modules)
 	}
 	if len(got.Components) != 3 || !slices.Equal(got.Components[0].Conventions, []string{"clean-architecture"}) {
@@ -54,7 +54,7 @@ func TestDiscoverFailures(t *testing.T) {
 	if _, err := NewDiscover(&fakeRepo{filesErr: listErr}, mapFiles{}, fakePacks{}).Execute(t.Context()); !errors.Is(err, listErr) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := NewDiscover(&fakeRepo{}, mapFiles{}, brokenPacks{}).Execute(t.Context()); err == nil {
+	if _, err := NewDiscover(&fakeRepo{}, mapFiles{}, fakePacks{err: errors.New("pack store unreadable")}).Execute(t.Context()); err == nil {
 		t.Fatal("an unreadable pack store must fail discover")
 	}
 	// A directory name that is not a valid path pattern cannot be drafted.

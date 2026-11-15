@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"millennium-code-qc/internal/application/port"
 	"millennium-code-qc/internal/application/usecase"
 	"millennium-code-qc/internal/domain"
 )
@@ -17,11 +18,12 @@ type fakeApplier struct {
 	applyErr   error
 	applied    bool
 	gotTarget  usecase.ApplyTarget
+	gotDir     string
 	exported   []byte
 }
 
-func (f *fakeApplier) Prepare(_ []byte, target usecase.ApplyTarget) (usecase.ApplyPlan, error) {
-	f.gotTarget = target
+func (f *fakeApplier) Prepare(_ []byte, dir string, target usecase.ApplyTarget) (usecase.ApplyPlan, error) {
+	f.gotTarget, f.gotDir = target, dir
 	return f.plan, f.prepareErr
 }
 
@@ -148,5 +150,20 @@ func TestIsTerminal(t *testing.T) {
 	defer f.Close()
 	if isTerminal(f) {
 		t.Fatal("a regular file is not a terminal")
+	}
+}
+
+func TestApplyShowsTheProposedPacks(t *testing.T) {
+	pack := samplePack(t)
+	plan := loosening
+	plan.Canonical = nil
+	plan.Packs = []port.ProposedPack{{Pack: pack, Files: port.PackFiles{Pack: []byte("{\"name\": \"flat\"}\n"), Guide: []byte(pack.Guide)}}}
+	h, root := applyHarness(t, plan, false)
+	if code := h.run(t, "config", "apply"); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(h.stderr.String(), "Convention flat, its rules (pack.json; its guide.md has 22 characters):\n{\"name\": \"flat\"}") ||
+		strings.Contains(h.stderr.String(), "The config it applies") || h.applier.gotDir != root {
+		t.Fatalf("dir %q, stderr:\n%s", h.applier.gotDir, h.stderr.String())
 	}
 }

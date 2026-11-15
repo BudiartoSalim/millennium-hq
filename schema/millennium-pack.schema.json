@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "millennium convention pack",
+  "description": "Schema for a convention pack's pack.json (.millennium/conventions/<name>/pack.json), for editor completion and validation. The pack's folder also holds guide.md, which agents are told to follow. The gate engine is the authority and also enforces rules this schema cannot express (the folder is named like the pack, mayImport names layers of the pack, paths name its layers or composition, the guide is at most 8,000 characters). code-qc/internal/infrastructure/packs/schema_sync_test.go keeps the two in step.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "name", "languages", "layers", "paths"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": 1, "description": "The pack format version." },
+    "name": {
+      "type": "string",
+      "description": "The convention's name, as components list it in conventions, and the name of the pack's folder. It may not be a built-in convention's name.",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 40
+    },
+    "languages": {
+      "type": "array",
+      "description": "The languages the convention governs. A component's files in other languages are outside its rules.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["go", "typescript", "python", "shell"] }
+    },
+    "layers": {
+      "type": "array",
+      "description": "The layers, in order: a file belongs to the first layer whose paths match it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "not": { "const": "composition" } },
+          "mayImport": { "type": "array", "description": "The other layers this layer may import.", "items": { "type": "string" } },
+          "thirdParty": { "type": "boolean", "description": "Whether the layer may import external packages and code outside its component." },
+          "tested": { "type": "boolean", "description": "Whether changed logic in the layer needs changed tests and full line coverage." },
+          "isolated": { "type": "boolean", "description": "Whether each match of the layer's paths is a unit that may not import its siblings." }
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "description": "Per language, per layer (or composition, the composition root): path patterns relative to the component root. '*' matches within one segment.",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^(go|typescript|python|shell)$": {
+          "type": "object",
+          "additionalProperties": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "description": "The function limits of components that use this convention. Omitted limits are the engine's defaults: 50 lines, nesting depth 3, cognitive complexity 15.",
+      "additionalProperties": false,
+      "properties": {
+        "functionLines": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "nesting": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "cognitive": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "suggest": {
+      "type": "object",
+      "description": "When discover suggests this pack.",
+      "additionalProperties": false,
+      "required": ["dependencies"],
+      "properties": {
+        "dependencies": {
+          "type": "array",
+          "description": "Packages whose presence in a module's package.json makes discover prefer this pack.",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

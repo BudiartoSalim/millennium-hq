@@ -58,38 +58,50 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 	if err != nil {
 		return cli.Deps{}, fmt.Errorf("load the builtin convention packs (an engine bug): %w", err)
 	}
-	configPath := filepath.Join(repo.Root(), filepath.FromSlash(domain.ConfigPath))
 	localDir, localPath, err := localConfig(ctx, repo)
 	if err != nil {
 		return cli.Deps{}, err
 	}
-	committed, local := configfile.NewLoader(configPath), configfile.NewLoader(localPath)
-	loadConfig := usecase.NewLoadConfig(committed, repo).WithLocal(local)
+	files := configFiles(repo.Root(), localPath, builtinPacks)
+	loadConfig := usecase.NewLoadConfig(files.Committed, repo).WithLocal(files.Local)
 	node := toolpath.Find("node")
 	analyzers, closeAnalyzers := newAnalyzers(repo.Root(), node)
-	files := usecase.ConfigFiles{
-		Committed: committed, CommittedPath: configPath, Local: local, LocalPath: localPath,
-		CommittedApprovals: filepath.Join(repo.Root(), filepath.FromSlash(domain.ApprovalsDir)),
-		LocalApprovals:     filepath.Join(filepath.Dir(localPath), "deps"),
-	}
-	g := gates(repo, node, analyzers, builtinPacks, approvals.New(files.CommittedApprovals, files.LocalApprovals))
+	g := gates(repo, node, analyzers, approvals.New(files.CommittedApprovals, files.LocalApprovals))
 	runGates := usecase.NewRunGates(loadConfig, repo, g)
+	writer := projectfiles.New(repo.Root())
 	return cli.Deps{
 		Gates:          runGates,
 		Audit:          usecase.NewRunAudit(loadConfig, repo, g),
 		Config:         loadConfig,
-		Explain:        usecase.NewExplainFile(loadConfig, builtinPacks),
+		Explain:        usecase.NewExplainFile(loadConfig),
 		Guard:          usecase.NewGuardToolCall(loadConfig),
 		Stop:           usecase.NewStopCheck(runGates, statestore.New(stateDir())),
 		Scope:          usecase.NewCheckScope(loadConfig, repo),
-		Apply:          usecase.NewApplyConfig(configfile.Codec{}, files, projectfiles.New(repo.Root())),
-		Discover:       usecase.NewDiscover(repo, repo, builtinPacks),
+		Apply:          usecase.NewApplyConfig(configfile.Codec{}, files, writer),
+		Discover:       usecase.NewDiscover(repo, repo, files.Committed),
+		Conventions:    usecase.NewConventions(files.Committed, files.Local, repo, configfile.Codec{}, writer, repo.Root()),
 		Root:           repo.Root(),
 		LocalConfigDir: localDir,
 		RepoPath:       repo.RepoPath,
 		Close:          closeAnalyzers,
 		EngineCommand:  engineCommand(),
 	}, nil
+}
+
+// configFiles locates the committed and local configs, with the convention
+// packs and dependency approvals beside each.
+func configFiles(root, localPath string, builtin []domain.Pack) usecase.ConfigFiles {
+	configPath := filepath.Join(root, filepath.FromSlash(domain.ConfigPath))
+	return usecase.ConfigFiles{
+		Committed:          configfile.NewLoader(configPath, builtin, domain.PackProject),
+		CommittedPath:      configPath,
+		Local:              configfile.NewLoader(localPath, builtin, domain.PackLocal),
+		LocalPath:          localPath,
+		CommittedApprovals: filepath.Join(root, filepath.FromSlash(domain.ApprovalsDir)),
+		LocalApprovals:     filepath.Join(filepath.Dir(localPath), "deps"),
+		CommittedPacks:     configfile.PacksPath(configPath),
+		LocalPacks:         configfile.PacksPath(localPath),
+	}
 }
 
 // newAnalyzers builds one analyzer per language and the function that stops
@@ -129,15 +141,15 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 }
 
 // gates lists every gate in the order reports show them.
-func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]port.Analyzer, builtinPacks *packs.Source, approved port.ApprovalSource) []port.Gate {
+func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]port.Analyzer, approved port.ApprovalSource) []port.Gate {
 	tools := buildtools.New(repo.Root(), node)
 	return []port.Gate{
 		gate.NewToolchain(toolpath.Locator{}),
-		gate.NewStructure(analyzers, builtinPacks, repo),
+		gate.NewStructure(analyzers, repo),
 		gate.NewShell(repo, shelltools.New(repo.Root())),
 		gate.NewHygiene(analyzers, repo),
 		gate.NewBuild(tools, repo),
-		gate.NewTests(analyzers, builtinPacks, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
+		gate.NewTests(analyzers, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
 		gate.NewDeps(repo, manifests.Reader{}, approved, registry.New(registry.Public()), tools, time.Now),
 	}
 }

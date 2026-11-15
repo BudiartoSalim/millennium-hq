@@ -14,8 +14,9 @@ func discoverPacks(t *testing.T) []Pack {
 	}
 	react, err := NewPack(PackInput{
 		Name: "react-feature-based", Languages: []string{"typescript"},
-		Layers: []PackLayer{{Name: "shared"}, {Name: "features", MayImport: []string{"shared"}, Isolated: true}},
-		Paths:  map[string]map[string][]string{"typescript": {"shared": {"src/components"}, "features": {"src/features/*"}}},
+		Layers:  []PackLayer{{Name: "shared"}, {Name: "features", MayImport: []string{"shared"}, Isolated: true}},
+		Paths:   map[string]map[string][]string{"typescript": {"shared": {"src/components"}, "features": {"src/features/*"}}},
+		Suggest: []string{"react"}, Guide: "Features never import each other.",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestDiscover(t *testing.T) {
 		"scripts/deploy.sh",
 		"README.md",
 	}
-	d := Discover(DiscoverInput{Files: files, React: func(root string) bool { return root == "services/game/web" }, Packs: discoverPacks(t)})
+	d := Discover(DiscoverInput{Files: files, Dependencies: webUsesReact, Packs: discoverPacks(t)})
 	if len(d.Modules) != 3 || d.Loose[LanguageShell] != 1 {
 		t.Fatalf("discovery = %+v", d)
 	}
@@ -71,16 +72,16 @@ func TestDiscover(t *testing.T) {
 }
 
 func TestDiscoverAtTheRoot(t *testing.T) {
-	d := Discover(DiscoverInput{Files: []string{"go.mod", "tool.go", "deploy.sh"}, React: func(string) bool { return false }})
+	d := Discover(DiscoverInput{Files: []string{"go.mod", "tool.go", "deploy.sh"}, Dependencies: noDependencies})
 	got := d.Suggest()
-	if loose := Discover(DiscoverInput{Files: []string{"deploy.sh"}, React: func(string) bool { return false }}); len(loose.Suggest()) != 0 || loose.Loose[LanguageShell] != 1 {
+	if loose := Discover(DiscoverInput{Files: []string{"deploy.sh"}, Dependencies: noDependencies}); len(loose.Suggest()) != 0 || loose.Loose[LanguageShell] != 1 {
 		t.Fatalf("a script at the root of a repository without modules is reported, not drafted: %+v", loose)
 	}
 	if len(got) != 1 || got[0].Paths[0] != "." || !slices.Equal(got[0].Languages, []string{"go", "shell"}) ||
 		got[0].Reason != "no convention pack governs this module's languages" {
 		t.Fatalf("suggestion = %+v", got)
 	}
-	empty := Discover(DiscoverInput{Files: []string{"docs/package.json"}, React: func(string) bool { return false }})
+	empty := Discover(DiscoverInput{Files: []string{"docs/package.json"}, Dependencies: noDependencies})
 	if len(empty.Suggest()) != 0 {
 		t.Fatal("a module without code needs no component")
 	}
@@ -88,9 +89,43 @@ func TestDiscoverAtTheRoot(t *testing.T) {
 
 func TestDiscoverPrefersReactForAReactModule(t *testing.T) {
 	files := []string{"app/package.json", "app/src/features/a/x.ts", "app/internal/domain/d.go"}
-	d := Discover(DiscoverInput{Files: files, React: func(string) bool { return true }, Packs: discoverPacks(t)})
+	d := Discover(DiscoverInput{Files: files, Dependencies: func(string) []string { return []string{"react"} }, Packs: discoverPacks(t)})
 	got := d.Suggest()
 	if len(got) != 1 || !slices.Equal(got[0].Conventions, []string{"react-feature-based"}) {
 		t.Fatalf("a React module gets the React pack even where clean-architecture fits its Go files: %+v", got)
+	}
+	if !slices.Equal(d.Modules[0].Hints, []Convention{"react-feature-based"}) {
+		t.Fatalf("hints = %v", d.Modules[0].Hints)
+	}
+}
+
+func noDependencies(string) []string { return nil }
+
+func webUsesReact(root string) []string {
+	if root == "services/game/web" {
+		return []string{"react", "vite"}
+	}
+	return nil
+}
+
+func TestDiscoverPicksTheBestFittingPack(t *testing.T) {
+	packs := discoverPacks(t)
+	flat := cleanArchitectureInput()
+	flat.Name = "flat-layers"
+	flat.Paths = map[string]map[string][]string{"go": {"domain": {"core", "internal/domain"}, "application": {"app"}}}
+	other, err := NewPack(flat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []string{"go.mod", "core/a.go", "core/b.go", "app/c.go", "internal/domain/d.go"}
+	d := Discover(DiscoverInput{Files: files, Dependencies: noDependencies, Packs: append(packs, other)})
+	if got := d.Suggest(); len(got) != 1 || !slices.Equal(got[0].Conventions, []string{"flat-layers"}) {
+		t.Fatalf("the pack holding 3 of 4 files wins over the one holding 1: %+v", got)
+	}
+	// Both fit; the larger share wins, whichever pack comes first.
+	files = []string{"go.mod", "core/a.go", "core/b.go", "internal/domain/c.go", "internal/domain/d.go", "internal/application/e.go"}
+	d = Discover(DiscoverInput{Files: files, Dependencies: noDependencies, Packs: append(packs, other)})
+	if got := d.Suggest(); len(got) != 1 || !slices.Equal(got[0].Conventions, []string{"flat-layers"}) {
+		t.Fatalf("the pack holding 4 of 5 files wins over the one holding 3: %+v", got)
 	}
 }

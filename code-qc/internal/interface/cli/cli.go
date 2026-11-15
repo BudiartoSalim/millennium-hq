@@ -51,6 +51,13 @@ Usage:
       Print the config as a proposal, to back it up or move it.
   millennium-code-qc config explain PATH
       Show which component, layers and limits apply to PATH.
+  millennium-code-qc convention list [--local]
+      List the convention packs: built in, and the project's own.
+  millennium-code-qc convention show [--local] NAME
+      Show a convention's rules, limits and guide.
+  millennium-code-qc convention new [--local] [--from PACK] NAME
+      Draft a new convention, copied from PACK (default clean-architecture),
+      in millennium.proposal/conventions/NAME, to edit and propose.
   millennium-code-qc version
 
 Paths are relative to the current directory. Exit status is 0 only when the
@@ -99,9 +106,17 @@ type ScopeChecker interface {
 // ConfigApplier validates, applies and exports configs; usecase.ApplyConfig
 // implements it.
 type ConfigApplier interface {
-	Prepare(proposal []byte, target usecase.ApplyTarget) (usecase.ApplyPlan, error)
+	Prepare(proposal []byte, dir string, target usecase.ApplyTarget) (usecase.ApplyPlan, error)
 	Apply(plan usecase.ApplyPlan) error
 	Export(target usecase.ApplyTarget) ([]byte, error)
+}
+
+// ConventionManager lists, shows and drafts convention packs;
+// usecase.Conventions implements it.
+type ConventionManager interface {
+	List(target usecase.ApplyTarget) ([]domain.Pack, error)
+	Show(target usecase.ApplyTarget, name domain.Convention) (domain.Pack, error)
+	New(target usecase.ApplyTarget, name, from domain.Convention) (usecase.Draft, error)
 }
 
 // Discoverer inspects a repository without a config; usecase.Discover
@@ -124,8 +139,9 @@ type Deps struct {
 	Stop    StopChecker
 	Scope   ScopeChecker
 	Apply   ConfigApplier
-	// Discover is nil only in tests that do not need it.
-	Discover Discoverer
+	// Discover and Conventions are nil only in tests that do not need them.
+	Discover    Discoverer
+	Conventions ConventionManager
 	// Root is the repository's absolute path.
 	Root string
 	// LocalConfigDir holds the local configs; no agent may write there.
@@ -212,6 +228,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.hook(ctx)
 	case "config":
 		return a.config(ctx, args[1:])
+	case "convention":
+		return a.convention(ctx, args[1:])
 	case "version":
 		fmt.Fprintln(a.stdout, "millennium-code-qc", a.version)
 		return exitPass

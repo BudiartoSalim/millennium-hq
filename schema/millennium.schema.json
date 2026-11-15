@@ -1,17 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "millennium project config",
-  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, react-feature-based needs typescript in its component, mypy needs python, the most specific component wins). code-qc/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
+  "description": "Schema for .millennium/config.json, for editor completion and validation. The gate engine is the authority and also enforces rules this schema cannot express (no '.' or '..' path segments, every convention names a built-in pack or one in .millennium/conventions that governs one of its component's languages, mypy needs python, the most specific component wins). code-qc/internal/infrastructure/configfile/schema_sync_test.go keeps the two in step.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version"],
   "anyOf": [
     { "required": ["languages"], "not": { "required": ["components"] } },
-    { "required": ["components"], "not": { "anyOf": [{ "required": ["languages"] }, { "required": ["conventions"] }, { "required": ["test"] }] } }
+    { "required": ["components"], "not": { "anyOf": [{ "required": ["languages"] }, { "required": ["conventions"] }, { "required": ["test"] }, { "required": ["limits"] }] } }
   ],
   "$defs": {
     "language": { "enum": ["go", "typescript", "python", "shell"] },
-    "convention": { "enum": ["clean-architecture", "react-feature-based"] },
+    "convention": {
+      "type": "string",
+      "description": "A convention pack: built in (clean-architecture, react-feature-based) or the project's own in .millennium/conventions/<name>/. `millennium-code-qc convention list` lists them.",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "maxLength": 40
+    },
+    "limits": {
+      "type": "object",
+      "description": "Function limits that replace the conventions' own, field by field, with the reason this code needs them.",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "minProperties": 2,
+      "properties": {
+        "functionLines": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "nesting": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "cognitive": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "reason": { "type": "string", "minLength": 10 }
+      }
+    },
     "test": {
       "type": "object",
       "description": "How the component runs its tests when the built-in runner does not fit, and the only way for TypeScript: an argument list run from the component root without a shell, and the lcov report it writes.",
@@ -91,11 +109,13 @@
             "type": "string",
             "description": "Why this component is an exception, for example a legacy service with no conventions."
           },
-          "test": { "$ref": "#/$defs/test" }
+          "test": { "$ref": "#/$defs/test" },
+          "limits": { "$ref": "#/$defs/limits" }
         }
       }
     },
     "test": { "$ref": "#/$defs/test" },
+    "limits": { "$ref": "#/$defs/limits" },
     "exclude": {
       "type": "array",
       "description": "Paths no check reads, such as generated or vendored code. '**' matches any number of segments; a directory excludes everything inside it.",

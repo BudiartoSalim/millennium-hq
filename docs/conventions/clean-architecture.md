@@ -5,6 +5,12 @@ or per component.
 
 **Status:** enforced for Go, TypeScript and Python.
 
+It is a built-in [convention pack](writing-a-convention.md):
+`millennium-code-qc convention show clean-architecture` prints its rules, its function
+limits (the defaults: 50 lines, nesting depth 3, cognitive complexity 15) and
+the guide every agent is given. To vary it, copy it under a new name with
+`millennium-code-qc convention new <name> --from clean-architecture`.
+
 ## Layers
 
 Code is split into four layers, and dependencies point inward:

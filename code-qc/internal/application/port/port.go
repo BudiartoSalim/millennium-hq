@@ -15,37 +15,60 @@ import (
 // config file at all. Any other load failure is a different error.
 var ErrConfigNotFound = errors.New("config not found")
 
-// ErrPackUnavailable is returned by a PackSource for a convention this engine
-// version does not ship yet.
-var ErrPackUnavailable = errors.New("convention pack not available in this engine version")
-
-// ConfigSource loads and validates the project config.
+// ConfigSource loads and validates the project config, resolved against
+// the convention packs available to it.
 type ConfigSource interface {
 	Load() (domain.Config, error)
 }
 
+// PackCatalog provides the convention packs a config can name: the
+// engine's own and the project's.
+type PackCatalog interface {
+	Packs() (domain.Catalog, error)
+}
+
 // ConfigFile is a config source backed by a file, which can also return the
-// file as it is, for export.
+// file as it is, for export, and the packs beside it.
 type ConfigFile interface {
 	ConfigSource
+	PackCatalog
 	Raw() ([]byte, error)
 }
 
+// PackFiles are a convention pack's files: pack.json and guide.md.
+type PackFiles struct {
+	Pack  []byte
+	Guide []byte
+}
+
+// ProposedPack is a convention pack a proposal adds or replaces.
+type ProposedPack struct {
+	Pack  domain.Pack
+	Files PackFiles
+}
+
 // Proposal is a validated change an agent drafted for the user to apply: a
-// new config, dependency approvals, or both.
+// new config, convention packs, dependency approvals, or any of them
+// together.
 type Proposal struct {
-	// Config is nil when the proposal only approves dependencies.
+	// Config is nil when the proposal does not change the config. It is
+	// not resolved yet: its conventions may name the proposal's packs.
 	Config *domain.Config
 	// Canonical is the config's indented JSON, as it will be written.
 	Canonical []byte
+	Packs     []ProposedPack
 	Approvals []domain.Approval
 }
 
-// ProposalCodec reads proposals and formats what `config apply` writes.
+// ProposalCodec reads proposals and formats what `config apply` and
+// `convention new` write.
 type ProposalCodec interface {
-	ParseProposal(data []byte) (Proposal, error)
+	// ParseProposal reads a proposal; dir is where it lives, which the pack
+	// folders it names are relative to.
+	ParseProposal(data []byte, dir string) (Proposal, error)
 	FormatProposal(config []byte) ([]byte, error)
 	FormatApproval(a domain.Approval) ([]byte, error)
+	FormatPack(pack domain.Pack) (PackFiles, error)
 }
 
 // ProjectWriter writes the files `config apply` manages.
@@ -183,11 +206,6 @@ type FileFinder interface {
 // Analyzer extracts facts from source files of one language.
 type Analyzer interface {
 	Analyze(ctx context.Context, path string, content []byte) (domain.FileFacts, error)
-}
-
-// PackSource provides convention packs.
-type PackSource interface {
-	Pack(name domain.Convention) (domain.Pack, error)
 }
 
 // AttemptStore counts an agent's consecutive blocked stops. It lives where

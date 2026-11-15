@@ -377,10 +377,10 @@ additions, not rewrites:
   `ast`), run with the project's runtime, because a correct TS or Python parser
   in Go would be a large source of bugs. A new language is a new analyzer
   producing the same facts.
-- **Convention packs** are rules over those facts, written as data. A new
-  convention is a new pack file plus its name on the allowlist. The engine's
-  logic only changes when a convention needs a new kind of rule; that rule
-  type is then available to every pack.
+- **Convention packs** are rules over those facts, written as data, with a
+  guide for the agents. A project adds its own without an engine release
+  (see Convention packs). The engine only changes when a convention needs a
+  new kind of rule; that rule type is then available to every pack.
 
 ### Checks
 
@@ -514,52 +514,133 @@ points millennium needs, but no subagents and no sandbox.
 
 ## Convention packs
 
-A convention is a pack; the engine is generic.
+The engine is convention-agnostic: a convention is data (a **pack**), and
+nothing in the engine names one. Not every project follows the same
+conventions, so a project can add its own without an engine release.
+Decided with the user on 2026-11-15.
 
-**Built:** a pack is one JSON file in
-`code-qc/internal/infrastructure/packs/builtin/`, embedded in the engine so
-an agent cannot weaken it on disk: layers with `mayImport`, `thirdParty`,
-`tested` and `isolated`, and layer paths per language. Its name must be on
-`domain.Conventions()`. The agents' guidance for each convention lives in the
-shared skills (`init-project`, `engineering-standards`,
-`maintainability-review`). [Adding a convention](conventions/adding-a-convention.md)
-lists every place a new one touches.
-
-**Planned, not built:** a pack folder that also carries its own agent
-guidance, review checklist and scaffold, so a convention is self-contained:
+### A pack
 
 ```
-conventions/<name>/
-  pack.json            name, languages, layer -> path mapping, required gates
-  SKILL.md             guidance the agents load
-  rules/               boundary and limit rules the engine evaluates
-  review-checklist.md  added to the maintainability reviewer's checklist
-  scaffold/<lang>/     starting skeleton (successor of /new-service)
+<name>/
+  pack.json   the enforced rules: languages, layers and their import rules,
+              tested and isolated layers, default layer paths per language,
+              default function limits, discovery hints
+  guide.md    the soft rules, for agents: what belongs in each layer, naming,
+              what reviewers look for
 ```
 
-v1 packs:
+- **pack.json** (format 1): `name`, `languages`, `layers` (`name`,
+  `mayImport`, `thirdParty`, `tested`, `isolated`), `paths` (language ->
+  layer -> patterns, `composition` reserved), `limits` (`functionLines`,
+  `nesting`, `cognitive`; omitted fields take the engine's defaults of 50, 3
+  and 15), and `suggest.dependencies` (package names that make `discover`
+  suggest the pack for a module). Read strictly, like the config: unknown
+  fields, duplicate keys and trailing data are errors.
+- **guide.md** is required and at most 8,000 characters. It is what agents
+  are told about the convention, so it has to be short enough to always be
+  in their context (see Guides below).
+
+### Where packs come from
+
+| Source | Location | Who changes it |
+|---|---|---|
+| Built in | embedded in the engine (`infrastructure/packs/builtin/<name>/`) | an engine release |
+| Project | `.millennium/conventions/<name>/` | the user, through `config apply` |
+| Local mode | `<local config dir>/conventions/<name>/` | the user, through `config apply --local` |
+
+Project packs sit inside `.millennium/`, so they have exactly the config's
+protection: the guard denies agents' writes, Claude Code's sandbox denies
+shell writes, and changes arrive only as proposals the user applies.
+
+- **No extending.** To vary a convention, copy it under a new name
+  (`millennium-code-qc convention new <name> --from <pack>`) and edit the
+  copy. One pack is the whole rule set, so there are no merge rules to
+  reason about.
+- **No shadowing.** A project pack with a built-in pack's name is an error.
+- **Fail closed.** A pack that cannot be read, is too large, is a symlink,
+  has unknown fields, or whose folder name differs from its `name` blocks
+  every check with a message, as a broken config does.
+
+### Using packs in the config
+
+- A component's `conventions` must name packs that exist (built in, or a
+  project pack); an unknown name is a config error. Each pack must govern at
+  least one of the component's languages.
+- **Limits:** a file's limits come from its component's `limits`, field by
+  field, else the strictest value among its conventions' packs, else the
+  engine defaults. A component `limits` override needs a `reason`. A
+  single-project config takes `limits` at the top level.
+
+### Proposals and `config apply`
+
+A proposal adds or replaces project packs with
+`"packs": {"<name>": "<folder relative to the proposal>"}`. The folder holds
+`pack.json` and `guide.md`; `convention new` writes one at
+`millennium.proposal/conventions/<name>/`, git-ignored like the proposal.
+The confirmation digest covers the packs' files. `config apply` writes them
+to `.millennium/conventions/<name>/` and lists what they loosen next to the
+config's own loosenings:
+
+- a layer removed, or a language removed;
+- a layer gaining `mayImport` entries or `thirdParty`, or losing `tested` or
+  `isolated`;
+- layer paths changed;
+- a limit raised, in a pack or a component.
+
+A pack the proposal does not name is left as it is. Removing one is a manual
+step, after no component uses it.
+
+### Guides reach every agent
+
+The guides of the conventions a repository uses are part of the session
+briefing, with nothing for the user to set up:
+
+- **Claude Code:** the SessionStart hook (the main session) and a
+  SubagentStart hook (every subagent, the qa-tester included: knowing the
+  layout does not expose the implementation, and it helps with acceptance
+  test structure).
+- **pi:** the briefing section of every run's system prompt; agents started
+  by `millennium_agent` get it through their own session start.
+
+Claude Code caps a hook's context at 10,000 characters and replaces anything
+longer with a file path and a preview. So the briefing includes whole guides
+while they fit, and names the rest with the command that prints them
+(`millennium-code-qc convention show <name>`). The skills no longer carry
+convention-specific prose: they tell agents to follow the guides.
+
+### Commands
+
+- `convention list`: every available pack and where it comes from.
+- `convention show <name>`: the pack's rules, effective limits and guide.
+- `convention new <name> [--from <pack>]`: a draft pack to edit, copied from
+  an existing one (default `clean-architecture`), with every limit written
+  out so the knobs are visible.
+
+### What still needs the engine
+
+A pack can express only the rule types the engine knows: layer imports,
+third-party imports, tested layers, isolated units, and function limits. A
+new kind of rule (naming, required files, calls banned in a layer, every
+`http.Server` setting timeouts) is added to the engine once, and is then
+available to every pack as data. Rules stay declarative: no scripts in
+packs.
+
+### Built-in packs
 
 - **clean-architecture** (Go, TypeScript, Python backends): `domain` ->
   `application` (ports + use-cases) -> `infrastructure` (adapters) and
   `interface` (delivery), dependencies pointing inward, `main` as the only
   composition root. Ported from the `server-scripts` rules.
-- **react-feature-based (built)**: `app/` (routes, providers), `features/<name>/`
+- **react-feature-based**: `app/` (routes, providers), `features/<name>/`
   (components, hooks, api, types), shared `components/`, `lib/`, `hooks/`.
   Imports flow shared -> features -> app; features never import each other
   (an `isolated` layer: each match of `src/features/*` is a unit no sibling
   may import). Shared code and features both need unit tests, components
-  included; keeping components thin keeps that cheap. Feature-Sliced Design
-  is a candidate for a later pack.
+  included; keeping components thin keeps that cheap. Suggested by
+  `discover` for modules that depend on `react`.
 
-Planned, not built: a project can have its own pack that extends a shipped
-one (packs are builtin only today, so this needs a way to load a project pack
-that agents cannot edit). For
-`server-scripts`, several prose rules become gated checks that way: the HTTP
-delivery package is named `web`, every `http.Server` sets timeouts, bearer
-tokens are compared with `ConstantTimeCompare`, no barrel `index.ts` files.
-
-Future packs (hexagonal, feature-sliced, a test-first testing profile) are new
-pack files rather than new engine logic; they still ship in an engine release.
+Candidates for later packs: hexagonal, Feature-Sliced Design.
 
 ## Testing
 

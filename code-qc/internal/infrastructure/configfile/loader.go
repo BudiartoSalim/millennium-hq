@@ -4,38 +4,59 @@
 package configfile
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
-	"os"
+	"path/filepath"
 
 	"millennium-code-qc/internal/application/port"
 	"millennium-code-qc/internal/domain"
+	"millennium-code-qc/internal/infrastructure/packs"
+	"millennium-code-qc/internal/infrastructure/strictfile"
 )
 
 // maxConfigBytes bounds what the engine reads; a real config is a few hundred
 // bytes.
 const maxConfigBytes = 64 << 10
 
-// Loader loads the config from one path.
+// PacksDir is the folder beside a config that holds the project's own
+// convention packs: .millennium/conventions for a committed config.
+const PacksDir = "conventions"
+
+// Loader loads the config from one path, with the packs beside it.
 type Loader struct {
-	path string
+	path    string
+	builtin []domain.Pack
+	origin  domain.PackOrigin
 }
 
-// NewLoader returns a loader for the config file at path.
-func NewLoader(path string) *Loader {
-	return &Loader{path: path}
+// NewLoader returns a loader for the config file at path. builtin are the
+// engine's packs; origin says whose the packs beside the config are.
+func NewLoader(path string, builtin []domain.Pack, origin domain.PackOrigin) *Loader {
+	return &Loader{path: path, builtin: builtin, origin: origin}
+}
+
+// PacksPath is the folder of the packs beside the config at configPath.
+func PacksPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), PacksDir)
 }
 
 // Raw returns the config file's bytes as they are, read as strictly as Load
 // reads them.
 func (l *Loader) Raw() ([]byte, error) { return readRegularFile(l.path) }
 
-// Load reads, decodes and validates the config. It returns
-// port.ErrConfigNotFound only when the file does not exist.
+// Packs returns the engine's packs and those beside the config.
+func (l *Loader) Packs() (domain.Catalog, error) {
+	project, err := packs.ReadDir(PacksPath(l.path), l.origin)
+	if err != nil {
+		return nil, err
+	}
+	return domain.NewCatalog(l.builtin, project)
+}
+
+// Load reads, decodes and validates the config, and resolves its
+// conventions against the packs. It returns port.ErrConfigNotFound only
+// when the file does not exist.
 func (l *Loader) Load() (domain.Config, error) {
 	data, err := readRegularFile(l.path)
 	if err != nil {
@@ -49,67 +70,31 @@ func (l *Loader) Load() (domain.Config, error) {
 	if err != nil {
 		return domain.Config{}, fmt.Errorf("%s: %w", l.path, err)
 	}
-	return cfg, nil
+	catalog, err := l.Packs()
+	if err != nil {
+		return domain.Config{}, fmt.Errorf("%s: %w", PacksPath(l.path), err)
+	}
+	resolved, err := cfg.Resolve(catalog)
+	if err != nil {
+		return domain.Config{}, fmt.Errorf("%s: %w", l.path, err)
+	}
+	return resolved, nil
 }
 
-// readRegularFile refuses symlinks, so the config cannot be redirected to a
-// file outside the reviewed tree, and checks after opening that the file is
-// still the one it inspected.
+// readRegularFile reads the config, refusing anything but a regular file,
+// so it cannot be redirected to a file outside the reviewed tree.
 func readRegularFile(path string) ([]byte, error) {
-	info, err := os.Lstat(path)
+	data, err := strictfile.ReadRegular(path, maxConfigBytes)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, port.ErrConfigNotFound
 	}
-	if err != nil {
-		return nil, fmt.Errorf("inspect %s: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s must be a regular file, found %s", path, describeMode(info.Mode()))
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-	opened, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("inspect %s: %w", path, err)
-	}
-	if !os.SameFile(info, opened) {
-		return nil, fmt.Errorf("%s changed while it was being read", path)
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	if len(data) > maxConfigBytes {
-		return nil, fmt.Errorf("%s is larger than %d bytes", path, maxConfigBytes)
-	}
-	return data, nil
-}
-
-func describeMode(mode fs.FileMode) string {
-	switch {
-	case mode.IsDir():
-		return "a directory"
-	case mode&fs.ModeSymlink != 0:
-		return "a symlink"
-	}
-	return "a special file"
+	return data, err
 }
 
 func decode(data []byte) (domain.ConfigInput, error) {
-	if err := rejectDuplicateKeys(data); err != nil {
-		return domain.ConfigInput{}, err
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	var dto configDTO
-	if err := dec.Decode(&dto); err != nil {
-		return domain.ConfigInput{}, fmt.Errorf("parse: %w", err)
-	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return domain.ConfigInput{}, errors.New("parse: unexpected data after the config object")
+	if err := strictfile.DecodeJSON(data, &dto); err != nil {
+		return domain.ConfigInput{}, err
 	}
 	return dto.toInput(), nil
 }

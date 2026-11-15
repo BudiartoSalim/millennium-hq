@@ -38,8 +38,9 @@ millennium-code-qc discover --format json
 
 It lists the module roots (`go.mod`, `package.json`, `pyproject.toml`,
 `setup.py`, `requirements.txt`), the code files per language, test files,
-whether a module uses React, how many files each convention pack's default
-layout already places in a layer, and a draft proposal. It reads file names
+which packs its dependencies suggest (`hints`, such as react-feature-based
+for a React app), how many files each convention pack's default layout
+already places in a layer, and a draft proposal. It reads file names
 and `package.json` only.
 
 Present it to the user as a short table: module, languages, tests, best fit.
@@ -55,7 +56,13 @@ For each module in the draft:
   `pkg/core`, `pkg/usecases`, `pkg/adapters`, `pkg/http`): look at the
   directory tree (`git ls-files <module> | cut -d/ -f1-4 | sort -u`) and
   propose `layers` overrides that map the pack's layers onto it. Explain the
-  mapping to the user; the docs for each convention describe the layers.
+  mapping to the user; `millennium-code-qc convention show <name>` lists a
+  pack's layers and rules.
+- **The code follows a convention no pack describes** (other layers, other
+  import rules): draft one with `millennium-code-qc convention new <name>
+  --from <closest pack>`, edit its `pack.json` and `guide.md` with the user,
+  and add it to the proposal's `packs` (see the init-project skill's Custom
+  conventions).
 - **The code is not layered**: no convention, with a `reason` the user agrees
   with ("flat package, predates the template"). It still gets every check
   that applies to any code: build, tests, secrets, suppressions, dependencies.

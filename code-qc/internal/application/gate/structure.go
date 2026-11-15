@@ -16,14 +16,13 @@ import (
 // checked; without one (an audit), every file is held to the full rules.
 type Structure struct {
 	analyzers map[domain.Language]port.Analyzer
-	packs     port.PackSource
 	source    port.SourceReader
-	limits    domain.Limits
 }
 
-// NewStructure returns the structure gate.
-func NewStructure(analyzers map[domain.Language]port.Analyzer, packs port.PackSource, source port.SourceReader) *Structure {
-	return &Structure{analyzers: analyzers, packs: packs, source: source, limits: domain.DefaultLimits()}
+// NewStructure returns the structure gate. The limits and layer rules come
+// from the config's convention packs.
+func NewStructure(analyzers map[domain.Language]port.Analyzer, source port.SourceReader) *Structure {
+	return &Structure{analyzers: analyzers, source: source}
 }
 
 // Rules lists the rules the gate reports.
@@ -76,8 +75,8 @@ func (g *Structure) checkFile(ctx context.Context, in port.GateInput, file domai
 	if err != nil {
 		return []domain.Finding{{Rule: "analysis-failed", File: file.Path, Message: err.Error()}}
 	}
-	findings := g.limits.Check(facts, base)
-	return append(findings, g.layerFindings(match, lang, facts, base)...)
+	findings := in.Config.LimitsFor(match.Component).Check(facts, base)
+	return append(findings, layerFindings(in.Config.Packs, match, lang, facts, base)...)
 }
 
 // language detects a file's language by extension and, for an
@@ -125,10 +124,10 @@ func (g *Structure) analyze(ctx context.Context, analyzer port.Analyzer, base st
 	return facts, &before, nil
 }
 
-func (g *Structure) layerFindings(match domain.ComponentMatch, lang domain.Language, facts domain.FileFacts, base *domain.FileFacts) []domain.Finding {
+func layerFindings(packs domain.Catalog, match domain.ComponentMatch, lang domain.Language, facts domain.FileFacts, base *domain.FileFacts) []domain.Finding {
 	var findings []domain.Finding
 	for _, convention := range match.Component.Conventions {
-		layering, err := layeringFor(g.packs, convention, lang, match)
+		layering, err := layeringFor(packs, convention, lang, match)
 		if errors.Is(err, domain.ErrLanguageNotGoverned) {
 			continue
 		}
@@ -144,20 +143,17 @@ func (g *Structure) layerFindings(match domain.ComponentMatch, lang domain.Langu
 
 // layeringFor applies a convention's pack to a component's files of lang,
 // with errors worded for findings.
-func layeringFor(packs port.PackSource, convention domain.Convention, lang domain.Language, match domain.ComponentMatch) (domain.Layering, error) {
-	pack, err := packs.Pack(convention)
-	if errors.Is(err, port.ErrPackUnavailable) {
-		return domain.Layering{}, fmt.Errorf("convention %s is not available in this engine version", convention)
-	}
-	if err != nil {
-		return domain.Layering{}, err
+func layeringFor(packs domain.Catalog, convention domain.Convention, lang domain.Language, match domain.ComponentMatch) (domain.Layering, error) {
+	pack, ok := packs[convention]
+	if !ok {
+		return domain.Layering{}, fmt.Errorf("no pack for convention %s is available", convention)
 	}
 	layering, err := pack.For(lang, match)
 	if errors.Is(err, domain.ErrLanguageNotGoverned) {
 		return domain.Layering{}, err
 	}
 	if errors.Is(err, domain.ErrLanguageNotSupported) {
-		return domain.Layering{}, fmt.Errorf("convention %s has no %s rules in this engine version", convention, lang)
+		return domain.Layering{}, fmt.Errorf("convention %s has no %s layer paths", convention, lang)
 	}
 	return layering, err
 }

@@ -88,6 +88,12 @@ The workflow, in order:
 | `performance-review` | performance-reviewer | Complexity at stated sizes, queries, memory, blocking I/O, limits. |
 | `qa-testing` | qa-tester | Acceptance, smoke and exploratory modes, black-box. |
 
+The skills hold no convention-specific rules: the engineer and the
+maintainability reviewer follow the guide of each convention the repository
+uses, which every agent's briefing carries (see
+[Convention guides](hooks.md#convention-guides)). A project's own
+convention reaches them the same way as a built-in one.
+
 Skills marked for agents are hidden from your `/` menu; you can still read
 them in `plugin/skills/`.
 
