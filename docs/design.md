@@ -378,8 +378,9 @@ additions, not rewrites:
   in Go would be a large source of bugs. A new language is a new analyzer
   producing the same facts.
 - **Convention packs** are rules over those facts, written as data. A new
-  convention is a new pack folder. The engine only changes when a convention
-  needs a new kind of rule; that rule type is then available to every pack.
+  convention is a new pack file plus its name on the allowlist. The engine's
+  logic only changes when a convention needs a new kind of rule; that rule
+  type is then available to every pack.
 
 ### Checks
 
@@ -515,6 +516,18 @@ points millennium needs, but no subagents and no sandbox.
 
 A convention is a pack; the engine is generic.
 
+**Built:** a pack is one JSON file in
+`code-qc/internal/infrastructure/packs/builtin/`, embedded in the engine so
+an agent cannot weaken it on disk: layers with `mayImport`, `thirdParty`,
+`tested` and `isolated`, and layer paths per language. Its name must be on
+`domain.Conventions()`. The agents' guidance for each convention lives in the
+shared skills (`init-project`, `engineering-standards`,
+`maintainability-review`). [Adding a convention](conventions/adding-a-convention.md)
+lists every place a new one touches.
+
+**Planned, not built:** a pack folder that also carries its own agent
+guidance, review checklist and scaffold, so a convention is self-contained:
+
 ```
 conventions/<name>/
   pack.json            name, languages, layer -> path mapping, required gates
@@ -538,13 +551,15 @@ v1 packs:
   included; keeping components thin keeps that cheap. Feature-Sliced Design
   is a candidate for a later pack.
 
-A project can also have its own pack that extends a shipped one. For
+Planned, not built: a project can have its own pack that extends a shipped
+one (packs are builtin only today, so this needs a way to load a project pack
+that agents cannot edit). For
 `server-scripts`, several prose rules become gated checks that way: the HTTP
 delivery package is named `web`, every `http.Server` sets timeouts, bearer
 tokens are compared with `ConstantTimeCompare`, no barrel `index.ts` files.
 
 Future packs (hexagonal, feature-sliced, a test-first testing profile) are new
-folders, not engine changes.
+pack files rather than new engine logic; they still ship in an engine release.
 
 ## Testing
 

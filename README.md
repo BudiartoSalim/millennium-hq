@@ -356,7 +356,7 @@ macOS.
 | [Hooks](docs/hooks.md) | What runs in every session, and its limits |
 | [Agents and skills](docs/agents.md) | The workflow, each agent and skill, the reviewer report format |
 | [pi](docs/pi.md) | Using millennium-hq in pi |
-| [Conventions](docs/conventions/) | Clean Architecture and feature-based React |
+| [Conventions](docs/conventions/) | Clean Architecture and feature-based React, and [adding a convention](docs/conventions/adding-a-convention.md) |
 | [Design](docs/design.md) | Why things are the way they are |
 
 ## Contributing
