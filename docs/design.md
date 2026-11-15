@@ -786,7 +786,9 @@ or sh shebang (such as `bin/*`).
 
 ## Pending
 
-None. The first engine release, `code-qc/v0.1.0`, is published.
+- Publish the engine release `code-qc/v0.2.0`, which adds convention packs.
+  `plugin/code-qc.lock` already names it, so it must be published before
+  users update the plugin.
 
 ## Open decisions
 

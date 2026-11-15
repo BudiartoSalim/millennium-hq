@@ -8,8 +8,8 @@ past; judgement calls go to fresh-context reviewer agents. These docs call it
 
 **Status: early development.** Everything described here is built: the
 gate engine, the hooks, `config apply`, the agents and skills, the pi
-extension, and the release pipeline. The first engine release is
-`code-qc/v0.1.0`.
+extension, and the release pipeline. The current engine release is
+`code-qc/v0.2.0`.
 
 ## Guides
 
