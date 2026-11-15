@@ -31,6 +31,31 @@
         "shell"
       ],
       "reason": "the repository's tooling scripts and the plugin's launcher"
+    },
+    {
+      "paths": [
+        "pi"
+      ],
+      "languages": [
+        "typescript"
+      ],
+      "test": {
+        "command": [
+          "node",
+          "--test",
+          "--experimental-test-coverage",
+          "--test-reporter=lcov",
+          "--test-reporter-destination=lcov.info",
+          "--test-reporter=spec",
+          "--test-reporter-destination=stdout",
+          "src/**/*.test.ts"
+        ],
+        "lcov": "lcov.info"
+      },
+      "reason": "the pi extension: a thin adapter from pi's events to the engine, plus the agent tool; Node standard library only"
     }
+  ],
+  "exclude": [
+    "pi/node_modules"
   ]
 }

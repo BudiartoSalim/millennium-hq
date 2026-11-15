@@ -50,9 +50,11 @@ func IsWriteTool(tool string) bool { return slices.Contains(writeTools(), tool) 
 func readTools() []string { return []string{"Read", "Grep", "Glob"} }
 
 // ProtectedPaths are what no agent may write: the rules it is checked
-// against, and the settings that load the checks.
+// against, and the settings and code that load the checks: Claude Code's
+// project settings, and pi's project settings and extensions (a project
+// extension runs inside pi and could switch millennium's off).
 func ProtectedPaths() []string {
-	return []string{".millennium", ".claude/settings.json", ".claude/settings.local.json"}
+	return []string{".millennium", ".claude/settings.json", ".claude/settings.local.json", ".pi/settings.json", ".pi/extensions"}
 }
 
 var (

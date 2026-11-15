@@ -25,7 +25,7 @@ data directory, where sandboxed agents cannot write.
 
 | Rule | Applies to | Denied |
 |---|---|---|
-| Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json` |
+| Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off) |
 | Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`): the engineer cannot change the tests that judge its work |
 | Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
 | Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path |
@@ -48,7 +48,10 @@ it, because the protected paths are unknown; reads stay allowed.
   from `HEAD`. Before merging an engineer's branch, the tech lead runs
   `millennium-code-qc scope` and the full gate against the branch's base.
 - **Other harnesses** get the portable layers only: `AGENTS.md`, the skills,
-  and the engine as a CLI.
+  and the engine as a CLI (see
+  [Installation: skills only](install.md#other-harnesses-skills-only)). pi is
+  the exception: millennium's pi extension runs the same guard, gates and
+  briefing (see [pi](pi.md)), without a sandbox behind them.
 
 ## Recommended settings
 

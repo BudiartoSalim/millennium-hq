@@ -19,8 +19,9 @@ const PluginID = "millennium@millennium-hq"
 // ProposalFile is where agents write proposals, at the repository root.
 const ProposalFile = "millennium.proposal.json"
 
-// WorktreesDir is where Claude Code puts subagent worktrees.
-const WorktreesDir = ".claude/worktrees/"
+// WorktreesDirs are where agent worktrees go: Claude Code's subagents, and
+// the agents millennium's pi extension starts.
+func WorktreesDirs() []string { return []string{".claude/worktrees/", ".pi/worktrees/"} }
 
 // ApplyTarget says where a config goes.
 type ApplyTarget int
@@ -126,7 +127,7 @@ func (u *ApplyConfig) writes(target ApplyTarget) []string {
 		u.files.CommittedPath,
 		".claude/settings.json: the plugin enabled for the project, the sandbox on with unsandboxed commands off, .millennium write-protected, the package registries and OSV reachable for the full tier, subagent worktrees branched from HEAD",
 		"AGENTS.md: the millennium section (and an @AGENTS.md import in CLAUDE.md, if there is one)",
-		".gitignore: " + ProposalFile + " and " + WorktreesDir,
+		".gitignore: " + ProposalFile + " and the agent worktrees (" + strings.Join(WorktreesDirs(), ", ") + ")",
 	}
 }
 
@@ -152,7 +153,9 @@ func (u *ApplyConfig) Apply(plan ApplyPlan) error {
 		func() error { return u.writer.MergeSettings(PluginID) },
 		func() error { return u.writer.SetAgentsSection(AgentsSection(*plan.Config)) },
 		func() error { return u.writer.Ignore(ProposalFile) },
-		func() error { return u.writer.Ignore(WorktreesDir) },
+	}
+	for _, dir := range WorktreesDirs() {
+		steps = append(steps, func() error { return u.writer.Ignore(dir) })
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {

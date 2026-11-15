@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Full local check for this repository: gofmt, go vet for every release target
-# OS, the engine's test suite, and the engine auditing its own source. Run it
+# OS, the engine's test suite, the launcher's and the pi extension's tests, and
+# the engine auditing its own source. Run it
 # before calling a change done.
 # Written for the bash 3.2 that macOS ships.
 set -euo pipefail
@@ -34,6 +35,12 @@ go test -count=1 ./...
 
 echo "== launcher"
 bash "$root/scripts/test-launcher.sh"
+
+# The pi extension type-checks with the pinned TypeScript of its lockfile,
+# which is the fixture's, linked in rather than installed into the repository.
+echo "== pi extension"
+ln -sfn "$MILLENNIUM_TYPESCRIPT/node_modules" "$root/pi/node_modules"
+(cd "$root/pi" && node node_modules/typescript/bin/tsc --noEmit -p . && node --test "src/**/*.test.ts")
 
 # The plugin practises what it enforces: the engine audits its own source
 # against .millennium/config.json, so a rule it would block in a user's

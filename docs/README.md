@@ -7,14 +7,15 @@ past; judgement calls go to fresh-context reviewer agents. These docs call it
 "the engine".
 
 **Status: early development.** Everything described here is built: the
-gate engine, the hooks, `config apply`, the agents and skills, and the
-release pipeline. The first engine release (`code-qc/v0.1.0`) has not been
-published yet; until it is, build the engine yourself (step 2 below).
+gate engine, the hooks, `config apply`, the agents and skills, the pi
+extension, and the release pipeline. The first engine release is
+`code-qc/v0.1.0`.
 
 ## Guides
 
 | Document | What it covers |
 |---|---|
+| [Installation](install.md) | Claude Code, pi, and skills only for other harnesses: requirements, scopes, updating, offline use, and what each setup enforces |
 | [Getting started](#getting-started) | Install the plugin and opt a repository in |
 | [Configuration](configuration.md) | Every setting of `.millennium/config.json`, single projects and monorepos |
 | [Commands](cli.md) | `gate`, `audit`, `discover`, `scope`, `config apply` and the rest, exit codes, output formats |
@@ -23,10 +24,14 @@ published yet; until it is, build the engine yourself (step 2 below).
 | [Feature-based React](conventions/react-feature-based.md) | Shared code, isolated features and the app layer, and how to map an existing layout |
 | [Hooks](hooks.md) | What the plugin's hooks enforce in every session, and their limits |
 | [Agents and skills](agents.md) | The tech-lead workflow, each agent and skill, and the reviewer report format |
+| [pi](pi.md) | Installing and using millennium in pi, and what pi cannot enforce |
 | [Releasing](releasing.md) | How engine releases are built, locked and published |
 | [Design](design.md) | Why things are the way they are, and what is planned |
 
 ## Getting started
+
+This is the short path for Claude Code. [Installation](install.md) has the
+details, and covers pi and other harnesses.
 
 You need Claude Code, git, `curl` or `wget`, and `sha256sum` or `shasum`,
 plus the toolchains of the languages you use: Go; `node` and the project's
@@ -41,18 +46,16 @@ install Git for Windows: the hooks run through Git Bash.
    /plugin install millennium@millennium-hq
    ```
 
-2. **The engine.** Once a release exists, the plugin's launcher downloads the
-   engine for your platform on first use and refuses it unless its SHA-256
-   matches the plugin's `code-qc.lock`; nothing to do. Before the first
-   release, build it from a clone of this repository (Go 1.25 or newer):
+   In pi, install the package instead (`pi install
+   git:github.com/BudiartoSalim/millennium-hq`); the steps below are the same
+   with `/skill:<name>` for `/millennium:<name>`. See [pi](pi.md).
 
-   ```
-   cd code-qc && go build -o millennium-code-qc .
-   ```
-
-   and start Claude Code with `MILLENNIUM_CODE_QC` set to the binary's
-   absolute path. Without an engine every hook blocks with a message saying
-   so.
+2. **The engine.** The plugin's launcher downloads the engine for your
+   platform on first use and refuses it unless its SHA-256 matches the
+   plugin's `code-qc.lock`; there is nothing to build. To run a binary you
+   built or vetted instead, set `MILLENNIUM_CODE_QC` to its absolute path
+   (see [Your own engine binary](install.md#your-own-engine-binary)). Without
+   an engine, every hook blocks with a message saying so.
 
 3. **Opt a repository in.** In the repository, run `/millennium:adopt-project` for
    existing code or `/millennium:init-project` for a new project. The agent looks at

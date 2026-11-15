@@ -141,9 +141,9 @@ built-in runner:
 ```json
 "test": {
   "command": ["npm", "test", "--", "--experimental-test-coverage",
-              "--test-reporter=lcov", "--test-reporter-destination=coverage/lcov.info",
+              "--test-reporter=lcov", "--test-reporter-destination=lcov.info",
               "--test-reporter=spec", "--test-reporter-destination=stdout"],
-  "lcov": "coverage/lcov.info"
+  "lcov": "lcov.info"
 }
 ```
 
@@ -151,7 +151,8 @@ built-in runner:
   with a 15-minute limit; a non-zero exit is a test failure.
 - `lcov` is where the command writes an lcov coverage report, relative to the
   component root. The engine deletes it before the run, so a stale report
-  cannot pass for a new one. It must cover the TypeScript sources (enable
+  cannot pass for a new one. Node's test runner does not create directories,
+  so write it to an existing one, such as the component root. It must cover the TypeScript sources (enable
   source maps when tests run on compiled JavaScript).
 
 `dependencyPolicy` has one value, `strict`, which the `deps` gate enforces;
@@ -212,7 +213,8 @@ For a config in the repository, it writes:
   lead's work rather than the default branch;
 - a managed section in `AGENTS.md` describing the gates to every agent, plus an
   `@AGENTS.md` import in `CLAUDE.md` when the repository has one;
-- `millennium.proposal.json` and `.claude/worktrees/` in `.gitignore`.
+- `millennium.proposal.json` and the agent worktrees (`.claude/worktrees/`, and
+  `.pi/worktrees/` for [pi](pi.md)) in `.gitignore`.
 
 The applied default proposal is removed. Inside an agent's sandbox the command
 cannot write `.millennium`, and the hooks deny agents from running it at all.

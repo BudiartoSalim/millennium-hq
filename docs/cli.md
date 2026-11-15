@@ -116,13 +116,17 @@ written.
 |---|---|
 | `scope/out-of-scope` | A changed file matches no `--allow` pattern. |
 | `scope/acceptance-test-changed` | The branch changes an acceptance test. |
-| `scope/protected-path` | The branch changes `.millennium/` or the project's Claude settings. |
+| `scope/protected-path` | The branch changes `.millennium/`, the project's Claude settings, or pi's project settings or extensions (`.pi/settings.json`, `.pi/extensions/`). |
 
 ## `millennium-code-qc hook`
 
-Handles one Claude Code hook event from stdin. The plugin's hooks call it; see
-[Hooks](hooks.md). It exits 0 with its answer on stdout, and 2 when it cannot
-decide, which blocks.
+Handles one hook event from stdin, in Claude Code's hook event format. The
+plugin's hooks call it, and millennium's pi extension translates pi's events
+into the same format; see [Hooks](hooks.md) and [pi](pi.md). It exits 0 with
+its answer on stdout, and 2 when it cannot decide, which blocks. The engine
+command named in the session briefing is the launcher under
+`MILLENNIUM_PLUGIN_ROOT` (set by the pi extension) or `CLAUDE_PLUGIN_ROOT`
+(set by Claude Code).
 
 ## `millennium-code-qc config validate`
 
