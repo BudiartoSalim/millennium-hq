@@ -48,9 +48,10 @@ it, because the protected paths are unknown; reads stay allowed.
   from `HEAD`. Before merging an engineer's branch, the tech lead runs
   `millennium-code-qc scope` and the full gate against the branch's base.
 - **Other harnesses** get the portable layers only: `AGENTS.md`, the skills,
-  and the engine as a CLI. pi is the exception: millennium's pi extension
-  runs the same guard, gates and briefing (see [pi](pi.md)), without a
-  sandbox behind them.
+  and the engine as a CLI (see
+  [Installation: skills only](install.md#other-harnesses-skills-only)). pi is
+  the exception: millennium's pi extension runs the same guard, gates and
+  briefing (see [pi](pi.md)), without a sandbox behind them.
 
 ## Recommended settings
 
