@@ -257,7 +257,7 @@ cp -R ~/tools/millennium-hq/plugin/skills/* .agents/skills/
 These paths were current in November 2026. Check your harness's
 documentation, since skill support is still changing.
 
-Install all thirteen skills, even if you invoke only a few: the tech lead and
+Install all fourteen skills, even if you invoke only a few: the tech lead and
 the agents rely on the others by name (`review-protocol`,
 `engineering-standards`, ...). If you already have a skill with the same name
 (`security-review` is a common one), keep millennium's in a separate
