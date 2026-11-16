@@ -23,7 +23,7 @@ func TestLoosenings(t *testing.T) {
 		{Paths: []string{"web"}, Languages: []string{"typescript"}, Test: recipe},
 	}})
 	next := mustConfig(t, ConfigInput{Version: ptr(1), ShellLint: ptr("off"), AcceptanceTests: ptr("qa"),
-		Exclude: []string{"gen"}, Disable: []DisabledCheck{{Check: "structure/function-length", Reason: "upstream style is long"}},
+		Exclude: []string{"gen"}, Disable: []DisableInput{{Check: "structure/function-length", Reason: "upstream style is long"}},
 		Components: []ComponentInput{
 			{Paths: []string{"services/*/api"}, Languages: []string{"go"}},
 			{Paths: []string{"web"}, Languages: []string{"typescript"}},
@@ -36,7 +36,7 @@ func TestLoosenings(t *testing.T) {
 		"component tts is removed",
 		"component web drops its test recipe",
 		"gen is newly excluded from every check",
-		"structure/function-length is newly disabled: upstream style is long",
+		"structure/function-length is newly disabled everywhere: upstream style is long",
 		"Python type checking (mypy) is switched off",
 		"shellcheck is switched off",
 		"acceptance tests move from tests/acceptance to qa, so the old ones lose their protection",

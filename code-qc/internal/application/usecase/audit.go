@@ -13,9 +13,9 @@ type AuditInput struct {
 	// Path is a repository-relative directory or file; empty audits everything.
 	Path string
 	Tier domain.Tier
-	// Config, when set, audits against it instead of the repository's
+	// Proposed, when set, audits against it instead of the repository's
 	// config: a dry run of a proposal before the user applies it.
-	Config *domain.Config
+	Proposed *domain.Config
 }
 
 // RunAudit runs every gate over existing code instead of a change, holding
@@ -55,14 +55,13 @@ func (u *RunAudit) Execute(ctx context.Context, in AuditInput) (domain.Report, e
 		}
 	}
 	changes.Files = withoutExcluded(cfg, changes.Files)
-	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)})
+	report, err := runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)})
+	report.Proposed = in.Proposed != nil
+	return report, err
 }
 
 func (u *RunAudit) auditConfig(ctx context.Context, in AuditInput) (domain.Config, error) {
-	if in.Config != nil {
-		return *in.Config, nil
-	}
-	cfg, enabled, err := u.config.Execute(ctx)
+	cfg, enabled, err := u.config.OrProposed(ctx, in.Proposed)
 	if err != nil {
 		return domain.Config{}, err
 	}

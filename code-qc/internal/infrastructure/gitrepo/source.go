@@ -3,10 +3,8 @@ package gitrepo
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,40 +21,62 @@ import (
 const maxSourceBytes = 4 << 20
 
 // Files lists every tracked or non-ignored untracked file present in the
-// working tree, sorted. Special files and tracked files deleted from the
-// working tree are left out.
+// working tree, sorted. Special files, the sandbox's placeholders and files
+// gone from the working tree, including untracked ones that vanish while
+// they are listed, are left out: an audit checks what is there.
 func (r *Repository) Files(ctx context.Context) ([]string, error) {
-	out, err := r.git(ctx, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	tracked, err := r.listPaths(ctx, "--cached")
 	if err != nil {
-		return nil, fmt.Errorf("list files: %w", err)
+		return nil, err
 	}
-	var files []string
-	for _, field := range splitNUL(out) {
-		p, err := checkedPath(field)
-		if err != nil {
-			return nil, err
-		}
-		present, err := r.isAnalysable(p)
-		if err != nil {
-			return nil, err
-		}
-		if present {
-			files = append(files, p)
-		}
+	untracked, err := r.listPaths(ctx, "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
 	}
+	files, err := r.keepPaths(tracked, func(_ string, state entryState) bool { return state.present() })
+	if err != nil {
+		return nil, err
+	}
+	others, err := r.keepPaths(untracked, untrackedKept)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, others...)
 	slices.Sort(files)
 	return slices.Compact(files), nil
 }
 
-func (r *Repository) isAnalysable(p string) (bool, error) {
-	info, err := os.Lstat(r.abs(p))
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
+// listPaths runs `git ls-files` with the given selection.
+func (r *Repository) listPaths(ctx context.Context, selection ...string) ([]string, error) {
+	out, err := r.git(ctx, append(append([]string{"ls-files"}, selection...), "-z")...)
 	if err != nil {
-		return false, fmt.Errorf("inspect %s: %w", p, err)
+		return nil, fmt.Errorf("list files: %w", err)
 	}
-	return info.Mode()&specialFile == 0, nil
+	fields := splitNUL(out)
+	paths := make([]string, 0, len(fields))
+	for _, field := range fields {
+		p, err := checkedPath(field)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, p)
+	}
+	return paths, nil
+}
+
+// keepPaths keeps the paths keep accepts in their current state.
+func (r *Repository) keepPaths(paths []string, keep func(string, entryState) bool) ([]string, error) {
+	var kept []string
+	for _, p := range paths {
+		state, err := r.inspect(p)
+		if err != nil {
+			return nil, err
+		}
+		if keep(p, state) {
+			kept = append(kept, p)
+		}
+	}
+	return kept, nil
 }
 
 // ReadWorking reads a regular file from the working tree. Symlinks are

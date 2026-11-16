@@ -28,9 +28,10 @@ const (
 const usageText = `millennium-code-qc: the code quality engine of the millennium plugin.
 
 Usage:
-  millennium-code-qc gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
+  millennium-code-qc gate [--base REV] [--require-config] [--proposal FILE] [--tier fast|full] [--format text|json]
       Check the changes against REV (default HEAD). Hooks run the fast tier;
       the full tier, the default, also runs the tests and measures coverage.
+      With --proposal, against the config a proposal would apply.
   millennium-code-qc audit [--path PATH] [--proposal FILE] [--tier fast|full] [--format text|json]
       Check all existing code, or only PATH, against the full rules; with
       --proposal, against the config a proposal would apply.
@@ -149,6 +150,9 @@ type Deps struct {
 	// RepoPath turns a command-line path, relative to the current
 	// directory, into a repository-relative one.
 	RepoPath func(arg string) (string, error)
+	// ReadProposal reads a proposal file named on the command line,
+	// bounded and strictly.
+	ReadProposal func(path string) ([]byte, error)
 	// Close releases what the dependencies hold, such as analyzer
 	// processes; nil when there is nothing to release.
 	Close func()
@@ -245,10 +249,11 @@ func (a *App) gate(ctx context.Context, args []string) int {
 	flags := a.flagSet("gate")
 	base := flags.String("base", "", "revision to compare the working tree against (default HEAD)")
 	requireConfig := flags.Bool("require-config", false, "block when the repository has no config")
+	proposal := flags.String("proposal", "", "gate against the config in this proposal instead of the repository's")
 	formatName := flags.String("format", "text", "report format: text or json")
 	tierName := flags.String("tier", "full", "fast (hooks: no test runs) or full (also runs the tests and measures coverage)")
 	render, ok := a.parse(flags, args, formatName, "changed files")
-	if !ok {
+	if !ok || !a.valuesGiven(flags, "base", "proposal") {
 		return exitBlocked
 	}
 	tier, ok := a.tier(*tierName)
@@ -261,6 +266,9 @@ func (a *App) gate(ctx context.Context, args []string) int {
 	}
 	var report domain.Report
 	err := a.withDeps(ctx, func(deps Deps) (err error) {
+		if in.Proposed, err = proposedConfig(deps, *proposal); err != nil {
+			return err
+		}
 		report, err = deps.Gates.Execute(ctx, in)
 		return err
 	})
@@ -274,7 +282,7 @@ func (a *App) audit(ctx context.Context, args []string) int {
 	formatName := flags.String("format", "text", "report format: text or json")
 	tierName := flags.String("tier", "full", "fast (no test runs) or full")
 	render, ok := a.parse(flags, args, formatName, "audited files")
-	if !ok {
+	if !ok || !a.valuesGiven(flags, "path", "proposal") {
 		return exitBlocked
 	}
 	tier, ok := a.tier(*tierName)
@@ -289,10 +297,8 @@ func (a *App) audit(ctx context.Context, args []string) int {
 				return err
 			}
 		}
-		if *proposal != "" {
-			if in.Config, err = proposedConfig(deps, *proposal); err != nil {
-				return err
-			}
+		if in.Proposed, err = proposedConfig(deps, *proposal); err != nil {
+			return err
 		}
 		report, err = deps.Audit.Execute(ctx, in)
 		return err
@@ -307,6 +313,20 @@ func (a *App) tier(name string) (domain.Tier, bool) {
 		return "", false
 	}
 	return tier, true
+}
+
+// valuesGiven refuses any of the named flags given with an empty value,
+// such as --base "$BASE" with BASE unset, which would otherwise read as the
+// flag left out and check something else than asked.
+func (a *App) valuesGiven(flags *flag.FlagSet, names ...string) bool {
+	given := true
+	flags.Visit(func(f *flag.Flag) {
+		if slices.Contains(names, f.Name) && f.Value.String() == "" {
+			fmt.Fprintf(a.stderr, "millennium-code-qc: --%s needs a value\n", f.Name)
+			given = false
+		}
+	})
+	return given
 }
 
 func (a *App) flagSet(name string) *flag.FlagSet {

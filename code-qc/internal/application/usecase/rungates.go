@@ -26,6 +26,9 @@ type RunGatesInput struct {
 	Base   string
 	Config ConfigRequirement
 	Tier   domain.Tier
+	// Proposed, when set, gates against it instead of the repository's
+	// config: a dry run of a proposal before the user applies it.
+	Proposed *domain.Config
 }
 
 // RunGates runs every gate over the change set and collects the report.
@@ -43,7 +46,10 @@ func NewRunGates(config *LoadConfig, repo port.Repository, gates []port.Gate) *R
 // Execute runs the gates. An error means the run could not decide and must
 // be treated as a block by the caller.
 func (u *RunGates) Execute(ctx context.Context, in RunGatesInput) (domain.Report, error) {
-	cfg, enabled, err := u.config.Execute(ctx)
+	if in.Proposed != nil && in.Config == ConfigRequired {
+		return domain.Report{}, ErrRequiredWithProposal
+	}
+	cfg, enabled, err := u.config.OrProposed(ctx, in.Proposed)
 	if err != nil {
 		return domain.Report{}, err
 	}
@@ -58,7 +64,9 @@ func (u *RunGates) Execute(ctx context.Context, in RunGatesInput) (domain.Report
 		return domain.Report{}, fmt.Errorf("detect changes: %w", err)
 	}
 	changes.Files = withoutExcluded(cfg, changes.Files)
-	return runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)})
+	report, err := runAll(ctx, u.gates, port.GateInput{Config: cfg, Changes: changes, Tier: tierOrFull(in.Tier)})
+	report.Proposed = in.Proposed != nil
+	return report, err
 }
 
 // tierOrFull defaults an unset tier to the thorough one.

@@ -83,6 +83,7 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 		Root:           repo.Root(),
 		LocalConfigDir: localDir,
 		RepoPath:       repo.RepoPath,
+		ReadProposal:   configfile.ReadProposal,
 		Close:          closeAnalyzers,
 		EngineCommand:  engineCommand(),
 	}, nil

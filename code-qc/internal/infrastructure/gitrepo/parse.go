@@ -29,20 +29,6 @@ func parseNameStatus(out []byte) ([]domain.ChangedFile, error) {
 	return files, nil
 }
 
-// parseAdded reads `git ls-files --others -z` output as added files.
-func parseAdded(out []byte) ([]domain.ChangedFile, error) {
-	fields := splitNUL(out)
-	files := make([]domain.ChangedFile, 0, len(fields))
-	for _, field := range fields {
-		path, err := checkedPath(field)
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, domain.ChangedFile{Path: path, Kind: domain.ChangeAdded})
-	}
-	return files, nil
-}
-
 // changeKind maps a status letter. A type change (T) and an unmerged path (U)
 // still need checking, so both count as modified; anything else is a format
 // this parser does not know and is refused.

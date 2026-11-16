@@ -62,7 +62,8 @@ it, because the protected paths are unknown; reads stay allowed.
   `millennium-code-qc gate --tier full --require-config` run is the last word.
 - **Committed work in an engineer's worktree.** Stop hooks check what differs
   from `HEAD`. Before merging an engineer's branch, the tech lead runs
-  `millennium-code-qc scope` and the full gate against the branch's base.
+  `millennium-code-qc scope` and the full gate from the commit the worktree
+  was dispatched from, so committed work is checked too.
 - **Other harnesses** get the portable layers only: `AGENTS.md`, the skills,
   and the engine as a CLI (see
   [Installation: skills only](install.md#other-harnesses-skills-only)). pi is

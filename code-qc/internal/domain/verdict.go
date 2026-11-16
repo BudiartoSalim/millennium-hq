@@ -23,6 +23,9 @@ type Report struct {
 	// Disabled lists the checks the config switched off, with the findings
 	// each hid, so nothing is ever silently off.
 	Disabled []DisabledResult
+	// Proposed says the run used a proposal's config, not the applied one,
+	// so a pass is not yet the verdict the hooks will reach.
+	Proposed bool
 }
 
 // Passed reports whether the run lets the change through. A repository that

@@ -153,28 +153,32 @@ func TestTestRecipes(t *testing.T) {
 
 func TestDisableValidation(t *testing.T) {
 	ok := minimalInput()
-	ok.Disable = []DisabledCheck{{Check: "structure/function-length", Reason: "upstream style keeps long handlers"}}
+	ok.Disable = []DisableInput{{Check: "structure/function-length", Reason: "upstream style keeps long handlers"}}
 	cfg, err := NewConfig(ok)
 	if err != nil || len(cfg.Disabled) != 1 {
 		t.Fatalf("NewConfig: %+v, %v", cfg.Disabled, err)
 	}
 	tests := []struct {
 		name  string
-		check DisabledCheck
+		check DisableInput
 		want  string
 	}{
-		{"whole gate", DisabledCheck{Check: "structure", Reason: "a long enough reason"}, "must name one rule as gate/rule"},
-		{"no reason", DisabledCheck{Check: "hygiene/secret", Reason: "temp"}, "needs a reason"},
-		{"bad name", DisabledCheck{Check: "Code/Secret", Reason: "a long enough reason"}, "must name one rule"},
+		{"whole gate", DisableInput{Check: "structure", Reason: "a long enough reason"}, "must name one rule as gate/rule"},
+		{"no reason", DisableInput{Check: "hygiene/secret", Reason: "temp"}, "needs a reason"},
+		{"bad name", DisableInput{Check: "Code/Secret", Reason: "a long enough reason"}, "must name one rule"},
+		{"empty paths", DisableInput{Check: "shell/strict-mode", Reason: "a long enough reason", Paths: []string{}}, "empty paths list"},
+		{"bad path", DisableInput{Check: "shell/strict-mode", Reason: "a long enough reason", Paths: []string{"../x"}}, "disable: shell/strict-mode paths"},
+		{"root path", DisableInput{Check: "shell/strict-mode", Reason: "a long enough reason", Paths: []string{"."}}, "leave paths out to disable it everywhere"},
+		{"duplicate path", DisableInput{Check: "shell/strict-mode", Reason: "a long enough reason", Paths: []string{"tests/**", "a", "tests/**"}}, "lists a path more than once"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			in := minimalInput()
-			in.Disable = []DisabledCheck{tt.check}
+			in.Disable = []DisableInput{tt.check}
 			assertConfigError(t, in, tt.want)
 		})
 	}
 	twice := minimalInput()
-	twice.Disable = []DisabledCheck{ok.Disable[0], ok.Disable[0]}
+	twice.Disable = []DisableInput{ok.Disable[0], ok.Disable[0]}
 	assertConfigError(t, twice, "listed more than once")
 }

@@ -124,14 +124,21 @@
     },
     "disable": {
       "type": "array",
-      "description": "Rules switched off for this project, each with a reason that every report shows. Rules that report a check failing to run cannot be disabled.",
+      "description": "Rules switched off for this project, each with a reason that every report shows, everywhere or only in some paths. Rules that report a check failing to run cannot be disabled.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["check", "reason"],
         "properties": {
           "check": { "type": "string", "pattern": "^[a-z][a-z-]*/[a-z][a-z-]*$", "description": "gate/rule, such as structure/function-length" },
-          "reason": { "type": "string", "minLength": 10 }
+          "reason": { "type": "string", "minLength": 10 },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "not": { "const": "." } },
+            "description": "Only findings about files these patterns match as a whole path are hidden (tests/** for a directory); leave it out to disable the rule everywhere."
+          }
         }
       },
       "default": []

@@ -79,6 +79,41 @@ func TestDiscoverFailures(t *testing.T) {
 	}
 }
 
+func TestGateAgainstAProposal(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "draft.json")
+	if err := os.WriteFile(file, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := domain.Config{}
+	h := &harness{gates: &fakeGates{report: passing}, applier: &fakeApplier{plan: usecase.ApplyPlan{Config: &cfg}}}
+	if code := h.run(t, "gate", "--proposal", file, "--base", "main"); code != 0 || h.gates.got.Proposed != &cfg || h.gates.got.Base != "main" || h.applier.applied {
+		t.Fatalf("exit %d, input %+v, applied %v: %s", code, h.gates.got, h.applier.applied, h.stderr.String())
+	}
+	plain := &harness{gates: &fakeGates{report: passing}}
+	if code := plain.run(t, "gate"); code != 0 || plain.gates.got.Proposed != nil {
+		t.Fatalf("exit %d, without --proposal the gate used %+v", code, plain.gates.got.Proposed)
+	}
+	invalid := &harness{applier: &fakeApplier{prepareErr: errors.New("proposal: version 2")}}
+	if code := invalid.run(t, "gate", "--proposal", file); code != 2 || !strings.Contains(invalid.stderr.String(), "version 2") {
+		t.Fatalf("exit %d: %s", code, invalid.stderr.String())
+	}
+	approvalsOnly := &harness{applier: &fakeApplier{}}
+	if code := approvalsOnly.run(t, "gate", "--proposal", file); code != 2 || !strings.Contains(approvalsOnly.stderr.String(), "no config to check against") {
+		t.Fatalf("exit %d: %s", code, approvalsOnly.stderr.String())
+	}
+	for _, args := range [][]string{{"gate", "--proposal="}, {"gate", "--base", ""}, {"audit", "--proposal="}, {"audit", "--path="}} {
+		empty := &harness{gates: &fakeGates{report: passing}, audit: &fakeAudit{report: passing}}
+		if code := empty.run(t, args...); code != 2 || !strings.Contains(empty.stderr.String(), "needs a value") {
+			t.Fatalf("%v: exit %d: %s", args, code, empty.stderr.String())
+		}
+	}
+	both := &harness{gates: &fakeGates{report: passing}, applier: &fakeApplier{plan: usecase.ApplyPlan{Config: &cfg}}}
+	if both.run(t, "gate", "--require-config", "--proposal", file); both.gates.got.Config != usecase.ConfigRequired || both.gates.got.Proposed != &cfg {
+		t.Fatalf("the use case did not get both flags to refuse: %+v", both.gates.got)
+	}
+}
+
 func TestAuditAgainstAProposal(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "draft.json")
@@ -87,11 +122,11 @@ func TestAuditAgainstAProposal(t *testing.T) {
 	}
 	cfg := domain.Config{}
 	h := &harness{audit: &fakeAudit{report: passing}, applier: &fakeApplier{plan: usecase.ApplyPlan{Config: &cfg}}}
-	if code := h.run(t, "audit", "--proposal", file); code != 0 || h.audit.got.Config != &cfg || h.applier.applied {
-		t.Fatalf("exit %d, config %v, applied %v: %s", code, h.audit.got.Config, h.applier.applied, h.stderr.String())
+	if code := h.run(t, "audit", "--proposal", file); code != 0 || h.audit.got.Proposed != &cfg || h.applier.applied {
+		t.Fatalf("exit %d, config %v, applied %v: %s", code, h.audit.got.Proposed, h.applier.applied, h.stderr.String())
 	}
 	approvalsOnly := &harness{applier: &fakeApplier{}}
-	if code := approvalsOnly.run(t, "audit", "--proposal", file); code != 2 || !strings.Contains(approvalsOnly.stderr.String(), "no config to audit against") {
+	if code := approvalsOnly.run(t, "audit", "--proposal", file); code != 2 || !strings.Contains(approvalsOnly.stderr.String(), "no config to check against") {
 		t.Fatalf("exit %d: %s", code, approvalsOnly.stderr.String())
 	}
 	invalid := &harness{applier: &fakeApplier{prepareErr: errors.New("proposal: version 2")}}

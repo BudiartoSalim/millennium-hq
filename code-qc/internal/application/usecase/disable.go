@@ -46,18 +46,18 @@ func applyDisabled(report *domain.Report, disabled []domain.DisabledCheck) {
 		result := domain.DisabledResult{DisabledCheck: d}
 		for i := range report.Results {
 			var hidden int
-			report.Results[i].Findings, hidden = without(report.Results[i].Findings, d.Check)
+			report.Results[i].Findings, hidden = without(report.Results[i].Findings, d)
 			result.Suppressed += hidden
 		}
 		report.Disabled = append(report.Disabled, result)
 	}
 }
 
-// without drops the findings of one gate/rule and counts them.
-func without(findings []domain.Finding, check string) ([]domain.Finding, int) {
+// without drops the findings a disabled check hides and counts them.
+func without(findings []domain.Finding, d domain.DisabledCheck) ([]domain.Finding, int) {
 	kept := findings[:0]
 	for _, f := range findings {
-		if f.Gate+"/"+f.Rule != check {
+		if f.Gate+"/"+f.Rule != d.Check || !d.Hides(f.File) {
 			kept = append(kept, f)
 		}
 	}

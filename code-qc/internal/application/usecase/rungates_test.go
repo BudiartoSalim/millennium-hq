@@ -121,9 +121,80 @@ func TestRunGatesDropsExcludedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if report.ChangedFiles != 1 || len(gate.got.Changes.Files) != 1 || gate.got.Changes.Files[0].Path != "main.go" {
+	if report.Proposed || report.ChangedFiles != 1 || len(gate.got.Changes.Files) != 1 || gate.got.Changes.Files[0].Path != "main.go" {
 		t.Fatalf("excluded file reached the gates: %+v", gate.got.Changes)
 	}
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// A proposal replaces the repository's config, so it works in a repository
+// that is not opted in yet, and its own excludes apply.
+func TestRunGatesAgainstAProposedConfig(t *testing.T) {
+	proposed, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: []string{"python"}, Exclude: []string{"gen/**"}})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	sources := map[string]fakeSource{"opted in": enabledSource(), "not opted in": {err: port.ErrConfigNotFound}}
+	for name, source := range sources {
+		t.Run(name, func(t *testing.T) {
+			repo := &fakeRepo{changes: []domain.ChangedFile{
+				{Path: "app.py", Kind: domain.ChangeModified},
+				{Path: "gen/x.py", Kind: domain.ChangeAdded},
+			}}
+			gate := &fakeGate{name: "g"}
+			uc := NewRunGates(NewLoadConfig(source, repo), repo, []port.Gate{gate})
+			report, err := uc.Execute(t.Context(), RunGatesInput{Proposed: &proposed})
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if !report.Enabled || !report.Proposed || !gate.got.Config.Has(domain.LanguagePython) || gate.got.Config.Has(domain.LanguageGo) {
+				t.Fatalf("gates did not run against the proposal: %+v", gate.got.Config)
+			}
+			if report.ChangedFiles != 1 || gate.got.Changes.Files[0].Path != "app.py" {
+				t.Fatalf("the proposal's exclude was not applied: %+v", gate.got.Changes)
+			}
+		})
+	}
+}
+
+var (
+	errTrackedCheck = errors.New("git failed")
+	errUnreadable   = errors.New("config.json must be a regular file, found a symlink")
+)
+
+// A proposal stands in for the repository's config, but cannot hide that
+// the config was deleted or cannot be read, nor satisfy a run that requires
+// the repository's own config.
+func TestRunGatesProposalRefusals(t *testing.T) {
+	proposed, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: []string{"go"}})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	tests := []struct {
+		name   string
+		source fakeSource
+		repo   *fakeRepo
+		in     RunGatesInput
+		want   error
+	}{
+		{"config deleted from the working tree", fakeSource{err: port.ErrConfigNotFound}, &fakeRepo{tracked: true},
+			RunGatesInput{Proposed: &proposed}, ErrConfigRemoved},
+		{"required config", enabledSource(), &fakeRepo{}, RunGatesInput{Config: ConfigRequired, Proposed: &proposed}, ErrRequiredWithProposal},
+		{"tracked check failing", fakeSource{err: port.ErrConfigNotFound}, &fakeRepo{trackedErr: errTrackedCheck},
+			RunGatesInput{Proposed: &proposed}, errTrackedCheck},
+		{"config unreadable", fakeSource{err: errUnreadable}, &fakeRepo{}, RunGatesInput{Proposed: &proposed}, errUnreadable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gate := &fakeGate{name: "g"}
+			uc := NewRunGates(NewLoadConfig(tt.source, tt.repo), tt.repo, []port.Gate{gate})
+			if _, err := uc.Execute(t.Context(), tt.in); !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+			if gate.got.Config.Languages != nil {
+				t.Fatal("gates ran despite the refusal")
+			}
+		})
+	}
+}

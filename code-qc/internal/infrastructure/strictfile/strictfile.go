@@ -1,7 +1,7 @@
 // Package strictfile reads the files that hold millennium's rules (the
-// config, convention packs, proposals) strictly: only regular files, never
-// through a symlink, bounded in size, and JSON with unknown fields,
-// duplicate keys and trailing data all rejected.
+// config, convention packs, proposals, approval records) strictly: only
+// regular files, never through a symlink, bounded in size, and JSON with
+// unknown fields, duplicate keys and trailing data all rejected.
 package strictfile
 
 import (
@@ -59,7 +59,8 @@ func describeMode(mode fs.FileMode) string {
 }
 
 // DecodeJSON decodes data into v: one JSON object, no duplicate keys, no
-// fields v does not declare, nothing after it.
+// fields v does not declare, nothing after it. An unknown field is reported
+// with where it is and the fields allowed there.
 func DecodeJSON(data []byte, v any) error {
 	if err := rejectDuplicateKeys(data); err != nil {
 		return err
@@ -67,7 +68,7 @@ func DecodeJSON(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
-		return fmt.Errorf("parse: %w", err)
+		return explainDecodeError(err, data, v)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return errors.New("parse: unexpected data after the object")
