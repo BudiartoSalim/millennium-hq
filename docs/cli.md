@@ -1,7 +1,7 @@
 # Commands
 
 ```
-millennium-code-qc gate [--base REV] [--require-config] [--tier fast|full] [--format text|json]
+millennium-code-qc gate [--base REV] [--require-config] [--proposal FILE] [--tier fast|full] [--format text|json]
 millennium-code-qc audit [--path PATH] [--proposal FILE] [--tier fast|full] [--format text|json]
 millennium-code-qc discover [--format text|json]
 millennium-code-qc scope --base REV --allow PATTERN [--allow PATTERN ...] [--format text|json]
@@ -37,10 +37,21 @@ Checks a change: everything that differs from a base revision, staged,
 unstaged and untracked files alike. This is what the plugin's hooks and the
 tech lead run.
 
+Device files and other special files hold no code and are not part of the
+change. Claude Code's sandbox protects paths such as `.mcp.json`, `.bashrc`,
+`.vscode` and `.claude/agents` where they do not exist by mounting a device
+over them while a sandboxed command runs; outside the sandbox these show up
+as empty untracked files that vanish when the command ends. So an untracked
+path with one of those names (shell profiles, `.gitconfig`, `.gitmodules`,
+`.ripgreprc`, `.mcp.json`, `.vscode`, `.idea`) at any depth, or directly
+inside a `.claude` directory, is left out when it is empty or already gone. Any other path that git lists but that
+is gone when the engine looks blocks the gate; run it again.
+
 | Flag | Default | Meaning |
 |---|---|---|
-| `--base REV` | `HEAD` | Compare against REV instead, for example `--base main` to check a whole branch. |
+| `--base REV` | `HEAD` | Compare against REV instead, for example `--base main` to check a whole branch. An empty value (`--base ""`, from an unset variable, say) is refused rather than read as `HEAD`. |
 | `--require-config` | off | Block when the repository has no config. Use it where a missing config must never look like a pass, such as the tech lead's final run or your own CI. |
+| `--proposal FILE` | | Check the change against the config in a proposal instead of the repository's, for a change that only passes once the proposal is applied (code moved to a convention's default paths, say, with the `layers` override that mapped the old ones dropped). The proposal is validated as `config apply` would, and nothing is written. Its config and the packs it adds are used (a proposal of packs alone is checked with the committed config, so it needs one); its dependency approvals and a local config are not. The report says it ran against a proposal, since the hooks keep the repository's config until you apply it. The repository's own config must still be readable, or absent and never committed: a config that is broken, or deleted from the working tree, blocks. `--require-config`, which is about the repository's own config, cannot be combined with it, and an empty value is refused. |
 | `--tier` | `full` | `fast` skips the test runs (what hooks use on every agent turn); `full` also runs the tests and measures coverage of the changed lines. |
 | `--format` | `text` | `text` writes a report to stderr; `json` writes a machine-readable report to stdout. |
 
@@ -67,10 +78,13 @@ Checks existing code instead of a change, holding every file to the full
 rules, with no allowance for code that was already over a limit. Use it to plan
 a refactor: the report's "by rule" line shows where the work is.
 
+It audits the files in the working tree: tracked files deleted from it,
+special files and the sandbox's empty placeholders (see `gate`) are left out.
+
 | Flag | Default | Meaning |
 |---|---|---|
-| `--path PATH` | whole repository | Audit only this directory or file. |
-| `--proposal FILE` | | Audit against the config in a proposal instead of the repository's: a dry run before `config apply`. The proposal is validated as `config apply` would, and nothing is written. Works in a repository without a config. |
+| `--path PATH` | whole repository | Audit only this directory or file. An empty value is refused. |
+| `--proposal FILE` | | Audit against the config in a proposal instead of the repository's: a dry run before `config apply`. The proposal is validated as `config apply` would, and nothing is written. Works in a repository without a config; a config that is broken, or deleted from the working tree while committed, still blocks. The report says it ran against a proposal. |
 | `--tier` | `full` | As for `gate`. In an audit the full tier requires every executable line of tested layers to be covered. |
 | `--format` | `text` | As for `gate`. |
 
@@ -117,7 +131,7 @@ written.
 
 | Flag | Meaning |
 |---|---|
-| `--base REV` | The revision the branch started from, such as `main`. |
+| `--base REV` | The revision the change started from: the feature branch's base, such as `main`, or, for one engineer's worktree, the commit it was dispatched from, so other packages merged before it are not reported. |
 | `--allow PATTERN` | A path the package may change; repeat it. `**` matches any depth: `services/game/api/internal/domain/**`. |
 
 | Rule | Fires when |
@@ -236,6 +250,7 @@ With `--format json`, `gate` and `audit` write one JSON object to stdout:
 
 `status` is `pass`, `blocked`, `not-enabled` or `error`; an `error` report
 carries an `error` message instead of findings. `disabled` lists the checks
-the config switched off, each with its `reason` and the number of findings it
-`suppressed`. `file` and `line` are left out
+the config switched off, each with its `reason`, its `paths` when it is
+limited to some, and the number of findings it `suppressed`. `proposed` is `true` when the run used a proposal's config
+(`--proposal`) rather than the applied one. `file` and `line` are left out
 when a finding is not about one place.

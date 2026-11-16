@@ -73,18 +73,14 @@ func (r *Repository) changedFiles(ctx context.Context, base, tree string) ([]dom
 	if err != nil {
 		return nil, err
 	}
-	untracked, err := r.git(ctx, "ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return nil, fmt.Errorf("list untracked files: %w", err)
+	if files, err = r.settle(files, listedByDiff); err != nil {
+		return nil, err
 	}
-	added, err := parseAdded(untracked)
+	added, err := r.untracked(ctx)
 	if err != nil {
 		return nil, err
 	}
-	files, err = r.dropSpecialFiles(append(files, added...))
-	if err != nil {
-		return nil, err
-	}
+	files = append(files, added...)
 	slices.SortFunc(files, func(a, b domain.ChangedFile) int { return strings.Compare(a.Path, b.Path) })
 	return files, nil
 }
@@ -146,24 +142,6 @@ func (r *Repository) hasCommit(ctx context.Context, rev string) (bool, error) {
 		return false, fmt.Errorf("resolve %s: %w", rev, err)
 	}
 	return true, nil
-}
-
-func (r *Repository) dropSpecialFiles(files []domain.ChangedFile) ([]domain.ChangedFile, error) {
-	kept := make([]domain.ChangedFile, 0, len(files))
-	for _, f := range files {
-		if f.Kind == domain.ChangeDeleted {
-			kept = append(kept, f)
-			continue
-		}
-		info, err := os.Lstat(r.abs(f.Path))
-		if err != nil {
-			return nil, fmt.Errorf("inspect changed file %s: %w", f.Path, err)
-		}
-		if info.Mode()&specialFile == 0 {
-			kept = append(kept, f)
-		}
-	}
-	return kept, nil
 }
 
 func (r *Repository) git(ctx context.Context, args ...string) ([]byte, error) {

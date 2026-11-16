@@ -5,16 +5,15 @@
 package approvals
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"millennium-code-qc/internal/domain"
+	"millennium-code-qc/internal/infrastructure/strictfile"
 )
 
 const maxRecordBytes = 1 << 20
@@ -61,12 +60,11 @@ func (s *Store) Approvals() (domain.Approvals, error) {
 }
 
 func readRecord(dir, path string) (domain.Approval, error) {
-	data, err := os.ReadFile(path)
+	// A record is a rule file: a symlink could pull approval from outside
+	// the reviewed tree, and an oversized one is not read into memory.
+	data, err := strictfile.ReadRegular(path, maxRecordBytes)
 	if err != nil {
-		return domain.Approval{}, fmt.Errorf("read approval %s: %w", path, err)
-	}
-	if len(data) > maxRecordBytes {
-		return domain.Approval{}, fmt.Errorf("approval %s is too large", path)
+		return domain.Approval{}, fmt.Errorf("read approval: %w", err)
 	}
 	approval, err := Decode(data)
 	if err != nil {
@@ -79,12 +77,11 @@ func readRecord(dir, path string) (domain.Approval, error) {
 	return approval, nil
 }
 
-// Decode reads one approval record strictly.
+// Decode reads one approval record as strictly as a config: no unknown
+// fields (an error names the allowed ones), duplicate keys or trailing data.
 func Decode(data []byte) (domain.Approval, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
 	var dto recordDTO
-	if err := dec.Decode(&dto); err != nil {
+	if err := strictfile.DecodeJSON(data, &dto); err != nil {
 		return domain.Approval{}, err
 	}
 	return domain.NewApproval(domain.ApprovalInput(dto))

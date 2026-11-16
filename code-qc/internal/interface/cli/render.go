@@ -57,9 +57,11 @@ func writeText(w io.Writer, r domain.Report, filesLabel string) {
 		fmt.Fprintln(w, "millennium-code-qc: BLOCKED: no gate ran; the engine is miswired, report this as a bug")
 	case r.Passed():
 		fmt.Fprintf(w, "millennium-code-qc: passed (gates: %d, %s: %d)\n", len(r.Results), filesLabel, r.ChangedFiles)
+		writeProposed(w, r.Proposed)
 		writeDisabled(w, r.Disabled)
 	default:
 		fmt.Fprintf(w, "millennium-code-qc: BLOCKED (findings: %d, %s: %d)\n", r.FindingCount(), filesLabel, r.ChangedFiles)
+		writeProposed(w, r.Proposed)
 		writeDisabled(w, r.Disabled)
 		fmt.Fprintf(w, "  by rule: %s\n", ruleCounts(r.Findings()))
 		for _, f := range r.Findings() {
@@ -68,12 +70,29 @@ func writeText(w io.Writer, r domain.Report, filesLabel string) {
 	}
 }
 
+// writeProposed marks a run against a proposal: its verdict is not the one
+// the hooks reach until the user applies the proposal.
+func writeProposed(w io.Writer, proposed bool) {
+	if proposed {
+		fmt.Fprintln(w, "  against a proposal, not the applied config: the hooks keep the current rules until the user runs config apply")
+	}
+}
+
 // writeDisabled lists the checks the config switched off on every report,
 // so a disabled check is never forgotten.
 func writeDisabled(w io.Writer, disabled []domain.DisabledResult) {
 	for _, d := range disabled {
-		fmt.Fprintf(w, "  disabled: %s (hid %d findings): %s\n", d.Check, d.Suppressed, d.Reason)
+		fmt.Fprintf(w, "  disabled: %s%s (hid %d findings): %s\n", d.Check, disabledWhere(d.DisabledCheck), d.Suppressed, d.Reason)
 	}
+}
+
+// disabledWhere names the paths of a disable limited to some, and nothing
+// for one that applies everywhere, as reports always showed it.
+func disabledWhere(d domain.DisabledCheck) string {
+	if !d.Limited() {
+		return ""
+	}
+	return " " + d.Where()
 }
 
 // ruleCounts summarises findings per rule, most frequent first, so a large
@@ -160,13 +179,15 @@ type jsonReport struct {
 	Gates    []string       `json:"gates"`
 	Findings []jsonFinding  `json:"findings"`
 	Disabled []jsonDisabled `json:"disabled"`
+	Proposed bool           `json:"proposed,omitempty"`
 	Error    string         `json:"error,omitempty"`
 }
 
 type jsonDisabled struct {
-	Check      string `json:"check"`
-	Reason     string `json:"reason"`
-	Suppressed int    `json:"suppressed"`
+	Check      string   `json:"check"`
+	Reason     string   `json:"reason"`
+	Paths      []string `json:"paths,omitempty"`
+	Suppressed int      `json:"suppressed"`
 }
 
 type jsonFinding struct {
@@ -178,9 +199,9 @@ type jsonFinding struct {
 }
 
 func toJSON(r domain.Report) jsonReport {
-	out := jsonReport{Status: jsonStatus(r), Files: r.ChangedFiles, Gates: []string{}, Findings: []jsonFinding{}, Disabled: []jsonDisabled{}}
+	out := jsonReport{Status: jsonStatus(r), Files: r.ChangedFiles, Gates: []string{}, Findings: []jsonFinding{}, Disabled: []jsonDisabled{}, Proposed: r.Proposed}
 	for _, d := range r.Disabled {
-		out.Disabled = append(out.Disabled, jsonDisabled{Check: d.Check, Reason: d.Reason, Suppressed: d.Suppressed})
+		out.Disabled = append(out.Disabled, jsonDisabled{Check: d.Check, Reason: d.Reason, Paths: d.PathNames(), Suppressed: d.Suppressed})
 	}
 	for _, result := range r.Results {
 		out.Gates = append(out.Gates, result.Gate)

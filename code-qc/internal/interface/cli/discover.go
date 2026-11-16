@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -171,19 +170,23 @@ func countsText(m map[domain.Language]int) string {
 	return strings.Join(parts, ", ")
 }
 
-// proposedConfig reads a proposal for a dry-run audit. Its config is
-// validated exactly as `config apply` would, and nothing is written.
+// proposedConfig reads a proposal for a dry-run gate or audit. Its config is
+// validated exactly as `config apply` would, and nothing is written. No file
+// means no proposal: the repository's own config applies.
 func proposedConfig(deps Deps, file string) (*domain.Config, error) {
-	data, err := os.ReadFile(file)
+	if file == "" {
+		return nil, nil
+	}
+	data, err := deps.ReadProposal(file)
 	if err != nil {
-		return nil, fmt.Errorf("read the proposal: %w", err)
+		return nil, err
 	}
 	plan, err := deps.Apply.Prepare(data, filepath.Dir(file), usecase.ApplyCommitted)
 	if err != nil {
 		return nil, err
 	}
 	if plan.Config == nil {
-		return nil, errors.New("the proposal has no config to audit against")
+		return nil, errors.New("the proposal has no config to check against")
 	}
 	return plan.Config, nil
 }

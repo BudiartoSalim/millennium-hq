@@ -86,6 +86,17 @@ func readProposedPacks(named map[string]string, dir string) ([]port.ProposedPack
 	return out, nil
 }
 
+// ReadProposal reads a proposal file named on the command line as strictly
+// as a config: a regular file, never through a symlink, within the size
+// limit, so a path such as /dev/zero or a named pipe is refused unread.
+func ReadProposal(path string) ([]byte, error) {
+	data, err := strictfile.ReadRegular(path, maxConfigBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read the proposal: %w", err)
+	}
+	return data, nil
+}
+
 func decodeProposal(data []byte) (proposalDTO, error) {
 	if len(data) > maxConfigBytes {
 		return proposalDTO{}, fmt.Errorf("the proposal is larger than %d bytes", maxConfigBytes)

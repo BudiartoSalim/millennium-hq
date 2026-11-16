@@ -98,3 +98,25 @@ func TestParseProposalRejectsBadPacks(t *testing.T) {
 		})
 	}
 }
+
+// A proposal named on the command line is read like a config: bounded, and
+// only from a regular file, so /dev/zero or a directory is refused unread.
+func TestReadProposal(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "p.json")
+	large := filepath.Join(dir, "large.json")
+	if err := os.WriteFile(good, []byte(`{"version":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(large, make([]byte, maxConfigBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := ReadProposal(good); err != nil || string(data) != `{"version":1}` {
+		t.Fatalf("ReadProposal = %q, %v", data, err)
+	}
+	for _, bad := range []string{large, dir, os.DevNull, filepath.Join(dir, "none.json")} {
+		if _, err := ReadProposal(bad); err == nil || !strings.HasPrefix(err.Error(), "read the proposal: ") {
+			t.Errorf("ReadProposal(%s) = %v, want a refusal", bad, err)
+		}
+	}
+}

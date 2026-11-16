@@ -147,8 +147,8 @@ force for a file.
 
 ### Disabling a check
 
-A project can switch off one rule of one gate when it does not fit, but only
-with a reason, and every report lists it:
+A project can switch off one rule of one gate when it does not fit, everywhere
+or only in some paths, but only with a reason, and every report lists it:
 
 ```json
 "disable": [
@@ -165,12 +165,37 @@ millennium-code-qc: passed (gates: 6, changed files: 4)
   disabled. A name that is not a rule of any gate is a config error, so a typo
   never leaves a rule running while you believe it off.
 - `reason` needs at least ten letters.
+- `paths`, optional, limits the disable to the files these patterns match as
+  a whole path: `**` matches any number of segments, so `tests/**` covers
+  everything under `tests` and `**/*_test.sh` every file named so. Unlike
+  `exclude`, a bare directory name covers nothing inside it, and neither does
+  a directory whose name happens to match a file pattern. The rule still runs everywhere else, and a
+  finding of it that is not about one file is not hidden, so a rule that only
+  reports on the whole change (`deps` approvals and advisories, `tests`
+  failing) cannot be limited to paths: the report shows such a disable hiding
+  nothing. Leave `paths` out to disable the rule everywhere; an empty list, a
+  repeated path or `.` is an error. Each rule is listed once, with all its
+  paths:
+
+  ```json
+  "disable": [
+    { "check": "shell/strict-mode", "paths": ["tests/**/*.sh"],
+      "reason": "the harness enables errexit inside each test, so the runner can record a failing test" }
+  ]
+  ```
+
+  ```
+    disabled: shell/strict-mode in tests/**/*.sh (hid 2 findings): the harness enables errexit ...
+  ```
+
+  `config apply` lists a newly disabled rule, each path newly covered, and a
+  rule widened from some paths to everywhere as loosenings.
 - Rules that report a check failing to run cannot be disabled, because that
   would let unchecked code pass: `toolchain/tool-missing`, and every
   `analysis-failed`, `analysis-unavailable`, `convention-unavailable`,
   `component-ambiguous`, `syntax-error`, `scan-failed`, `tool-failed`,
   `tsconfig-missing` and `tests-unconfigured` rule.
-- For one line rather than a whole project, use a
+- For one line of `secret` or `banned-construct`, use a
   [waiver](checks.md#waivers) instead.
 
 ### Test recipes
@@ -206,7 +231,16 @@ follows.
 
 The engine rejects, with a message naming each problem:
 
-- unknown fields, at any level (`"lnaguages"` is an error, not ignored);
+- unknown fields, at any level (`"lnaguages"` is an error, not ignored). The
+  message says where the field is and lists the fields allowed there:
+
+  ```
+  parse: unknown field "pahts" in $.components[1]; allowed fields there: paths, languages, conventions, layers, reason, test, limits
+  ```
+
+  The same applies to proposals, convention packs and approval records. In
+  a proposal, the path starts at the part named before it, so
+  `proposal config: ... in $.components[0]` is `config.components[0]`;
 - a key that appears twice, even in different case: JSON parsers keep the last
   value, so a duplicate could hide the effective setting from a reviewer;
 - anything after the closing brace;
@@ -237,7 +271,7 @@ millennium-code-qc config apply
 It validates the proposal as strictly as a config, shows every file it will
 write, lists every way it **loosens** the rules compared with the current
 config (a language, component or convention dropped, a path excluded, a check
-disabled, mypy or shellcheck switched off, component or acceptance-test paths
+disabled or disabled in more paths, mypy or shellcheck switched off, component or acceptance-test paths
 moved, a limit raised, a convention pack's rules weakened), and asks you to
 type `yes`. Without a terminal, for example from
 Claude Code's `!` prefix, it prints a digest instead; re-run with
@@ -313,7 +347,10 @@ one file per package under `.millennium/deps/<ecosystem>/`, named
 ```
 
 Records are protected like the config: agents draft them into a proposal and
-you apply it.
+you apply it. They are read as strictly too (see
+[How strictly the file is read](#how-strictly-the-file-is-read)): a record
+that is a symlink, larger than 1 MiB, or has an unknown field, a duplicate key
+or trailing data blocks.
 
 ```json
 {

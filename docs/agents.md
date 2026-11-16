@@ -46,7 +46,10 @@ The workflow, in order:
 5. **Engineers** in parallel, each in its own worktree; at the same time
    qa-tester writes the acceptance tests from the spec.
 6. **Integration**: per package `millennium-code-qc scope` against its paths and the
-   full gate, then a merge; then the full gate on the integrated branch.
+   full gate in its worktree, from the commit the worktree was dispatched
+   from (a worktree dispatched after other packages merged holds their
+   changes too), then a merge; then the full gate on the integrated branch,
+   from the feature's base.
 7. **Smoke test** by qa-tester.
 8. **Review panel** in parallel: correctness and maintainability always;
    security and performance by risk; acceptance and exploratory testing.

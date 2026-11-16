@@ -149,7 +149,7 @@ type ConfigInput struct {
 	Test             *TestRecipe
 	Limits           *LimitOverride
 	Exclude          []string
-	Disable          []DisabledCheck
+	Disable          []DisableInput
 	Testing          *string
 	DependencyPolicy *string
 	PythonTypeCheck  *string

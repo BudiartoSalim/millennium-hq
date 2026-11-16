@@ -37,3 +37,17 @@ func TestReportFindings(t *testing.T) {
 		t.Fatalf("Findings() = %+v, want gate order", findings)
 	}
 }
+
+// Proposed only labels a run against a proposal; it never changes the
+// verdict.
+func TestProposedDoesNotChangeTheVerdict(t *testing.T) {
+	clean := Report{Enabled: true, Results: []GateResult{{Gate: "g"}}}
+	blocked := Report{Enabled: true, Results: []GateResult{{Gate: "g", Findings: []Finding{{Rule: "r"}}}}}
+	for _, r := range []Report{clean, blocked} {
+		proposed := r
+		proposed.Proposed = true
+		if proposed.Passed() != r.Passed() {
+			t.Errorf("Proposed changed the verdict of %+v", r)
+		}
+	}
+}

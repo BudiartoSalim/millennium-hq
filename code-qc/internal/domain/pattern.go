@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -113,6 +114,19 @@ func (p Pattern) Covers(target string) bool {
 		}
 	}
 	return false
+}
+
+// Matches reports whether the pattern matches target as a whole: unlike
+// Covers, a directory whose name happens to match covers nothing inside it,
+// so "**/*_test.go" cannot be stretched over "x_test.go/impl.go". A trailing
+// "**" stands for at least one segment: "tests/**" is what lies under
+// tests, not a file named tests.
+func (p Pattern) Matches(target string) bool {
+	segments := p.segments
+	if n := len(segments); n > 0 && segments[n-1] == "**" {
+		segments = append(slices.Clone(segments[:n-1]), "*", "**")
+	}
+	return matchSegments(segments, splitPath(target))
 }
 
 func matchSegments(pattern, segments []string) bool {

@@ -45,9 +45,9 @@ func applyTarget(local bool) usecase.ApplyTarget {
 }
 
 func (a *App) apply(deps Deps, path string, target usecase.ApplyTarget, confirm string, defaultProposal bool) error {
-	data, err := os.ReadFile(path)
+	data, err := deps.ReadProposal(path)
 	if err != nil {
-		return fmt.Errorf("read the proposal: %w", err)
+		return err
 	}
 	plan, err := deps.Apply.Prepare(data, filepath.Dir(path), target)
 	if err != nil {

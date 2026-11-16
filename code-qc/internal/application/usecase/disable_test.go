@@ -11,7 +11,7 @@ import (
 func disabledConfig(t *testing.T, check string) domain.Config {
 	t.Helper()
 	cfg, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: []string{"go"},
-		Disable: []domain.DisabledCheck{{Check: check, Reason: "the project accepts this deliberately"}}})
+		Disable: []domain.DisableInput{{Check: check, Reason: "the project accepts this deliberately"}}})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
 	}
@@ -64,5 +64,34 @@ func TestDisablingOneRuleKeepsTheOthers(t *testing.T) {
 	report, err := uc.Execute(t.Context(), RunGatesInput{})
 	if err != nil || report.Passed() || report.FindingCount() != 1 || report.Findings()[0].Rule != "broken" || report.Disabled[0].Suppressed != 1 {
 		t.Fatalf("report = %+v, %v", report, err)
+	}
+}
+
+// A disable limited to paths hides only that rule's findings about files
+// inside them; the same rule elsewhere, and a finding about no file, still
+// block.
+func TestDisabledChecksLimitedToPaths(t *testing.T) {
+	cfg, err := domain.NewConfig(domain.ConfigInput{Version: ptr(1), Languages: []string{"go"},
+		Disable: []domain.DisableInput{{Check: "g/r", Reason: "the harness enables it per test", Paths: []string{"tests/**"}}}})
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	repo := &fakeRepo{}
+	gate := &fakeGate{name: "g", findings: []domain.Finding{
+		{Gate: "g", Rule: "r", File: "tests/harness.sh"},
+		{Gate: "g", Rule: "r", File: "deploy.sh"},
+		{Gate: "g", Rule: "r"},
+	}}
+	report, err := NewRunGates(NewLoadConfig(fakeSource{cfg: cfg}, repo), repo, []port.Gate{gate}).Execute(t.Context(), RunGatesInput{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if report.FindingCount() != 2 || report.Disabled[0].Suppressed != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+	for _, f := range report.Findings() {
+		if f.File == "tests/harness.sh" {
+			t.Fatalf("a finding inside the disabled paths was kept: %+v", f)
+		}
 	}
 }

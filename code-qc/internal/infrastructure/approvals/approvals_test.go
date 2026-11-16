@@ -49,7 +49,9 @@ func TestApprovalsRejectBadRecords(t *testing.T) {
 		name, rel, content, want string
 	}{
 		{"misnamed", "npm/other@1.0.0.json", expressRecord, "must be named npm/express@4.21.2.json"},
-		{"unknown field", "npm/express@4.21.2.json", strings.Replace(expressRecord, `"decision"`, `"extra":1,"decision"`, 1), "unknown field"},
+		{"unknown field", "npm/express@4.21.2.json", strings.Replace(expressRecord, `"decision"`, `"extra":1,"decision"`, 1), `unknown field "extra" in $; allowed fields there: ecosystem`},
+		{"duplicate key", "npm/express@4.21.2.json", strings.Replace(expressRecord, `"decision"`, `"decision":"approved","decision"`, 1), `"decision" appears more than once`},
+		{"trailing data", "npm/express@4.21.2.json", expressRecord + "{}", "unexpected data after the object"},
 		{"invalid", "npm/express@4.21.2.json", strings.Replace(expressRecord, `"approved"`, `"maybe"`, 1), "decision"},
 		{"not json", "npm/express@4.21.2.json", "nope", "approval"},
 	}
@@ -61,5 +63,27 @@ func TestApprovalsRejectBadRecords(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// A record is read like any rule file: never through a symlink, which could
+// pull an approval from outside the reviewed tree, and never past its size.
+func TestApprovalsReadRecordsStrictly(t *testing.T) {
+	dir := t.TempDir()
+	writeRecord(t, dir, "npm/express@4.21.2.json", strings.Repeat(" ", maxRecordBytes+1))
+	if _, err := New(dir).Approvals(); err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("an oversized record: %v", err)
+	}
+	outside := t.TempDir()
+	writeRecord(t, outside, "express.json", expressRecord)
+	linked := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(linked, "npm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "express.json"), filepath.Join(linked, "npm", "express@4.21.2.json")); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+	if _, err := New(linked).Approvals(); err == nil || !strings.Contains(err.Error(), "found a symlink") {
+		t.Fatalf("a symlinked record: %v", err)
 	}
 }

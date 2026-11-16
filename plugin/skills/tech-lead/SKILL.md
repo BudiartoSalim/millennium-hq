@@ -39,8 +39,13 @@ In this skill, `millennium-code-qc` means the engine command
    opt-in: `/millennium:solution-design <problem>`.
 2. `git status`: start from a clean tree. If the user has uncommitted work,
    ask whether to commit, stash or include it.
-3. If you are on the default branch, create a feature branch. Record the base:
-   `git rev-parse HEAD`. Every later `--base` uses this commit.
+3. Record the base. On the default branch, create a feature branch and
+   take `git rev-parse HEAD`. On an existing branch, take where it forked
+   from the default branch, `git merge-base HEAD origin/<default-branch>`
+   (the local one without a remote), so its
+   earlier commits are checked too (ask the user if they should not be). The checks of the whole feature use
+   `--base <base>`; the checks of one package use the `<start>` its worktree
+   was dispatched from (step 5).
 
 ## 1. Understand and design
 
@@ -126,7 +131,12 @@ Show the plan to the user before dispatching.
 
 1. **Commit first.** Engineer worktrees branch from `HEAD` (millennium sets
    `worktree.baseRef: "head"`), so uncommitted work is invisible to them.
-   Commit the spec and any contract, then dispatch.
+   Commit the spec and any contract, record `<start>` = `git rev-parse HEAD`,
+   and dispatch with no commit in between: every worktree dispatched in that
+   message starts from `<start>`. Each later dispatch into a new worktree (a
+   package that waited, a fix after a merge) records its own `<start>` the
+   same way; a fix sent to an engineer whose worktree still exists keeps
+   that worktree's `<start>`.
 2. Start every independent package in the same message: one
    `millennium:software-engineer` Agent call per package, each in the background. Give
    each engineer only its package: the spec slice, its paths, the contract,
@@ -141,22 +151,42 @@ Show the plan to the user before dispatching.
 ## 6. Integrate
 
 For each finished package, in its worktree (the path and branch the Agent
-result reports, or `git worktree list`):
+result reports, or `git worktree list`), check the package's change from
+the `<start>` its worktree was dispatched from (step 5). It covers what the
+engineer committed as well as the working tree, which the stop hook,
+comparing with `HEAD`, does not. Not `<base>`: a worktree dispatched after
+other packages were merged holds their changes too, and checked from
+`<base>` it would report their files as out of scope and re-check them. The
+integrated branch is what gets checked from `<base>`.
 
-1. `millennium-code-qc scope --base <base> --allow <pattern> ...` with the package's
-   paths. Out-of-scope changes go back to the engineer.
-2. `millennium-code-qc gate --base <base> --tier full` in the worktree.
-3. Read the diff yourself. Does it do what the package asked, and only that?
-4. On a failure, send it back to the same engineer with the findings
+1. `git -C <worktree> merge-base --is-ancestor <start> HEAD` must succeed;
+   if it does not, the worktree did not start from `<start>`: stop and bring
+   it to the user rather than guess another range.
+2. `millennium-code-qc scope --base <start> --allow <pattern> ...` in the
+   worktree, with the package's paths. Out-of-scope changes go back to the engineer.
+3. `millennium-code-qc gate --base <start> --tier full` in the worktree.
+4. Read the change yourself: `git -C <worktree> diff <start>` for tracked
+   files, and every new file `git -C <worktree> status --porcelain
+   --untracked-files=all` lists as untracked (`??`), which `git diff` does
+   not show. Does it do what the
+   package asked, and only that?
+5. On a failure, send it back to the same engineer with the findings
    (SendMessage to its agent id keeps its context). Otherwise commit in the
-   worktree with a message naming the package, and merge the branch into the
+   worktree, staging by explicit path every file you read, deletions and
+   renames included (never `git add -A`, which would also stage the
+   sandbox's placeholder files), with a message
+   naming the package, and merge the branch into the
    feature branch (`git merge --no-ff <branch>`). Once merged, remove the
    worktree (`git worktree remove <path>`) and delete its branch.
 
-After merging every package and the acceptance tests, run
-`millennium-code-qc gate --base <base> --tier full` on the integrated branch and fix
-integration failures by sending them to the package that owns the code.
-Commit the integrated state: reviewers' worktrees branch from it.
+After merging every package and the acceptance tests, commit the integrated
+state (fix worktrees and reviewers' worktrees branch from it) and run
+`millennium-code-qc gate --base <base> --tier full` on it. Fix integration
+failures with a new Agent call for the package that owns the code (its
+worktree is gone once merged): `millennium:software-engineer`, or
+`millennium:qa-tester` for a wrong acceptance test. Record that dispatch's
+`<start>` (step 5), integrate the fix as above, and run the integrated gate
+again. Each such round counts toward the fix-round cap in step 9.
 
 ## 7. Smoke test
 
@@ -190,18 +220,20 @@ every finding in the spec's Decision log:
 | MR-2 | maintainability | low | helper name | reject | matches the package's existing naming |
 ```
 
-- **fix**: send it to the owning engineer. Every bug fix comes with a
-  regression test that fails without the fix; a correctness-reviewer proof test can be
-  that test.
+- **fix**: give it to the owning package's engineer in a new Agent call
+  from the committed, integrated state, recording its `<start>` (step 5),
+  since the old worktree is gone once merged. Every
+  bug fix comes with a regression test that fails without the fix; a
+  correctness-reviewer proof test can be that test.
 - **defer**: only with a reason and a follow-up (an issue link). Critical or
   high security findings are never deferred without the user's explicit
   agreement.
 - **reject**: only with a reason grounded in the spec or evidence, not in the
   author's preference.
 
-Re-run step 6 for fixes. A fix that rewrites a significant part of the change
-(a new design, or more than about a third of the diff) gets a fresh review of
-that part by a new reviewer instance. After **3** fix rounds with findings
+Re-run step 6 for fixes. A fix that rewrites a
+significant part of the change (a new design, or more than about a third of
+the diff) gets a fresh review of that part by a new reviewer instance. After **3** fix rounds with findings
 still open, stop and bring the state to the user.
 
 ## 10. Final gate
@@ -235,7 +267,12 @@ engineer disagree on something the spec does not settle:
 1. State the finding, the evidence on both sides, and what each option costs.
 2. If the fix is a rule change, draft it as `millennium.proposal.json` (see
    the project's configuration docs) with a reason; the user reviews and runs
-   `millennium-code-qc config apply`, which lists every loosening.
+   `millennium-code-qc config apply`, which lists every loosening. For a
+   config or pack change, check the work against it with
+   `millennium-code-qc gate --base <base> --proposal millennium.proposal.json`:
+   findings it clears are the ones the proposal is for, and anything left is
+   still to fix. It uses the proposal's config and packs, not its dependency
+   approvals, and its pass is not the final gate.
 3. Wait for the user. Meanwhile continue with packages the question does not
    affect.
 

@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -117,11 +120,21 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	deps := func(_ context.Context, dir string) (Deps, error) {
 		h.gotDir = dir
 		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
-			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath}, h.depsErr
+			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath, ReadProposal: readProposalFile}, h.depsErr
 	}
 	app := New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps)
 	app.terminal = func() bool { return h.terminal }
 	return app.Run(t.Context(), args)
+}
+
+// readProposalFile stands in for the strict reader main wires in, which
+// configfile tests.
+func readProposalFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read the proposal: %w", err)
+	}
+	return data, nil
 }
 
 var (
@@ -322,6 +335,32 @@ func TestConfigExplain(t *testing.T) {
 	}
 }
 
+// A run against a proposal says so in both formats, passing or blocked:
+// its verdict is not the one the hooks reach until the proposal is applied.
+func TestProposedRunsAreMarked(t *testing.T) {
+	blocked := domain.Report{Enabled: true, Proposed: true, Results: []domain.GateResult{{Gate: "g", Findings: []domain.Finding{{Gate: "g", Rule: "r", Message: "m"}}}}}
+	pass := passing
+	pass.Proposed = true
+	for _, report := range []domain.Report{pass, blocked} {
+		h := &harness{gates: &fakeGates{report: report}}
+		h.run(t, "gate")
+		if !strings.Contains(h.stderr.String(), "against a proposal, not the applied config") {
+			t.Fatalf("text report does not mark the proposal: %q", h.stderr.String())
+		}
+		h = &harness{gates: &fakeGates{report: report}}
+		h.run(t, "gate", "--format", "json")
+		var out jsonReport
+		if err := json.Unmarshal(h.stdout.Bytes(), &out); err != nil || !out.Proposed {
+			t.Fatalf("json report does not mark the proposal: %s, %v", h.stdout.String(), err)
+		}
+	}
+	plain := &harness{gates: &fakeGates{report: passing}}
+	plain.run(t, "gate", "--format", "json")
+	if strings.Contains(plain.stdout.String(), "proposed") {
+		t.Fatalf("a run against the applied config is marked as a proposal: %s", plain.stdout.String())
+	}
+}
+
 func TestDisabledChecksAreAlwaysShown(t *testing.T) {
 	report := passing
 	report.Disabled = []domain.DisabledResult{{DisabledCheck: domain.DisabledCheck{Check: "structure/function-length", Reason: "upstream style"}, Suppressed: 3}}
@@ -333,6 +372,25 @@ func TestDisabledChecksAreAlwaysShown(t *testing.T) {
 	h.run(t, "gate", "--format", "json")
 	var out jsonReport
 	if err := json.Unmarshal(h.stdout.Bytes(), &out); err != nil || len(out.Disabled) != 1 || out.Disabled[0].Suppressed != 3 {
+		t.Fatalf("json disabled = %+v, %v", out.Disabled, err)
+	}
+}
+
+func TestDisabledPathsAreShown(t *testing.T) {
+	pattern, err := domain.ParsePattern("tests/**", domain.RecursivePattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := passing
+	report.Disabled = []domain.DisabledResult{{DisabledCheck: domain.DisabledCheck{Check: "shell/strict-mode", Reason: "the harness enables errexit per test", Paths: []domain.Pattern{pattern}}, Suppressed: 2}}
+	h := &harness{gates: &fakeGates{report: report}}
+	if h.run(t, "gate"); !strings.Contains(h.stderr.String(), "disabled: shell/strict-mode in tests/** (hid 2 findings): the harness") {
+		t.Fatalf("stderr %q", h.stderr.String())
+	}
+	h = &harness{gates: &fakeGates{report: report}}
+	h.run(t, "gate", "--format", "json")
+	var out jsonReport
+	if err := json.Unmarshal(h.stdout.Bytes(), &out); err != nil || len(out.Disabled) != 1 || !slices.Equal(out.Disabled[0].Paths, []string{"tests/**"}) {
 		t.Fatalf("json disabled = %+v, %v", out.Disabled, err)
 	}
 }

@@ -52,8 +52,9 @@ func (l *limitsDTO) toDomain() *domain.LimitOverride {
 }
 
 type disableDTO struct {
-	Check  string `json:"check"`
-	Reason string `json:"reason"`
+	Check  string   `json:"check"`
+	Reason string   `json:"reason"`
+	Paths  []string `json:"paths"`
 }
 
 type testDTO struct {
@@ -85,10 +86,10 @@ type runDTO struct {
 	HealthURL string `json:"healthUrl"`
 }
 
-func disabledChecks(in []disableDTO) []domain.DisabledCheck {
-	out := make([]domain.DisabledCheck, len(in))
+func disabledChecks(in []disableDTO) []domain.DisableInput {
+	out := make([]domain.DisableInput, len(in))
 	for i, d := range in {
-		out[i] = domain.DisabledCheck(d)
+		out[i] = domain.DisableInput(d)
 	}
 	return out
 }

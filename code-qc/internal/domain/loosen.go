@@ -28,11 +28,7 @@ func Loosenings(current *Config, next Config) []string {
 			out = append(out, fmt.Sprintf("%s is newly excluded from every check", p))
 		}
 	}
-	for _, d := range next.Disabled {
-		if !slices.ContainsFunc(current.Disabled, func(c DisabledCheck) bool { return c.Check == d.Check }) {
-			out = append(out, fmt.Sprintf("%s is newly disabled: %s", d.Check, d.Reason))
-		}
-	}
+	out = append(out, disableLoosenings(current.Disabled, next.Disabled)...)
 	out = append(out, settingLoosenings(*current, next)...)
 	for _, name := range current.Packs.Names() {
 		if pack, ok := next.Packs[name]; ok {

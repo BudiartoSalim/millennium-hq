@@ -174,13 +174,17 @@ are independent, so development is not limited to one engineer.
   others build against it.
 - **One worktree per engineer.** Each engineer is a separate subagent in its
   own git worktree, running in the background alongside the others.
-- **Ownership is gated.** At merge time the engine checks each branch's diff
-  against the package's declared paths; a change outside them blocks, so two
+- **Ownership is gated.** At merge time the engine checks each package's
+  diff, from the commit its worktree was dispatched from, against the
+  package's declared paths; a change outside them blocks, so two
   engineers cannot silently edit the same file.
-- **Integrate, then review.** The lead merges the branches one at a time and
-  runs the gates on the integrated result; a failure goes back to the
-  package's engineer. The review panel normally sees the integrated diff once;
-  a large change can be reviewed per package.
+- **Integrate, then review.** The lead checks each package on what its
+  engineer changed since the worktree was dispatched (a worktree dispatched
+  after other packages merged holds their changes too, which are not this
+  package's to answer for), merges the branches one at a time and runs the
+  gates on the integrated result; a failure goes back to the package's
+  engineer. The review panel normally sees the integrated diff once; a large
+  change can be reviewed per package.
 - **Judgement, with a cap.** Tightly coupled work stays with one engineer, and
   a concurrency limit keeps cost and machine load (parallel test suites) in
   check.
@@ -274,6 +278,18 @@ their reasons, so nothing is silently off:
   { "check": "complexity", "reason": "upstream style; 80-line handlers are the norm here" }
 ]
 ```
+
+A disable can be limited to paths, so a local convention that conflicts with
+one rule does not cost every other check on those files (as `exclude` would)
+or leave a finding open: `{ "check": "shell/strict-mode", "paths":
+["tests/**"], "reason": "..." }`. It hides only that rule's findings about
+files the paths match as whole paths (not, as with `exclude`, anything inside
+a directory whose name matches, which an agent could create to escape a
+check); a finding about no file stays. Per-rule exceptions
+live in the config, which the user applies, rather than in inline waivers an
+agent can write: `config apply` lists each newly covered path, or a rule
+widened to everywhere, as a loosening. Inline waivers stay limited to
+`secret` and `banned-construct`, where the exception is about one line.
 
 ## Adopting an existing project
 
@@ -403,7 +419,7 @@ Every change (hooks and the lead's runs):
 | Check | How |
 |---|---|
 | Config validation | Strict JSON: unknown fields, duplicate keys, trailing data, symlinks and oversized files are errors |
-| Change detection | git, NUL-separated output, special files skipped, fsmonitor disabled |
+| Change detection | git, NUL-separated output, special files skipped, the sandbox's placeholders left out (below), any other listed path that is gone or cannot be inspected blocking, fsmonitor disabled |
 | Toolchain | Required tools present; a missing one blocks |
 | Format and types | `gofmt`, `go vet`, `tsc --noEmit`, optional mypy, run with the project's own tools |
 | Config integrity | tsconfig (comments and `extends` chains included) and lint thresholds not weakened |
@@ -415,7 +431,21 @@ Every change (hooks and the lead's runs):
 | Secrets | High-confidence patterns, binary files skipped, bounded reads |
 | Tests required | Changed code in tested layers comes with changed tests |
 | Changed-line coverage | Changed lines covered by the suite |
-| Ownership | Each engineer's branch stays inside its package's paths; protected paths untouched |
+| Ownership | Each package's change, from the commit its worktree was dispatched from, stays inside its package's paths; protected paths untouched |
+
+Claude Code's sandbox mounts a device over each protected path that does
+not exist while a sandboxed command runs. Inside the sandbox git lists a
+device, which change detection skips as a special file; outside it, where
+hooks run, git lists an empty untracked file that vanishes when the command
+ends, often while the gates run. So an untracked path that is empty or gone
+is left out when it has a protected name at any depth (shell profiles, git
+and editor config, `.mcp.json`) or sits directly in a `.claude` directory,
+whose protected set grows between releases. Tool config such as `.npmrc` is
+not exempt: even empty, it changes how a tool behaves. Claude Code's
+settings files directly in `.claude` are exempt too, although they are
+protected paths: an empty one holds no settings, agents cannot write them
+(the guard and the sandbox both refuse), and excluding them would bring the
+false blocks back for every project that has none.
 
 Hooks:
 
