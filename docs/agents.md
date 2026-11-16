@@ -1,6 +1,6 @@
 # Agents and skills
 
-The plugin ships seven agents and thirteen skills. The agents differ by what
+The plugin ships seven agents and fourteen skills. The agents differ by what
 they may do (tools, worktree, what they may read); the skills hold the
 instructions. Skills are portable (the Agent Skills format); the agent files
 are Claude Code's adapter.
@@ -13,7 +13,9 @@ Run the tech lead in your main session:
 /millennium:tech-lead add a cart total endpoint that applies the active discount
 ```
 
-The lead writes a spec with you, splits the work into packages for parallel
+The lead first works out with you what to build and how: it researches the
+problem, proposes options with their trade-offs, and waits for your decision.
+Then it writes a spec with you, splits the work into packages for parallel
 engineers, has the result reviewed and tested by fresh-context agents, records
 a decision for every finding, and finishes only when the full gate passes.
 You see each step and can overrule any decision. Sessions that do not use the
@@ -24,32 +26,44 @@ agent. It stops and reports where the interactive lead would ask you.
 
 The workflow, in order:
 
-1. **Spec** with acceptance criteria (AC-n), non-goals, constraints and risk.
-2. **Threat model** by the security engineer when the change touches a trust
+1. **Understand and design** (the `solution-design` skill), scaled to the
+   problem. For a small, clear change: read the code and ask what is
+   unclear. For an open-ended one, such as "a message broker with delayed
+   delivery, like SQS":
+   - study how the reference system really behaves, from its documentation;
+   - survey how others build it: patterns, prior art, known pitfalls;
+   - test uncertain claims with throwaway spikes outside the repository;
+   - propose two or three options with trade-offs and a recommendation.
+
+   The lead may split the research across engineers with research briefs,
+   in parallel. You decide; the decision and its sources go in the spec.
+2. **Spec** with acceptance criteria (AC-n), non-goals, constraints, risk and
+   the chosen approach.
+3. **Threat model** by the security engineer when the change touches a trust
    boundary; its security requirements (SR-n) join the spec.
-3. **Work packages** with disjoint paths, contracts first, at most three
+4. **Work packages** with disjoint paths, contracts first, at most three
    engineers at once unless you agree to more.
-4. **Engineers** in parallel, each in its own worktree; at the same time
+5. **Engineers** in parallel, each in its own worktree; at the same time
    qa-tester writes the acceptance tests from the spec.
-5. **Integration**: per package `millennium-code-qc scope` against its paths and the
+6. **Integration**: per package `millennium-code-qc scope` against its paths and the
    full gate, then a merge; then the full gate on the integrated branch.
-6. **Smoke test** by qa-tester.
-7. **Review panel** in parallel: correctness and maintainability always;
+7. **Smoke test** by qa-tester.
+8. **Review panel** in parallel: correctness and maintainability always;
    security and performance by risk; acceptance and exploratory testing.
-8. **Triage**: every finding fixed (with a regression test), deferred (with a
+9. **Triage**: every finding fixed (with a regression test), deferred (with a
    follow-up) or rejected (with evidence), in the spec's decision log; at most
    three fix rounds before the lead comes back to you.
-9. **Final gate**: `millennium-code-qc gate --base <base> --tier full --require-config`
+10. **Final gate**: `millennium-code-qc gate --base <base> --tier full --require-config`
    and the acceptance tests.
-10. **Summary**: changes, criteria mapped to tests, the decision log, anything
+11. **Summary**: changes, criteria mapped to tests, the decision log, anything
     disabled or waived, and proposals waiting for you.
 
 ## Agents
 
 | Agent | Skills | Tools | Isolation |
 |---|---|---|---|
-| `tech-lead` | lead | all | none |
-| `software-engineer` | engineering-standards | read, edit, shell, web | own worktree |
+| `tech-lead` | tech-lead | all | none |
+| `software-engineer` | engineering-standards; solution-design for research briefs | read, edit, shell, web | own worktree |
 | `correctness-reviewer` | review-protocol, correctness-review | read, shell, edit (proof tests only) | own worktree |
 | `qa-tester` | qa-testing | all but Agent | own worktree |
 | `security-engineer` | review-protocol, security-review, threat-model, security-research | read, shell, web | none, read-only |
@@ -75,6 +89,7 @@ The workflow, in order:
 | Skill | Invoked by | What it is |
 |---|---|---|
 | `tech-lead` | you (`/millennium:tech-lead <task>`), the tech-lead agent | The tech-lead playbook above. |
+| `solution-design` | you (`/millennium:solution-design <problem>`), the lead, an engineer with a research brief | Research and design before building: the reference behaviour, approaches others use, spikes, options with trade-offs, a recommendation. Needs no opt-in. |
 | `init-project` | you (`/millennium:init-project [committed\|local]`) | Sets up a new project: languages, conventions, a draft config, an optional layout skeleton. |
 | `adopt-project` | you (`/millennium:adopt-project [committed\|local]`) | Onboards existing code: `millennium-code-qc discover`, convention matching, a dry-run audit, the draft config. |
 | `vet-dependency` | you (`/millennium:vet-dependency npm express@4.21.2`), the lead | Vets a dependency and drafts its approval records into `millennium.proposal.json`. |

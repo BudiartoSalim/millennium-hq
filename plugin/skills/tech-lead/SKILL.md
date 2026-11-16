@@ -1,6 +1,6 @@
 ---
 name: tech-lead
-description: Tech-lead playbook for taking a change from request to merged, gated result - spec with acceptance criteria, threat model when risky, parallel engineers on disjoint work packages, fresh-context reviewers and black-box QA, a decision log for every finding, and the final full gate. Use when the user asks you to lead, plan and run, or orchestrate a feature, fix or refactor with the millennium agents.
+description: Tech-lead playbook for taking a change from request to merged, gated result - design research and options for the user to decide, spec with acceptance criteria, threat model when risky, parallel engineers on disjoint work packages, fresh-context reviewers and black-box QA, a decision log for every finding, and the final full gate. Use when the user asks you to lead, plan and run, or orchestrate a feature, fix or refactor with the millennium agents.
 argument-hint: <task>
 ---
 
@@ -22,7 +22,7 @@ In this skill, `millennium-code-qc` means the engine command
   tool config, or restructuring code just to dodge a check. If a gate seems
   wrong, stop and bring the case to the user (see Escalating). Rule changes
   are proposals the user applies; you cannot apply them.
-- **Never mark work done without the final gate passing** (step 9).
+- **Never mark work done without the final gate passing** (step 10).
 - **Every finding gets a disposition** in the decision log: fix, defer or
   reject, with a reason. Nothing is silently dropped.
 - **Reviewers get the spec and the diff, never the authors' reasoning.** Do
@@ -35,13 +35,37 @@ In this skill, `millennium-code-qc` means the engine command
 
 1. `millennium-code-qc config validate`. If the repository is not opted in, stop and
    suggest `/millennium:init-project` (new project) or `/millennium:adopt-project` (existing
-   code); do not lead without gates.
+   code); do not lead without gates. A design discussion alone needs no
+   opt-in: `/millennium:solution-design <problem>`.
 2. `git status`: start from a clean tree. If the user has uncommitted work,
    ask whether to commit, stash or include it.
 3. If you are on the default branch, create a feature branch. Record the base:
    `git rev-parse HEAD`. Every later `--base` uses this commit.
 
-## 1. Spec
+## 1. Understand and design
+
+Before any spec or code, work out with the user what to build and how.
+Follow the `solution-design` skill (load `millennium:solution-design` if it
+is not in your context); its scale guidance sets how far to go. A small,
+clear change needs a look at the code and a few questions. An open-ended one
+("a message broker with delayed delivery, like SQS") gets the full research:
+how the reference system really behaves, how others build it, spikes for
+what is uncertain, and options with trade-offs.
+
+- **Research yourself, or in parallel.** When the research has independent
+  parts (the reference system, the implementation approaches, a spike on the
+  riskiest claim), give each to a `millennium:software-engineer` with a
+  research brief, all in one message, in the background, at most 3 at once.
+  A research brief names the question, the constraints, the design note
+  sections to return, and says to change nothing in the repository. Do
+  quick lookups yourself; a brief costs a fresh agent.
+- **Research reports are claims.** Check the sources they cite before you
+  present them.
+- **The user decides.** Ask the questions that change the direction, present
+  the options with your recommendation, and wait. Never write the spec on an
+  option the user has not chosen.
+
+## 2. Spec
 
 Write the spec with the user before any code. Use the project's spec location
 if it has one, otherwise `docs/specs/<slug>.md`, committed with the change:
@@ -55,21 +79,24 @@ if it has one, otherwise `docs/specs/<slug>.md`, committed with the change:
 ## Constraints        (compatibility, performance budgets, sizes it must handle)
 ## Risk               (auth, input, secrets, crypto, permissions, money,
                        concurrency, data loss, hot paths: which apply)
+## Approach           (the design note from step 1: options, decision, sources)
 ## Security requirements   (from the threat model, SR-1 ...)
 ## Decision log       (filled in during the work)
 ```
 
 Ask the user about anything ambiguous instead of guessing. Each acceptance
-criterion must be something a black-box test can check.
+criterion must be something a black-box test can check. The reference
+behaviour the user confirmed in step 1 becomes acceptance criteria; what they
+ruled out becomes non-goals.
 
-## 2. Threat model (when Risk names a trust boundary)
+## 3. Threat model (when Risk names a trust boundary)
 
 When the change touches auth, input from outside, secrets, crypto,
 permissions or another trust boundary, run `millennium:security-engineer` in
 threat-model mode with the spec path. Add its security requirements to the
 spec as SR-n, each with how it will be tested, and confirm them with the user.
 
-## 3. Work packages
+## 4. Work packages
 
 Split the work so engineers can run in parallel:
 
@@ -95,7 +122,7 @@ Done when: <its ACs met, with unit tests; fast gate clean>
 
 Show the plan to the user before dispatching.
 
-## 4. Dispatch
+## 5. Dispatch
 
 1. **Commit first.** Engineer worktrees branch from `HEAD` (millennium sets
    `worktree.baseRef: "head"`), so uncommitted work is invisible to them.
@@ -111,7 +138,7 @@ Show the plan to the user before dispatching.
    `vet-dependency` skill and have the user apply the approval before the
    engineer adds it.
 
-## 5. Integrate
+## 6. Integrate
 
 For each finished package, in its worktree (the path and branch the Agent
 result reports, or `git worktree list`):
@@ -131,13 +158,13 @@ After merging every package and the acceptance tests, run
 integration failures by sending them to the package that owns the code.
 Commit the integrated state: reviewers' worktrees branch from it.
 
-## 6. Smoke test
+## 7. Smoke test
 
 Run `millennium:qa-tester` in **smoke** mode. If the software does not start
 or its main path fails, send that straight back to the owning engineer; do
 not start the review panel on broken software.
 
-## 7. Review panel
+## 8. Review panel
 
 Start in one message, each with the spec path, the base commit and the head
 commit, and nothing about how the code came to be:
@@ -152,7 +179,7 @@ commit, and nothing about how the code came to be:
 
 A large change can be reviewed per package instead of all at once.
 
-## 8. Triage and fix
+## 9. Triage and fix
 
 Reviewers answer in the JSON format of the `review-protocol` skill. Record
 every finding in the spec's Decision log:
@@ -172,12 +199,12 @@ every finding in the spec's Decision log:
 - **reject**: only with a reason grounded in the spec or evidence, not in the
   author's preference.
 
-Re-run step 5 for fixes. A fix that rewrites a significant part of the change
+Re-run step 6 for fixes. A fix that rewrites a significant part of the change
 (a new design, or more than about a third of the diff) gets a fresh review of
 that part by a new reviewer instance. After **3** fix rounds with findings
 still open, stop and bring the state to the user.
 
-## 9. Final gate
+## 10. Final gate
 
 On the integrated feature branch:
 
@@ -189,7 +216,7 @@ plus the acceptance tests passing (qa-tester's last run, or run them per
 `tests/acceptance/README.md`). This is the CI-equivalent run and the last
 word: if it does not pass, the work is not done, whatever any report says.
 
-## 10. Summary for the user
+## 11. Summary for the user
 
 - What changed, per package, and the commits.
 - Each acceptance criterion and security requirement, with the test that

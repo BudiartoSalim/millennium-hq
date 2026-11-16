@@ -86,7 +86,7 @@ reviewer of a change is `<topic>-reviewer` with a `<topic>-review` skill;
 | Agent | Skills / modes | Context | Tools |
 |---|---|---|---|
 | tech-lead | `tech-lead` | Full | All |
-| software-engineer (one or more, in parallel) | `engineering-standards` + active packs | Its work package + standards | Edit/Write/Bash, own git worktree |
+| software-engineer (one or more, in parallel) | `engineering-standards` + active packs; `solution-design` for research briefs | Its work package or research brief + standards | Edit/Write/Bash, web, own git worktree |
 | correctness-reviewer | `correctness-review` | Spec + diff (incl. tests) | Read-only on the change, own worktree for proof-of-bug tests |
 | qa-tester | `smoke`, `acceptance`, `exploratory` | Spec + run recipe; no implementation source | Bash (run the app, HTTP), browser for web |
 | security-engineer | `threat-model`, `security-review`, `security-research` | Spec + diff (+ codebase for research) | Read-only |
@@ -114,6 +114,17 @@ Notes:
   paths when `agent_type` is qa-tester. Bash cannot be path-filtered reliably,
   so this is best-effort; it protects test independence, not a security
   boundary.
+- **Design before the spec.** The lead works out how to build a change with
+  the user before writing the spec, like a design discussion: for an
+  open-ended request it studies the reference system, surveys the approaches
+  and prior art, tests uncertain claims with throwaway spikes outside the
+  repository, and proposes options with trade-offs. The method lives in the
+  `solution-design` skill, so the lead, an engineer given a research brief,
+  or the user alone (no opt-in needed) can run it. Research goes to engineers
+  rather than a researcher agent: they already have web access and a
+  worktree for spikes, and a brief keeps their output to a design note. The
+  chosen approach is part of the spec, so reviewers check the code against
+  the decision.
 - **When a gate seems wrong, the lead escalates.** The playbook forbids working
   around a gate; the lead brings the case to the user. The stop hook enforces
   the same: repeated blocked attempts escalate to the user instead of passing.
@@ -121,7 +132,10 @@ Notes:
 ## Workflow
 
 ```
-spec + acceptance criteria (lead, with the user)
+understand and design (lead, with the user; solution-design): reference
+  behaviour, approaches others use, spikes, options with trade-offs
+  -> the user decides
+  -> spec + acceptance criteria + the chosen approach (lead, with the user)
   -> [threat-model when the change touches auth, input, secrets, crypto, permissions]
   -> lead splits the work into packages (see Parallel work)
   -> engineers, in parallel: implement with unit tests, each in its own worktree

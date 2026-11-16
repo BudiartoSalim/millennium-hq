@@ -87,24 +87,30 @@ opted-in repository, whether or not you use the workflow:
 
 `/millennium:tech-lead <task>` runs a change from request to finished work:
 
-1. A **spec** with acceptance criteria. If the change crosses a trust
-   boundary, the security engineer adds a **threat model**.
-2. **Work packages** with disjoint paths, implemented by up to three
+1. **Design first.** The lead studies the problem before proposing anything,
+   as in a design discussion with a tech lead. For an open-ended request
+   ("a message broker with delayed delivery, like SQS"), it checks how the
+   reference system really behaves, surveys how others build it, tests
+   uncertain claims with throwaway spikes, and brings two or three options
+   with trade-offs and a recommendation. You decide.
+2. A **spec** with acceptance criteria and the chosen approach. If the change
+   crosses a trust boundary, the security engineer adds a **threat model**.
+3. **Work packages** with disjoint paths, implemented by up to three
    **engineers** in parallel, each in its own git worktree. Meanwhile, the
    QA tester writes acceptance tests from the spec.
-3. **Integration**, with each branch checked against the paths it was given.
-4. A **review panel**, each reviewer seeing only the spec and the diff:
+4. **Integration**, with each branch checked against the paths it was given.
+5. A **review panel**, each reviewer seeing only the spec and the diff:
    - correctness and maintainability on every change;
    - security and performance when the change carries those risks;
    - acceptance and exploratory testing.
-5. **Triage.** Every finding is fixed, deferred or rejected, with a reason
+6. **Triage.** Every finding is fixed, deferred or rejected, with a reason
    recorded in a decision log.
-6. **The full gate.** The change is done only when it passes, and you get a
+7. **The full gate.** The change is done only when it passes, and you get a
    summary.
 
 | Agent | Role |
 |---|---|
-| `software-engineer` | Implements one work package with its unit tests, in its own worktree. |
+| `software-engineer` | Implements one work package with its unit tests, in its own worktree, or researches one design question for the lead. |
 | `correctness-reviewer` | Checks the change against the spec: edge cases, error paths, test quality. Proves findings with failing tests. |
 | `security-engineer` | Security review of the diff, threat models, and security research across the codebase. |
 | `maintainability-reviewer` | Architecture fit, naming, cohesion, duplication, readability. |
@@ -121,6 +127,7 @@ You see every decision and can overrule any of them.
 | `/millennium:adopt-project` | Onboards an existing codebase. It discovers modules and languages, maps your layout onto a convention, drafts the config, and shows what the rules would find today. |
 | `/millennium:init-project` | Sets up a new project: languages, conventions, layout, and the config. |
 | `/millennium:tech-lead <task>` | Leads a change through the workflow above. |
+| `/millennium:solution-design <problem>` | A design discussion on its own: research, options with trade-offs, and a recommendation, without building anything. Works in any repository. |
 | `/millennium:vet-dependency <ecosystem> <name>@<version>` | Vets a package (need, age, maintainers, advisories, install scripts, transitive packages) and drafts its approval for you to apply. |
 
 Nine more skills hold the agents' playbooks: engineering standards, the
@@ -171,6 +178,7 @@ Go, TypeScript (Node and React), Python, and shell.
 
 ```
  you ──> /millennium:tech-lead <task>
+          │  research, options, your decision
           │  spec, work packages
           ├──> engineers (parallel worktrees) ──┐
           │                                     │ every tool call: guard

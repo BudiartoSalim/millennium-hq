@@ -1,6 +1,6 @@
 {
   "name": "millennium",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Quality and security gates agents cannot work around, and a tech-lead workflow with parallel engineers and fresh-context reviewers.",
   "author": { "name": "budiarto" },
   "license": "MIT",
