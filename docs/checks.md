@@ -123,7 +123,9 @@ Runs on every changed script of a component that lists `shell`.
 | `shellcheck` | shellcheck reports a problem on a line the change touched (every line, for a new script or an audit). The code, such as `SC2086`, links to shellcheck's explanation. | Fix it, or suppress that one code with a written reason: `# shellcheck disable=SC2016 # printed for the user to copy`. |
 
 An existing script that already lacked strict mode is not blocked when it is
-edited; `millennium-code-qc audit` lists it. A test harness that must keep
+edited; `millennium-code-qc audit` lists it. The finding is about the whole
+file and is reported on line 1, and no `millennium:allow` comment covers it
+(see [Waivers](#waivers)). A test harness that must keep
 running after a failing test, and so enables `errexit` only inside each test
 function, can have the rule switched off for its files:
 `{ "check": "shell/strict-mode", "paths": ["tests/**/*.sh"], "reason": "..." }`
@@ -158,7 +160,8 @@ EXAMPLE_KEY = "AKIAIOSFODNN7EXAMPLE"
 ```
 
 Waivers apply to `secret` and `banned-construct`. A waiver needs a reason of
-at least ten letters, or it waives nothing. Any other rule, such as
+at least ten letters, or it waives nothing. A waiver naming any other rule
+has no effect, wherever it is written. Any other rule, such as
 `shell/strict-mode`, is switched off for the files it does not fit by a
 [`disable` entry with `paths`](configuration.md#disabling-a-check) in the
 config, which the user applies.

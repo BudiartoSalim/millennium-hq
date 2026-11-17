@@ -3,6 +3,7 @@ package domain
 import (
 	"bufio"
 	"bytes"
+	"slices"
 	"strings"
 )
 
@@ -21,7 +22,7 @@ func StrictModeMissing(content []byte) []string {
 		return nil
 	}
 	required := []string{"errexit", "nounset"}
-	if dialect == "bash" || dialect == "ksh" {
+	if needsPipefail(dialect) {
 		required = append(required, "pipefail")
 	}
 	enabled := enabledOptions(content)
@@ -33,6 +34,27 @@ func StrictModeMissing(content []byte) []string {
 	}
 	return missing
 }
+
+// StrictModeCommand is the set command that enables the missing options
+// StrictModeMissing listed: "set -euo pipefail", or "set -o pipefail" for a
+// script that already has "set -eu".
+func StrictModeCommand(missing []string) string {
+	flags := ""
+	for _, option := range missing {
+		switch option {
+		case "errexit":
+			flags += "e"
+		case "nounset":
+			flags += "u"
+		}
+	}
+	if !slices.Contains(missing, "pipefail") {
+		return "set -" + flags
+	}
+	return "set -" + flags + "o pipefail"
+}
+
+func needsPipefail(dialect string) bool { return dialect == "bash" || dialect == "ksh" }
 
 // enabledOptions reads the `set` commands near the top of a script:
 // `set -euo pipefail`, `set -Eeuo pipefail`, `set -o errexit -o nounset`.

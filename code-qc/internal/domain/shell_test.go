@@ -38,3 +38,21 @@ func repeatLine(line string, n int) string {
 	}
 	return out
 }
+
+func TestStrictModeCommand(t *testing.T) {
+	tests := []struct {
+		missing []string
+		want    string
+	}{
+		{[]string{"errexit", "nounset", "pipefail"}, "set -euo pipefail"},
+		{[]string{"errexit", "nounset"}, "set -eu"},
+		{[]string{"pipefail"}, "set -o pipefail"},
+		{[]string{"nounset", "pipefail"}, "set -uo pipefail"},
+		{[]string{"errexit"}, "set -e"},
+	}
+	for _, tt := range tests {
+		if got := StrictModeCommand(tt.missing); got != tt.want {
+			t.Errorf("StrictModeCommand(%q) = %q, want %q", tt.missing, got, tt.want)
+		}
+	}
+}

@@ -70,27 +70,42 @@ func TestShellGate(t *testing.T) {
 		content string
 		tools   *fakeShellTools
 		want    string
+		says    []string
 	}{
-		{"clean script", "scripts/a.sh", strictScript, &fakeShellTools{}, ""},
+		{"clean script", "scripts/a.sh", strictScript, &fakeShellTools{}, "", nil},
 		{"syntax error stops there", "scripts/a.sh", strictScript, &fakeShellTools{
 			syntax: map[string][]domain.LintIssue{"scripts/a.sh": {{Line: 2, Code: "syntax", Message: "unexpected token"}}},
 			lint:   map[string][]domain.LintIssue{"scripts/a.sh": sc2086},
-		}, "shell/syntax-error"},
-		{"no strict mode", "scripts/a.sh", "#!/bin/bash\necho hi\n", &fakeShellTools{}, "shell/strict-mode"},
-		{"shellcheck finding", "scripts/a.sh", strictScript, &fakeShellTools{lint: map[string][]domain.LintIssue{"scripts/a.sh": sc2086}}, "shell/shellcheck"},
-		{"extensionless script by shebang", "scripts/bin/deploy", "#!/bin/bash\necho hi\n", &fakeShellTools{}, "shell/strict-mode"},
-		{"extensionless non-script is ignored", "scripts/bin/data", "hello\n", &fakeShellTools{}, ""},
-		{"outside a shell component", "svc/x.sh", "#!/bin/bash\n", &fakeShellTools{}, ""},
-		{"library without shebang needs no strict mode", "scripts/lib.sh", "helper() { :; }\n", &fakeShellTools{}, ""},
+		}, "shell/syntax-error", nil},
+		{"no strict mode, and where an exception goes", "scripts/a.sh", "#!/bin/bash\necho hi\n", &fakeShellTools{}, "shell/strict-mode",
+			[]string{"errexit, nounset, pipefail near the top (set -euo pipefail)", "no inline waiver", "disable shell/strict-mode for its paths"}},
+		{"no strict mode in sh", "scripts/a.sh", "#!/bin/sh\necho hi\n", &fakeShellTools{}, "shell/strict-mode", []string{"enable errexit, nounset near the top (set -eu)"}},
+		{"shellcheck finding", "scripts/a.sh", strictScript, &fakeShellTools{lint: map[string][]domain.LintIssue{"scripts/a.sh": sc2086}}, "shell/shellcheck", nil},
+		{"extensionless script by shebang", "scripts/bin/deploy", "#!/bin/bash\necho hi\n", &fakeShellTools{}, "shell/strict-mode", nil},
+		{"extensionless non-script is ignored", "scripts/bin/data", "hello\n", &fakeShellTools{}, "", nil},
+		{"outside a shell component", "svc/x.sh", "#!/bin/bash\n", &fakeShellTools{}, "", nil},
+		{"library without shebang needs no strict mode", "scripts/lib.sh", "helper() { :; }\n", &fakeShellTools{}, "", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			source := &fakeSource{working: map[string]string{tt.path: tt.content}}
-			got := rules(runShell(t, shellConfig(t, ""), source, tt.tools, "", added(tt.path)))
+			findings := runShell(t, shellConfig(t, ""), source, tt.tools, "", added(tt.path))
+			got := rules(findings)
 			if (tt.want == "" && len(got) > 0) || (tt.want != "" && (len(got) != 1 || got[0] != tt.want)) {
 				t.Fatalf("findings %q, want %q", got, tt.want)
 			}
+			assertSays(t, findings, tt.says)
 		})
+	}
+}
+
+// assertSays checks that the first finding's message contains each text.
+func assertSays(t *testing.T, findings []domain.Finding, texts []string) {
+	t.Helper()
+	for _, want := range texts {
+		if !strings.Contains(findings[0].Message, want) {
+			t.Errorf("message %q lacks %q", findings[0].Message, want)
+		}
 	}
 }
 

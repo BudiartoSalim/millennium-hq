@@ -1,5 +1,5 @@
 {
-  "description": "millennium: guard every tool call, check the work when an agent stops, and brief each session and subagent, with the guides of the repository's conventions. All hooks run the engine through the launcher; a failing guard blocks the tool call. Shell form, so Windows runs them through Git Bash.",
+  "description": "millennium: guard every tool call, check the work when an agent stops, and brief each session and subagent, with the guides of the repository's conventions. All hooks run the engine through the launcher, started with /bin/sh so that it runs even if its execute bit is lost; a failing guard blocks the tool call. Shell form, so Windows runs them through Git Bash.",
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 30,
             "onFailure": "block"
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 600
           }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 600
           }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 120
           }
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
+            "command": "/bin/sh \"${CLAUDE_PLUGIN_ROOT}/scripts/millennium-code-qc\" hook",
             "shell": "bash",
             "timeout": 120
           }

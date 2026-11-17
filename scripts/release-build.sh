@@ -32,6 +32,9 @@ case "$mode" in "" | --lock | --check) ;; *)
 esac
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# A release names a plugin users install from git: its launcher must be
+# executable there.
+bash "$root/scripts/check-modes.sh"
 dist="$root/dist"
 lock="$root/plugin/code-qc.lock"
 rm -rf "$dist"

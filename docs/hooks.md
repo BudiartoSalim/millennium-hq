@@ -90,8 +90,9 @@ written by a command the hooks did not recognise:
 
 ## Finding the engine
 
-Every hook runs `plugin/scripts/millennium-code-qc`, the launcher, through the shell
-(Git Bash on Windows). It runs, in order:
+Every hook runs `plugin/scripts/millennium-code-qc`, the launcher, with `/bin/sh`
+(Git Bash's on Windows), so a launcher whose execute bit was lost in
+packaging still runs. It runs, in order:
 
 1. the binary named by `MILLENNIUM_CODE_QC`, if set: one you built or vetted;
 2. the release named in the plugin's `code-qc.lock` for your platform, kept
@@ -106,3 +107,10 @@ the kept binary but cannot change it. A binary that no longer matches the
 lock is refused, never replaced silently; delete it to download it again.
 Any failure blocks, with a message saying what to do. See
 [Releasing](releasing.md) for how the lock is made.
+
+Agents' shells and your `!` commands run the launcher by its path, so it
+must be executable. Millennium 0.3.0 and earlier shipped it without its
+execute bit: running it by path fails with "Permission denied", and the
+hooks then block every tool call. Update the plugin, or run
+`chmod +x` on `scripts/millennium-code-qc` in the plugin's installed
+directory.
