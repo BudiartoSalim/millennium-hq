@@ -7,6 +7,8 @@ the PYTHON* environment out of the import path.
 """
 
 import ast
+import codecs
+import hashlib
 import io
 import json
 import os
@@ -51,6 +53,7 @@ def analyze(rel_path, content):
         "functions": collect_functions(tree, parents),
         "comments": collect_comments(content),
         "constructs": collect_constructs(tree),
+        "runtime": runtime_code(content),
     }
 
 
@@ -255,6 +258,52 @@ def collect_comments(content):
         if token.type == tokenize.COMMENT:
             out.append({"line": token.start[0], "text": token.string})
     return out
+
+
+# --- runtime code ---
+
+# COOKIE is the PEP 263 encoding declaration, as tokenize reads it.
+COOKIE = re.compile(r"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)", re.ASCII)
+# DROPPED tokens are not runtime: comments and the line breaks inside a
+# statement. NEWLINE, INDENT and DEDENT are syntax and stay.
+DROPPED = (tokenize.COMMENT, tokenize.NL)
+# LAYOUT tokens stay in the digest but mark no line of their own.
+LAYOUT = (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER)
+
+
+def runtime_code(content):
+    """The lines that hold runtime tokens and a digest of the runtime token
+    sequence, or None when they cannot be known: Python decodes a file with
+    an encoding other than UTF-8 differently from the text the engine sent,
+    so a "comment" can hold code (utf-7 turns "# +AAo-print(1)" into a
+    line that runs)."""
+    if not declares_utf8(content):
+        return None
+    digest = hashlib.sha256()
+    lines = set()
+    for token in tokenize.generate_tokens(io.StringIO(content).readline):
+        if token.type in DROPPED and not is_cookie(token):
+            continue
+        for field in (tokenize.tok_name[token.type], token.string):
+            data = field.encode("utf-8")
+            digest.update(len(data).to_bytes(8, "big") + data)
+        if token.type not in LAYOUT:
+            lines.update(range(token.start[0], token.end[0] + 1))
+    return {"lines": sorted(lines), "digest": digest.hexdigest()}
+
+
+def declares_utf8(content):
+    try:
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(content.encode("utf-8")).readline)
+    except SyntaxError:
+        return False
+    return codecs.lookup(encoding).name in ("utf-8", "utf-8-sig")
+
+
+def is_cookie(token):
+    """An encoding declaration is read by the interpreter, so it counts as
+    runtime; one on line 2 that Python would not honour counts too."""
+    return token.type == tokenize.COMMENT and token.start[0] <= 2 and bool(COOKIE.match(token.line))
 
 
 # --- constructs ---

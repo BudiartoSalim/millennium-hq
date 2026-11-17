@@ -401,7 +401,18 @@ The engine separates two concerns, so new languages and conventions are
 additions, not rewrites:
 
 - **Language analyzers** turn code into facts: imports per file, functions with
-  length, nesting and cognitive complexity, comments, calls. Go is analysed in
+  length, nesting and cognitive complexity, comments, calls, and the file's
+  runtime code (the lines that hold runtime tokens, and a SHA-256 digest of
+  the runtime token sequence), which the tests gate uses so that comments,
+  whitespace and erased TypeScript types need no test and no coverage. Each
+  language's own scanner or compiler classifies, erring toward runtime: Go's
+  `go/scanner`, the TypeScript compiler's comment-free `transpileModule`
+  output and source map (plus the syntax it can drop that still runs, such
+  as value imports and `const enum`), and Python's `tokenize`. Runtime facts
+  are known or unknown; unknown (an analysis failure, a helper answer
+  without them, content a helper cannot number as git does) counts every
+  line as runtime and every file as changed. Lines are physical, as git
+  numbers them: Go's `//line` directives move none. Go is analysed in
   the engine (`go/ast`); TypeScript and Python by two small helpers of ours (a
   JS file using the project's own `typescript`, a stdlib Python script using
   `ast`), run with the project's runtime, because a correct TS or Python parser

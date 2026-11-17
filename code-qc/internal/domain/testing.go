@@ -50,11 +50,13 @@ func (c Coverage) Merge(other Coverage) {
 }
 
 // Uncovered returns the touched executable lines that never ran, as ranges
-// for a readable message. Lines that are not executable are not counted.
-func (f FileCoverage) Uncovered(touched LineSet) []LineRange {
+// for a readable message. Lines that are not executable are not counted, and
+// neither are lines without runtime code: a coverage tool working through a
+// source map can give a comment or an erased type declaration zero hits.
+func (f FileCoverage) Uncovered(touched LineSet, runtime RuntimeCode) []LineRange {
 	var lines []int
 	for line, hits := range f {
-		if hits == 0 && touched.Contains(line) {
+		if hits == 0 && touched.Contains(line) && runtime.Holds(line) {
 			lines = append(lines, line)
 		}
 	}

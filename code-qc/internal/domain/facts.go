@@ -93,4 +93,6 @@ type FileFacts struct {
 	Functions  []FunctionFacts
 	Comments   []Comment
 	Constructs []Construct
+	// Runtime is the file's runtime code; its zero value is unknown.
+	Runtime RuntimeCode
 }

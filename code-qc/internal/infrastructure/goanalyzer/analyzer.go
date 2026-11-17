@@ -1,7 +1,8 @@
 // Package goanalyzer turns Go source into domain.FileFacts with the standard
 // library parser: imports classified against the file's module, every
-// function's length, nesting depth and cognitive complexity, comments, and
-// risky constructs.
+// function's length, nesting depth and cognitive complexity, comments, risky
+// constructs, and the file's runtime code. Every line it reports is the
+// physical line, as git numbers it: a //line directive moves none of them.
 package goanalyzer
 
 import (
@@ -37,6 +38,10 @@ func (a *Analyzer) Analyze(_ context.Context, path string, content []byte) (doma
 	if err != nil {
 		return domain.FileFacts{}, err
 	}
+	runtime, err := runtimeCode(fset, file, content)
+	if err != nil {
+		return domain.FileFacts{}, fmt.Errorf("runtime code of %s: %w", path, err)
+	}
 	facts := domain.FileFacts{
 		Path:       path,
 		Generated:  ast.IsGenerated(file),
@@ -45,6 +50,7 @@ func (a *Analyzer) Analyze(_ context.Context, path string, content []byte) (doma
 		Functions:  functions(fset, file),
 		Comments:   comments(fset, file),
 		Constructs: constructs(fset, file),
+		Runtime:    runtime,
 	}
 	return facts, nil
 }
@@ -60,7 +66,7 @@ func imports(fset *token.FileSet, file *ast.File, mod module) []domain.Import {
 		kind, target := mod.classify(importPath)
 		out = append(out, domain.Import{
 			Path:   importPath,
-			Line:   fset.Position(spec.Pos()).Line,
+			Line:   line(fset, spec.Pos()),
 			Kind:   kind,
 			Target: target,
 		})
@@ -82,7 +88,7 @@ func functions(fset *token.FileSet, file *ast.File) []domain.FunctionFacts {
 			key = fmt.Sprintf("%s#%d", key, seen[key])
 		}
 		m := measure(fn)
-		start, end := fset.Position(fn.Pos()).Line, fset.Position(fn.End()).Line
+		start, end := line(fset, fn.Pos()), line(fset, fn.End())
 		out = append(out, domain.FunctionFacts{
 			Key:       key,
 			Line:      start,
@@ -92,6 +98,11 @@ func functions(fset *token.FileSet, file *ast.File) []domain.FunctionFacts {
 		})
 	}
 	return out
+}
+
+// line is the physical line of pos, which a //line directive cannot move.
+func line(fset *token.FileSet, pos token.Pos) int {
+	return fset.PositionFor(pos, false).Line
 }
 
 // functionKey names a function by receiver type and name, so a method keeps

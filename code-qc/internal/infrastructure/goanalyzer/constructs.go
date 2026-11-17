@@ -18,7 +18,7 @@ func comments(fset *token.FileSet, file *ast.File) []domain.Comment {
 	var out []domain.Comment
 	for _, group := range file.Comments {
 		for _, c := range group.List {
-			out = append(out, domain.Comment{Line: fset.Position(c.Pos()).Line, Text: c.Text})
+			out = append(out, domain.Comment{Line: line(fset, c.Pos()), Text: c.Text})
 		}
 	}
 	return out
@@ -32,11 +32,11 @@ func constructs(fset *token.FileSet, file *ast.File) []domain.Construct {
 		switch n := n.(type) {
 		case *ast.KeyValueExpr:
 			if isIdent(n.Key, "InsecureSkipVerify") && isIdent(n.Value, "true") {
-				out = append(out, domain.Construct{Kind: domain.ConstructTLSVerifyOff, Line: fset.Position(n.Pos()).Line, Detail: "InsecureSkipVerify: true"})
+				out = append(out, domain.Construct{Kind: domain.ConstructTLSVerifyOff, Line: line(fset, n.Pos()), Detail: "InsecureSkipVerify: true"})
 			}
 		case *ast.CallExpr:
 			if detail, ok := shellCommand(n); ok {
-				out = append(out, domain.Construct{Kind: domain.ConstructShellCommand, Line: fset.Position(n.Pos()).Line, Detail: detail})
+				out = append(out, domain.Construct{Kind: domain.ConstructShellCommand, Line: line(fset, n.Pos()), Detail: detail})
 			}
 		}
 		return true

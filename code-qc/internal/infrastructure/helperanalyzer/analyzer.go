@@ -90,7 +90,7 @@ func (a *Analyzer) Analyze(ctx context.Context, path string, content []byte) (do
 		a.Close()
 		return domain.FileFacts{}, a.failure
 	}
-	return decode(path, line)
+	return decode(path, content, line)
 }
 
 // Close stops the helper process.

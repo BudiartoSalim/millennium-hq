@@ -13,7 +13,9 @@ import (
 // code in a tested layer (one its convention pack marks as tested, such as
 // domain and application under clean-architecture) must come with a change to its tests. In the full tier the suites of the
 // touched modules also run, must pass, and must execute every changed
-// executable line of that code.
+// executable line of that code. Only runtime code counts: a modified file
+// whose runtime tokens match its base needs no test change, and a changed
+// line without runtime code need not run.
 type Tests struct {
 	analyzers map[domain.Language]port.Analyzer
 	source    port.SourceReader
@@ -42,15 +44,16 @@ func (*Tests) Name() string { return "tests" }
 
 // candidate is changed code that needs tests.
 type candidate struct {
-	file  domain.ChangedFile
-	lang  domain.Language
-	match domain.ComponentMatch
+	file    domain.ChangedFile
+	lang    domain.Language
+	match   domain.ComponentMatch
+	runtime domain.RuntimeCode
 }
 
 // Run checks the tests of the change.
 func (g *Tests) Run(ctx context.Context, in port.GateInput) ([]domain.Finding, error) {
 	candidates := g.candidates(ctx, in)
-	findings := missingTests(in, candidates)
+	findings := g.missingTests(ctx, in, candidates)
 	if in.Tier != domain.TierFull {
 		return label(g.Name(), findings), nil
 	}
@@ -70,8 +73,8 @@ func (g *Tests) candidates(ctx context.Context, in port.GateInput) []candidate {
 		if !ok || domain.IsTestPath(lang, file.Path) || !inTestedLayer(in.Config.Packs, lang, match, file.Path) {
 			continue
 		}
-		if g.needsTests(ctx, lang, file.Path) {
-			out = append(out, candidate{file: file, lang: lang, match: match})
+		if facts, ok := g.logic(ctx, lang, file.Path); ok {
+			out = append(out, candidate{file: file, lang: lang, match: match, runtime: facts.Runtime})
 		}
 	}
 	return out
@@ -97,25 +100,26 @@ func inTestedLayer(packs domain.Catalog, lang domain.Language, match domain.Comp
 	return false
 }
 
-// needsTests analyses the file; one that cannot be analysed is reported by
-// the structure gate, so it is not a candidate here.
-func (g *Tests) needsTests(ctx context.Context, lang domain.Language, p string) bool {
+// logic analyses the file and reports whether it is production logic that
+// needs tests. A file that cannot be analysed is reported by the structure
+// gate, so it is not a candidate here.
+func (g *Tests) logic(ctx context.Context, lang domain.Language, p string) (domain.FileFacts, bool) {
 	analyzer, ok := g.analyzers[lang]
 	if !ok {
-		return false
+		return domain.FileFacts{}, false
 	}
 	content, err := g.source.ReadWorking(p)
 	if err != nil {
-		return false
+		return domain.FileFacts{}, false
 	}
 	facts, err := analyzer.Analyze(ctx, p, content)
-	return err == nil && domain.NeedsTests(facts)
+	return facts, err == nil && domain.NeedsTests(facts)
 }
 
-func missingTests(in port.GateInput, candidates []candidate) []domain.Finding {
+func (g *Tests) missingTests(ctx context.Context, in port.GateInput, candidates []candidate) []domain.Finding {
 	var findings []domain.Finding
 	for _, c := range candidates {
-		if hasRelatedTest(in.Changes.Files, c) {
+		if hasRelatedTest(in.Changes.Files, c) || domain.SameRuntime(g.baseRuntime(ctx, in.Changes.Base, c), c.runtime) {
 			continue
 		}
 		message := fmt.Sprintf("%s changed without a change to its tests; %s", c.file.Path, testHint(c))
@@ -125,6 +129,26 @@ func missingTests(in port.GateInput, candidates []candidate) []domain.Finding {
 		findings = append(findings, domain.Finding{Rule: "tests-missing", File: c.file.Path, Message: message})
 	}
 	return findings
+}
+
+// baseRuntime returns the runtime code of a modified file as it was at base,
+// for a change that only touched comments, whitespace or erased types. An
+// added file and an audit have no base to compare with. A base that is not
+// found, cannot be read or fails analysis gives unknown facts, which never
+// compare equal: the file counts as changed and needs its test change.
+func (g *Tests) baseRuntime(ctx context.Context, base string, c candidate) domain.RuntimeCode {
+	if base == "" || c.file.Kind != domain.ChangeModified {
+		return domain.RuntimeCode{}
+	}
+	content, found, err := g.source.ReadAt(ctx, base, c.file.Path)
+	if err != nil || !found {
+		return domain.RuntimeCode{}
+	}
+	facts, err := g.analyzers[c.lang].Analyze(ctx, c.file.Path, content)
+	if err != nil {
+		return domain.RuntimeCode{}
+	}
+	return facts.Runtime
 }
 
 func hasRelatedTest(files []domain.ChangedFile, c candidate) bool {
@@ -199,7 +223,7 @@ func (g *Tests) uncovered(ctx context.Context, in port.GateInput, candidates []c
 		if err != nil {
 			return nil, err
 		}
-		if ranges := lines.Uncovered(touched); len(ranges) > 0 {
+		if ranges := lines.Uncovered(touched, c.runtime); len(ranges) > 0 {
 			findings = append(findings, domain.Finding{Rule: "uncovered-change", File: c.file.Path, Line: ranges[0].First, Message: fmt.Sprintf(
 				"changed lines %s never run in any test", domain.FormatRanges(ranges))})
 		}

@@ -5,6 +5,7 @@
 // {"error"}. It parses with the project's own `typescript` package (the
 // classic compiler API, TypeScript 6 or older) and needs nothing else.
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -32,7 +33,8 @@ function main() {
 function analyze(relPath, content) {
   const file = path.join(root, relPath);
   const ts = compilerFor(file, relPath);
-  const kind = relPath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  // The compiler reads extensions case-insensitively, so Foo.TSX holds JSX.
+  const kind = /\.tsx$/i.test(relPath) ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, kind);
   if (source.parseDiagnostics && source.parseDiagnostics.length > 0) {
     const diag = source.parseDiagnostics[0];
@@ -48,6 +50,7 @@ function analyze(relPath, content) {
     functions: collectFunctions(ctx),
     comments: collectComments(ctx),
     constructs: collectConstructs(ctx, imports),
+    runtime: runtimeCode(ctx, content),
   };
 }
 
@@ -342,6 +345,15 @@ function isRecursive(ts, call, recursion) {
 // --- comments ---
 
 function collectComments(ctx) {
+  const text = ctx.source.getFullText();
+  return commentRanges(ctx)
+    .map((range) => ({ line: lineOf(ctx, range.pos), text: text.slice(range.pos, range.end) }))
+    .sort((a, b) => a.line - b.line);
+}
+
+// commentRanges finds the comments around every node, as the compiler
+// attaches them.
+function commentRanges(ctx) {
   const { ts, source } = ctx;
   const text = source.getFullText();
   const seen = new Set();
@@ -350,7 +362,7 @@ function collectComments(ctx) {
     for (const range of ranges || []) {
       if (seen.has(range.pos)) continue;
       seen.add(range.pos);
-      out.push({ line: lineOf(ctx, range.pos), text: text.slice(range.pos, range.end) });
+      out.push(range);
     }
   };
   const visit = (node) => {
@@ -360,7 +372,228 @@ function collectComments(ctx) {
   };
   visit(source);
   take(ts.getLeadingCommentRanges(text, source.endOfFileToken.getFullStart()));
-  return out.sort((a, b) => a.line - b.line);
+  return out;
+}
+
+// --- runtime code ---
+
+// runtimeCode reports the lines that hold runtime code and a digest of it.
+// The compiler decides what is erased: the digest covers the tokens of the
+// comment-free output of ts.transpileModule with the project's options, and
+// a line is runtime when the output's source map points into it. The output
+// spells out every semicolon, so its tokens keep the line breaks that end a
+// statement while its layout, which follows the source's, stays out. Syntax
+// the output can drop while it still changes what runs is added from the
+// syntax tree (see keptNodes), and so are the comments the toolchain reads.
+// Without the compiler's pragmas, or when the file cannot be transpiled, the
+// facts are unknown (null).
+function runtimeCode(ctx, content) {
+  const { ts, source } = ctx;
+  const emit = transpile(ctx, content);
+  if (!emit || !(source.pragmas instanceof Map)) return null;
+  const output = ts.createSourceFile('output.jsx', emit.outputText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JSX);
+  if (output.parseDiagnostics && output.parseDiagnostics.length > 0) return null;
+  const digest = crypto.createHash('sha256');
+  forEachToken(ts, output, output, (token) => addToken(ts, output, token, digest));
+  const lines = mappedLines(JSON.parse(emit.sourceMapText).mappings);
+  multiLineLiterals(ctx, lines);
+  addField(digest, 'kept syntax');
+  for (const node of keptNodes(ctx)) {
+    forEachToken(ts, source, node, (token) => {
+      addToken(ts, source, token, digest);
+      addLines(ctx, token.getStart(source), token.getEnd(), lines);
+    });
+  }
+  for (const range of directiveComments(ctx)) {
+    addField(digest, 'directive');
+    addField(digest, content.slice(range.pos, range.end));
+    addLines(ctx, range.pos, range.end, lines);
+  }
+  const count = gitLineCount(content);
+  return { lines: [...lines].filter((line) => line <= count).sort((a, b) => a - b), digest: digest.digest('hex') };
+}
+
+function transpile(ctx, content) {
+  try {
+    return ctx.ts.transpileModule(content, { compilerOptions: emitOptions(ctx.options), fileName: ctx.file, reportDiagnostics: false });
+  } catch {
+    return null;
+  }
+}
+
+function emitOptions(options) {
+  return Object.assign({}, options, {
+    removeComments: true, sourceMap: true, inlineSourceMap: false, inlineSources: false,
+    sourceRoot: undefined, mapRoot: undefined, declaration: false, declarationMap: false,
+    emitDeclarationOnly: false, noEmit: false,
+  });
+}
+
+// addField hashes text prefixed with its length, so no two sequences of
+// fields share an encoding.
+function addField(hash, text) {
+  const data = Buffer.from(text, 'utf8');
+  const size = Buffer.alloc(8);
+  size.writeBigUInt64BE(BigInt(data.length));
+  hash.update(size);
+  hash.update(data);
+}
+
+function addToken(ts, source, token, hash) {
+  addField(hash, ts.SyntaxKind[token.kind]);
+  addField(hash, token.getText(source));
+}
+
+// forEachToken calls visit for every token of node, in order. JSDoc is
+// comment, not syntax.
+function forEachToken(ts, source, node, visit) {
+  if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return;
+  const children = node.getChildren(source);
+  if (children.length > 0) {
+    for (const child of children) forEachToken(ts, source, child, visit);
+  } else if (node.kind !== ts.SyntaxKind.EndOfFileToken) {
+    visit(node);
+  }
+}
+
+function addLines(ctx, start, end, lines) {
+  for (let line = lineOf(ctx, start); line <= lineOf(ctx, end); line++) lines.add(line);
+}
+
+// gitLineCount numbers lines as git does: only a line feed ends one.
+function gitLineCount(content) {
+  const breaks = content.split('\n').length - 1;
+  return content === '' || content.endsWith('\n') ? breaks : breaks + 1;
+}
+
+const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+// mappedLines decodes a source map's mappings (base64 VLQ) into the
+// one-based source lines they point at.
+function mappedLines(mappings) {
+  const lines = new Set();
+  let sourceLine = 0;
+  for (const segment of mappings.split(/[;,]/)) {
+    const fields = decodeVLQ(segment);
+    if (fields.length >= 4) {
+      sourceLine += fields[2];
+      lines.add(sourceLine + 1);
+    }
+  }
+  return lines;
+}
+
+function decodeVLQ(segment) {
+  const out = [];
+  let value = 0;
+  let shift = 0;
+  for (const char of segment) {
+    const digit = BASE64.indexOf(char);
+    if (digit < 0) throw new Error(`the compiler's source map holds ${JSON.stringify(char)}, which is not base64`);
+    value += (digit & 31) * 2 ** shift;
+    shift += 5;
+    if (digit & 32) continue;
+    out.push(value % 2 === 1 ? -(value - 1) / 2 : value / 2);
+    value = 0;
+    shift = 0;
+  }
+  return out;
+}
+
+// multiLineLiterals marks every line of a string, template or JSX text that
+// spans lines once the output maps any line of it: the source map points
+// only at its ends.
+function multiLineLiterals(ctx, lines) {
+  const { ts, source } = ctx;
+  const visit = (node) => {
+    if (isLiteralToken(ts, node)) {
+      const first = lineOf(ctx, node.getStart(source));
+      const last = lineOf(ctx, node.getEnd());
+      let mapped = false;
+      for (let line = first; line <= last; line++) mapped = mapped || lines.has(line);
+      if (mapped) addLines(ctx, node.getStart(source), node.getEnd(), lines);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+}
+
+function isLiteralToken(ts, node) {
+  return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) ||
+    ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isJsxText(node);
+}
+
+// keptNodes finds syntax that is runtime whatever this compilation emits:
+// value imports and exports, which the output drops when they look unused;
+// enums, const and declared ones included, whose values other files inline;
+// class fields that are not declare or abstract, which other options emit
+// (parameter properties always emit); and decorators, with the annotations
+// of what they decorate, which emitDecoratorMetadata turns into code. The
+// annotations of undecorated fields stay erased.
+function keptNodes(ctx) {
+  const { ts, source } = ctx;
+  const kept = [];
+  const visit = (node) => {
+    if (isKeptWhole(ts, node)) kept.push(node);
+    if (isRuntimeField(ts, node)) kept.push(...(node.modifiers || []), node.name, ...(node.initializer ? [node.initializer] : []));
+    if (hasDecorators(ts, node)) kept.push(...decoratedAnnotations(ts, node));
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return kept;
+}
+
+function isKeptWhole(ts, node) {
+  if (ts.isImportDeclaration(node)) return !(node.importClause && node.importClause.isTypeOnly);
+  if (ts.isImportEqualsDeclaration(node) || ts.isExportDeclaration(node)) return !node.isTypeOnly;
+  return ts.isExportAssignment(node) || ts.isEnumDeclaration(node);
+}
+
+function isRuntimeField(ts, node) {
+  return ts.isPropertyDeclaration(node) && !hasModifier(node, ts.SyntaxKind.DeclareKeyword) && !hasModifier(node, ts.SyntaxKind.AbstractKeyword);
+}
+
+function hasModifier(node, kind) {
+  return Boolean(node.modifiers && node.modifiers.some((m) => m.kind === kind));
+}
+
+// hasDecorators reads decorators where TypeScript 5 and later keep them, in
+// the modifiers, and where older versions did.
+function hasDecorators(ts, node) {
+  return hasModifier(node, ts.SyntaxKind.Decorator) || Boolean(node.decorators && node.decorators.length);
+}
+
+// decoratedAnnotations are a decorated node's decorators and the
+// annotations emitDecoratorMetadata records for it: its type, its
+// parameters' types, and for a class its constructor's parameter types.
+function decoratedAnnotations(ts, node) {
+  const owner = ts.isParameter(node) ? node.parent : node;
+  const signatures = [owner];
+  if (ts.isClassLike(owner)) signatures.push(...owner.members.filter((m) => ts.isConstructorDeclaration(m)));
+  const parts = [...(node.modifiers || []), ...(node.decorators || [])].filter((m) => ts.isDecorator(m));
+  for (const signature of signatures) {
+    if (signature.type) parts.push(signature.type);
+    for (const parameter of signature.parameters || []) {
+      if (parameter.type) parts.push(parameter.type);
+    }
+  }
+  return parts;
+}
+
+// directiveComments are the comments the toolchain reads: the compiler's
+// pragmas (triple-slash directives, @jsx and its siblings) and the source
+// map comments node reads at run time.
+function directiveComments(ctx) {
+  const ranges = [];
+  for (const value of ctx.source.pragmas.values()) {
+    for (const pragma of [].concat(value)) ranges.push(pragma.range);
+  }
+  const text = ctx.source.getFullText();
+  for (const range of commentRanges(ctx)) {
+    if (/^\/[/*][#@]\s*source(Mapping)?URL=/.test(text.slice(range.pos, range.end))) ranges.push(range);
+  }
+  return ranges;
 }
 
 // --- constructs ---
