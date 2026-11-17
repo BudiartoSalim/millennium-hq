@@ -134,10 +134,128 @@ walk gives the same answer here.
 
 ## Security requirements
 
-(Filled in from the threat model.)
+From the threat model (security-engineer, at 770fb6b). The attacker is an
+agent whose change is checked, or a hostile repository file.
+
+B1, the vanished cwd:
+
+- SR-1: The walk moves up only when the OS reports that the cwd does not
+  exist (`Lstat` gives `ErrNotExist`), never because of git's stderr. A
+  file, a permission error, a dangling symlink, or an existing directory git
+  rejects all block. *Test:* one table row per case.
+- SR-2: The walk starts only from an absolute, already-clean cwd. It moves
+  up one parent at a time, stops at the first ancestor that exists, and is
+  bounded. *Test:* a relative cwd blocks; a cwd with `..` blocks; the walk
+  never goes past the first existing ancestor.
+- SR-3: The root still comes from `git rev-parse --show-toplevel` in the
+  ancestor, and every event gets the decision it would get with that ancestor
+  as cwd. *Test:* hook tests with a real repository and a removed
+  `.claude/worktrees/x` cwd: Bash `cd <repo>` passes; an Edit of
+  `.millennium/config.json` is denied; Stop with a failing gate blocks.
+- SR-4: Hook tool paths are mapped without the engine process's working
+  directory. A relative path joins the event cwd. Symlinks are resolved on
+  both sides: the root, and the longest existing prefix of the target. A
+  path that cannot be mapped for any reason other than lying outside the
+  repository blocks (exit 2) and is never dropped. *Test:* with the process
+  cwd removed, an Edit of `<root>/.millennium/config.json` is denied, and so
+  is a relative `../../.millennium/config.json` from a removed worktree cwd. A
+  mapping error makes the hook exit 2. An Edit through a symlinked path to
+  the repository is denied.
+
+B2 and B3, runtime facts:
+
+- SR-5: Runtime facts have an explicit known or unknown state. They are
+  unknown when an analyzer does not report them, when a helper answer lacks
+  them, or when analysis fails. With unknown facts, every touched line counts
+  for `uncovered-change` and the file counts as changed for `tests-missing`.
+  Two unknown digests never compare equal. A known file with no runtime lines
+  is not the same as unknown. *Test:* a gate test with a fake analyzer that
+  reports no runtime facts; a decode test for an answer without the fields.
+- SR-6: The decoder rejects the whole helper answer when the digest is not
+  64 lowercase hex characters, or when a runtime line is not an integer from
+  1 to the content's line count. *Test:* a decode table.
+- SR-7: The digest is SHA-256 over an unambiguous, length-prefixed encoding
+  of each runtime token's kind and exact text. Hashing the compiler's emitted
+  output, as SR-12 allows, also meets this. *Test:* `["ab","c"]` and
+  `["a","bc"]` differ; `'a'` and `"a"` differ; docstrings that differ only in
+  text differ.
+- SR-8: The digest keeps every line break that changes meaning: Go's
+  automatic semicolons (including one caused by a multi-line `/* */`
+  comment), TypeScript's automatic semicolon insertion (including a line
+  break inside a comment), and Python's NEWLINE, INDENT and DEDENT. *Test:*
+  pairs that must differ: Go `return /* */ f()` and `return /*\n*/ f()`; TS
+  `return /* c */ v` and `return /*\n c */ v`; TS `return v` and
+  `return\nv`; Python `x = 1 \\\n-1` and `x = 1\n-1`.
+- SR-9: Comments that the toolchain reads count as runtime, both as tokens
+  and as lines:
+  - Go: `//go:` directives, `//line`, `// +build`, `//export`, `//extern`,
+    and the cgo preamble;
+  - TypeScript: JSX pragmas (`@jsx`, `@jsxFrag`, `@jsxImportSource`,
+    `@jsxRuntime`), triple-slash directives, `//# sourceMappingURL=` and
+    `//# sourceURL=`;
+  - Python: an encoding declaration.
+
+  *Test:* one per directive. Changing only the directive changes the digest,
+  and its line is a runtime line.
+- SR-10: Runtime facts are unknown for a Python file that declares an
+  encoding other than UTF-8, and for any helper-language content that is not
+  valid UTF-8. (A `utf-7` cookie turns `# +AAo-print(1)` into code that
+  runs.) *Test:* that utf-7 sample counts as changed and its line counts as
+  runtime.
+- SR-11: Classification comes from each language's own parser or scanner,
+  never from patterns. Anything not positively identified as a comment,
+  whitespace or erased type syntax is runtime. *Test:* these are runtime:
+  `"http://x" // c`, a regex literal containing `/*`, a template literal
+  with `//` and `${f()}`, Python `s = "# no"`, `let type = 1`, and a file
+  named `Foo.TSX`.
+- SR-12: TypeScript erasure is decided by the compiler. The recommended
+  approach takes the runtime digest and the runtime lines from the
+  comment-free `ts.transpileModule` emit and its source map. Either way,
+  these stay runtime: enums (const and `declare const` included), namespaces
+  with values, class fields unless `declare` or abstract, parameter
+  properties, decorators and the annotations of decorated members,
+  `import x = require()`, `export =`, `accessor`, and value imports. *Test:*
+  one per construct, plus a differential test: no line marked non-runtime
+  has a source-map mapping in `transpileModule` output, with
+  `emitDecoratorMetadata` and `useDefineForClassFields` both on and both off.
+- SR-13: Runtime lines use git's numbering, where only `\n` ends a line. Go
+  positions are physical (`PositionFor(pos, false)`), so `//line` cannot
+  shift them; the same goes for the function limits. A TypeScript or Python
+  file with a line terminator git does not count (a lone CR, U+2028,
+  U+2029) has unknown runtime lines. *Test:* one per language.
+- SR-14: The base is read with `ReadAt` at `Changes.Base`. A base that is not
+  found, cannot be read, or fails analysis counts as changed. Equal digests
+  take a file out of `tests-missing` only. Added files and audits are never
+  compared. *Test:* a fake SourceReader records the revision asked for. An
+  audit never calls `ReadAt`. A file with equal digests still gets
+  `uncovered-change` for a zero-hit runtime line.
+- SR-15: Each modified candidate costs at most one extra analysis. A helper
+  failure on the base counts as changed. *Test:* a counting fake gives at
+  most 2N analyses for N candidates.
+- SR-16: Node's coverage directives (`node:coverage disable`,
+  `node:coverage ignore next`) are suppressions, so they need a reason like
+  istanbul, c8 and v8 ones. *Test:* hygiene table rows.
+
+Accepted risks:
+
+- The project's own TypeScript package is trusted. It already decides what a
+  function is.
+- The Stop hook compares with HEAD, so walking to the main checkout of a
+  removed worktree exposes nothing that was hidden before.
+- Bundler hint comments (`/*#__PURE__*/`, webpack magic comments) count as
+  non-runtime. They change bundles, not test runs.
 
 ## Decision log
 
 | id | from | severity | finding | disposition | reason |
 |---|---|---|---|---|---|
+| TM-1 (SEC-1) | security-engineer | high | `RepoPath` uses `os.Getwd`, and the hook drops paths it cannot map. A hook process started in a removed cwd would let the guard see no paths after B1. | fix | SR-4, package P1b |
+| TM-2 (SEC-2) | security-engineer | high | The Python helper parses a str and ignores the PEP 263 encoding cookie, so code can hide in a utf-7 "comment". | fix | SR-10, package P2 |
+| TM-3 (SEC-3) | security-engineer | high | A generated-code marker comment (`DO NOT EDIT`, `@generated`) takes a tested-layer file out of the tests gate and the limits, and no gate notices it being added. | defer, pending the user's agreement | This predates the change and is outside the spec. A high security finding is not deferred without the user's agreement. Follow-up: report a newly added marker in a tested layer, or require generated files to be declared. |
+| TM-4 (SEC-4) | security-engineer | medium | `//line` directives shift Go analyzer positions, which bypasses the function-length limit and would skew runtime lines. | fix | SR-13, package P2 |
+| TM-5 (SEC-5) | security-engineer | medium | Node's `node:coverage` directives are not treated as suppressions. | fix | SR-16, package P2. Node is the coverage tool B2 is about. |
+| TM-6 (SEC-6) | security-engineer | medium | Guard path mapping resolves symlinks in the root but not in the target. | fix | SR-4, package P1b (same function) |
+| TM-7 (SEC-7) | security-engineer | low | Analyzer line numbers can disagree with git's on a lone CR, U+2028 or U+2029. | fix | SR-13, package P2 |
+| TM-8 | security-engineer | n/a | Should a `tests-missing` skipped because runtime code is unchanged appear in the JSON report? | defer | Useful for audit, but it changes the report format. Follow-up. |
+| P1-6 | software-engineer (P1) | n/a | A removed worktree's leftover `.git` file, pointing at a pruned gitdir, makes git say "not a git repository", so the hook passes with no guard. | defer | This predates the change and is outside the spec. It belongs with TM-3 in a follow-up on fail-open paths in repository discovery. |
 | L-1 | tech lead (stop hook during this run) | medium | An untracked nested checkout (an agent worktree in a repository that does not ignore `.claude/worktrees/`) is listed by git as `dir/`, and the engine blocks with "git reported a path outside the repository", which names neither the cause nor the fix. | fix here (ignore), defer (message) | This repository's `.gitignore` lacked the entry `config apply` writes for users; added. The engine message should say "nested git checkout; ignore it or remove it": follow-up issue to file. |
