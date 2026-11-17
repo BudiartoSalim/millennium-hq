@@ -44,6 +44,8 @@ schema/                      JSON Schemas of a project's .millennium/config.json
                               convention pack's pack.json
 .millennium/config.json       this repository's own config: the engine audits itself
 scripts/verify.sh             the full local check
+scripts/check-modes.sh        fails unless plugin/scripts/ is executable in git (verify.sh and
+                              release-build.sh run it; scripts/test-check-modes.sh tests it)
 scripts/release-build.sh      reproducible release builds and the engine lock
 scripts/test-launcher.sh      the launcher's tests (verify.sh runs them)
 docs/                         user documentation; docs/design.md is the design
@@ -160,6 +162,10 @@ export GOCACHE="$TMPDIR/go-cache" GOMODCACHE="$TMPDIR/go-mod" GOPATH="$TMPDIR/go
   ...). Inside the sandbox they appear as untracked files; they are not on disk.
   Never delete or stage them: stage explicit paths, never `git add -A`. The
   engine skips device files for the same reason.
+- On a Windows drive under WSL, `core.fileMode` is false: every file looks
+  executable, and git never records the bit. A new file under
+  `plugin/scripts/` needs `git update-index --chmod=+x <file>`;
+  `scripts/check-modes.sh` fails without it.
 - `CLAUDE.md` only imports this file: a `CLAUDE.md` in a directory above the
   repository stops Claude Code from loading `AGENTS.md` on its own.
 

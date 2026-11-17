@@ -21,7 +21,7 @@ func StrictModeMissing(content []byte) []string {
 		return nil
 	}
 	required := []string{"errexit", "nounset"}
-	if dialect == "bash" || dialect == "ksh" {
+	if needsPipefail(dialect) {
 		required = append(required, "pipefail")
 	}
 	enabled := enabledOptions(content)
@@ -33,6 +33,17 @@ func StrictModeMissing(content []byte) []string {
 	}
 	return missing
 }
+
+// StrictModeCommand is the command that switches strict mode on in the
+// script's dialect.
+func StrictModeCommand(content []byte) string {
+	if dialect, _ := ShellDialect(content); needsPipefail(dialect) {
+		return "set -euo pipefail"
+	}
+	return "set -eu"
+}
+
+func needsPipefail(dialect string) bool { return dialect == "bash" || dialect == "ksh" }
 
 // enabledOptions reads the `set` commands near the top of a script:
 // `set -euo pipefail`, `set -Eeuo pipefail`, `set -o errexit -o nounset`.

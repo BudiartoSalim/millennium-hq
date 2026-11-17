@@ -34,10 +34,18 @@ launcher="$work/plugin/scripts/millennium-code-qc"
 write_lock() {
 	printf 'version 9.9.9\nurl file://%s/release\nsha256 linux-amd64 %s\n' "$work" "$1" >"$work/plugin/code-qc.lock"
 }
-run() { env -u MILLENNIUM_CODE_QC -u CLAUDE_PLUGIN_DATA MILLENNIUM_PLATFORM=linux-amd64 "$launcher" "$@"; }
+isolated() { env -u MILLENNIUM_CODE_QC -u CLAUDE_PLUGIN_DATA MILLENNIUM_PLATFORM=linux-amd64 "$@"; }
+run() { isolated "$launcher" "$@"; }
+# The hooks start the launcher with /bin/sh, so a lost execute bit cannot
+# stop them.
+run_sh() { isolated /bin/sh "$launcher" "$@"; }
 
 write_lock "$(sha "$work/release/millennium-code-qc-linux-amd64")"
-check "downloads, verifies and runs the release" 0 "fake engine: gate --tier fast" run gate --tier fast
+chmod -x "$launcher"
+check "downloads, verifies and runs the release through /bin/sh, without its execute bit" 0 "fake engine: hook" run_sh hook
+check "runs the cached copy through /bin/sh too" 0 "fake engine: hook" run_sh hook
+chmod +x "$launcher"
+check "runs by its path" 0 "fake engine: gate --tier fast" run gate --tier fast
 check "keeps it beside the plugin" 0 "" test -x "$work/plugin/.code-qc/9.9.9/millennium-code-qc-linux-amd64"
 rm "$work/release/millennium-code-qc-linux-amd64"
 check "runs the cached copy without the network" 0 "fake engine: version" run version

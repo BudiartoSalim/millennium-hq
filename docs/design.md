@@ -744,7 +744,7 @@ millennium-hq/
                                  are embedded in it, so they cannot be edited
                                  on disk
   schema/                        JSON Schema of the project config
-  scripts/                       verify, launcher tests, reproducible release builds
+  scripts/                       verify, file-mode check, launcher tests, reproducible release builds
   .github/workflows/             the engine release workflow
   docs/
   AGENTS.md                      rules for developing this plugin
@@ -799,8 +799,9 @@ or sh shebang (such as `bin/*`).
   once it is stable, or letting a project point the helper at a TypeScript 6
   install.
 
-- **Windows** is supported through Git Bash (the hooks run in shell form, and
-  the launcher recognises Git Bash's `uname`), but has not been tried on a
+- **Windows** is supported through Git Bash (the hooks run in shell form,
+  starting the launcher with `/bin/sh`, and the launcher recognises Git Bash's
+  `uname`), but has not been tried on a
   real Windows machine. Without Git Bash, Claude Code runs shell-form hooks
   in PowerShell and the launcher cannot start: the guard then blocks every
   tool call (it fails closed), while stop hooks cannot block.

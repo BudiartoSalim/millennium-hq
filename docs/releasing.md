@@ -33,7 +33,10 @@ so a published binary can only be one built from reviewed source.
    bash scripts/release-build.sh 0.1.0 --lock
    ```
 
-   The second command writes `plugin/code-qc.lock`. Bump `version` in
+   The second command writes `plugin/code-qc.lock`. Both refuse to run
+   unless the plugin's scripts are executable in git
+   (`scripts/check-modes.sh`): users install from a clone and get the mode
+   git records, whatever your checkout shows. Bump `version` in
    `plugin/.claude-plugin/plugin.json` too, so users' plugins update to the
    release that names this engine.
 

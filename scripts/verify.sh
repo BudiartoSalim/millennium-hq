@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full local check for this repository: gofmt, go vet for every release target
+# Full local check for this repository: the plugin scripts' file modes, gofmt, go vet for every release target
 # OS, the engine's test suite, the launcher's and the pi extension's tests, and
 # the engine auditing its own source. Run it
 # before calling a change done.
@@ -8,6 +8,10 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root/code-qc"
+
+echo "== file modes"
+bash "$root/scripts/test-check-modes.sh"
+bash "$root/scripts/check-modes.sh"
 
 # The TypeScript analyzer's tests skip without their fixture, and a skip is
 # not a pass: refuse to start rather than report an incomplete run as done.

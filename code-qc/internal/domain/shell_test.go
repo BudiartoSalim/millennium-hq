@@ -38,3 +38,17 @@ func repeatLine(line string, n int) string {
 	}
 	return out
 }
+
+func TestStrictModeCommand(t *testing.T) {
+	tests := map[string]string{
+		"#!/bin/bash\n":         "set -euo pipefail",
+		"#!/usr/bin/env ksh\n":  "set -euo pipefail",
+		"#!/bin/sh\n":           "set -eu",
+		"#!/usr/bin/env dash\n": "set -eu",
+	}
+	for content, want := range tests {
+		if got := StrictModeCommand([]byte(content)); got != want {
+			t.Errorf("StrictModeCommand(%q) = %q, want %q", content, got, want)
+		}
+	}
+}
