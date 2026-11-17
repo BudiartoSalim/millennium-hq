@@ -34,6 +34,11 @@ func TestSuppressionFindings(t *testing.T) {
 		{"reason on the line above", comments("// The SDK returns any for this callback.", "// eslint-disable-next-line @typescript-eslint/no-explicit-any"), 0},
 		{"directive above is not a reason", comments("// eslint-disable-next-line a", "// eslint-disable-next-line b"), 2},
 		{"ordinary comment", comments("// nothing to see here"), 0},
+		{"node coverage disable bare", comments("/* node:coverage disable */"), 1},
+		{"node coverage ignore next bare", comments("/* node:coverage ignore next */"), 1},
+		{"node coverage ignore next count bare", comments("// node:coverage ignore next 3"), 1},
+		{"node coverage ignore with reason", comments("/* node:coverage ignore next -- the platform branch runs only on Windows */"), 0},
+		{"node coverage enable is no suppression", comments("/* node:coverage enable */"), 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

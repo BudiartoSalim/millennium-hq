@@ -14,7 +14,7 @@ const minReasonLetters = 10
 var (
 	// suppression matches the directives that switch a checker off for a
 	// line, a block or a file, across the supported languages.
-	suppression = regexp.MustCompile(`eslint-disable(-next-line|-line)?|@ts-(ignore|expect-error|nocheck)|//\s*nolint|\bNOLINT\b|lint:ignore|#\s*nosec|//\s*#nosec|#\s*noqa|#\s*type:\s*ignore|#\s*pragma:\s*no\s*cover|shellcheck\s+disable=|(istanbul|c8|v8)\s+ignore`)
+	suppression = regexp.MustCompile(`eslint-disable(-next-line|-line)?|@ts-(ignore|expect-error|nocheck)|//\s*nolint|\bNOLINT\b|lint:ignore|#\s*nosec|//\s*#nosec|#\s*noqa|#\s*type:\s*ignore|#\s*pragma:\s*no\s*cover|shellcheck\s+disable=|(istanbul|c8|v8)\s+ignore|node:coverage\s+(disable|ignore\s+next)`)
 	// todo matches a work-left-to-do marker word at the start of a comment,
 	// or anywhere when a colon or an opening parenthesis follows it. The same
 	// word inside prose, or hyphenated, is not a marker.
