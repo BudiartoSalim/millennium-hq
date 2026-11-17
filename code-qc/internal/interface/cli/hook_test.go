@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -278,5 +280,130 @@ func TestBriefingNamesTheGuidesThatDoNotFit(t *testing.T) {
 	}
 	if plain := briefing("", domain.Config{}); strings.Contains(plain, "Conventions") {
 		t.Fatalf("no conventions, no guides: %s", plain)
+	}
+}
+
+// vanishedTree is a DepsFactory over a made-up directory tree: a directory
+// missing reports does not exist, one in failing fails as given, and any
+// other opens. It records the directories asked for and the releases.
+type vanishedTree struct {
+	missing func(dir string) bool
+	failing map[string]error
+	guard   *fakeGuard
+	visited []string
+	closed  int
+}
+
+func (v *vanishedTree) deps(_ context.Context, dir string) (Deps, error) {
+	v.visited = append(v.visited, dir)
+	release := func() { v.closed++ }
+	if v.missing(dir) {
+		return Deps{Close: release}, fmt.Errorf("%s: %w", dir, ErrNoDirectory)
+	}
+	if err := v.failing[dir]; err != nil {
+		return Deps{Close: release}, err
+	}
+	return Deps{Guard: v.guard, Stop: &fakeStop{}, RepoPath: repoPath, Close: release}, nil
+}
+
+func missingDirs(dirs ...string) func(string) bool {
+	return func(dir string) bool { return slices.Contains(dirs, dir) }
+}
+
+func missingEverywhere(string) bool { return true }
+
+// vanishedCase is one PreToolUse event in a cwd that may no longer exist.
+type vanishedCase struct {
+	name     string
+	cwd      string
+	missing  func(string) bool
+	failing  map[string]error
+	tool     string
+	input    map[string]any
+	deny     bool
+	wantCode int
+	visited  []string
+	wantOut  string
+}
+
+// A hook event whose cwd was removed, such as a deleted worktree, is
+// evaluated in the nearest parent that exists. The walk moves up only past
+// a directory that does not exist, stops at the first one that does, and
+// needs an absolute, clean cwd; anything else blocks.
+func TestHookInAVanishedCwd(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	worktrees := filepath.Join(repo, ".claude", "worktrees")
+	worktree := filepath.Join(worktrees, "agent")
+	deep := filepath.Join(worktree, "src", "pkg")
+	unclean := worktree + string(filepath.Separator) + ".." + string(filepath.Separator) + "other"
+	relative := filepath.Join("repo", "gone")
+	protected := filepath.Join(repo, ".millennium", "config.json")
+	tests := []vanishedCase{
+		{name: "an allowed command runs in the nearest existing parent", cwd: deep,
+			missing: missingDirs(deep, filepath.Dir(deep), worktree),
+			tool:    "Bash", input: map[string]any{"command": "cd " + repo},
+			visited: []string{deep, filepath.Dir(deep), worktree, worktrees}},
+		{name: "the guard still denies there", cwd: worktree, missing: missingDirs(worktree),
+			tool: "Edit", input: map[string]any{"file_path": protected}, deny: true,
+			visited: []string{worktree, worktrees}, wantOut: `"permissionDecision":"deny"`},
+		{name: "a parent outside any repository passes", cwd: worktree, missing: missingDirs(worktree),
+			failing: map[string]error{worktrees: fmt.Errorf("wrapped: %w", ErrNoRepository)},
+			tool:    "Bash", visited: []string{worktree, worktrees}},
+		{name: "the first existing parent decides", cwd: worktree, missing: missingDirs(worktree),
+			failing: map[string]error{worktrees: errors.New("detected dubious ownership")},
+			tool:    "Bash", wantCode: 2, visited: []string{worktree, worktrees}, wantOut: "dubious ownership"},
+		{name: "any other failure does not walk", cwd: worktree, missing: missingDirs(),
+			failing: map[string]error{worktree: errors.New("cannot change to it: Permission denied")},
+			tool:    "Bash", wantCode: 2, visited: []string{worktree}, wantOut: "Permission denied"},
+		{name: "a relative cwd does not walk", cwd: relative, missing: missingEverywhere,
+			tool: "Bash", wantCode: 2, visited: []string{relative}, wantOut: "does not exist"},
+		{name: "an unclean cwd does not walk", cwd: unclean, missing: missingEverywhere,
+			tool: "Bash", wantCode: 2, visited: []string{unclean}, wantOut: "does not exist"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertVanishedCwd(t, tt)
+		})
+	}
+}
+
+func assertVanishedCwd(t *testing.T, tt vanishedCase) {
+	t.Helper()
+	tree := &vanishedTree{missing: tt.missing, failing: tt.failing, guard: &fakeGuard{decision: domain.GuardDecision{Deny: tt.deny, Reason: "protected"}}}
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader(hookEvent(map[string]any{"hook_event_name": "PreToolUse", "cwd": tt.cwd, "tool_name": tt.tool, "tool_input": tt.input}))
+	code := New("1.2.3", stdin, &stdout, &stderr, tree.deps).Run(t.Context(), []string{"hook"})
+	if code != tt.wantCode || !slices.Equal(tree.visited, tt.visited) {
+		t.Fatalf("exit %d (want %d), visited %q\nwant %q\nstderr %q", code, tt.wantCode, tree.visited, tt.visited, stderr.String())
+	}
+	out := stdout.String() + stderr.String()
+	if tt.wantOut == "" && out != "" || !strings.Contains(out, tt.wantOut) {
+		t.Fatalf("output %q, want %q", out, tt.wantOut)
+	}
+	if tree.closed != len(tree.visited) {
+		t.Fatalf("released %d of %d dependency sets", tree.closed, len(tree.visited))
+	}
+	opened := tt.failing[tt.visited[len(tt.visited)-1]] == nil && !tt.missing(tt.visited[len(tt.visited)-1])
+	if opened && tree.guard.got.Tool != tt.tool {
+		t.Fatalf("the guard got %+v, want the %s call", tree.guard.got, tt.tool)
+	}
+}
+
+// A cwd whose parents are all gone, up to the root, stops after a bounded
+// number of steps and blocks.
+func TestHookWalksABoundedNumberOfParents(t *testing.T) {
+	cwd := t.TempDir()
+	for range maxVanishedLevels + 5 {
+		cwd = filepath.Join(cwd, "d")
+	}
+	tree := &vanishedTree{missing: missingEverywhere}
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader(hookEvent(map[string]any{"hook_event_name": "Stop", "cwd": cwd}))
+	code := New("1.2.3", stdin, &stdout, &stderr, tree.deps).Run(t.Context(), []string{"hook"})
+	if code != 2 || len(tree.visited) != maxVanishedLevels+1 || !strings.Contains(stderr.String(), "nearest parents") {
+		t.Fatalf("exit %d after %d directories, stderr %q", code, len(tree.visited), stderr.String())
+	}
+	if tree.closed != len(tree.visited) {
+		t.Fatalf("released %d of %d dependency sets", tree.closed, len(tree.visited))
 	}
 }

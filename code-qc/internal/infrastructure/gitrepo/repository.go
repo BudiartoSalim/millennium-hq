@@ -32,17 +32,32 @@ type Repository struct {
 // ErrNotRepository means the directory is not inside a git working tree.
 var ErrNotRepository = errors.New("not inside a git repository")
 
+// ErrNoDirectory means the directory does not exist, such as a worktree
+// removed while a session was still in it.
+var ErrNoDirectory = errors.New("the directory does not exist")
+
 // Open finds the repository containing dir.
 func Open(ctx context.Context, dir string) (*Repository, error) {
 	out, err := run(ctx, dir, "rev-parse", "--show-toplevel")
-	var gitErr *gitError
-	if errors.As(err, &gitErr) && strings.Contains(gitErr.stderr, "not a git repository") {
-		return nil, fmt.Errorf("%s: %w", dir, ErrNotRepository)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("find repository root: %w", err)
+		return nil, openError(dir, err)
 	}
 	return &Repository{root: trimLine(out)}, nil
+}
+
+// openError says why git could not find a repository in dir. Only a dir
+// that is not there at all, looked at without following a final symlink,
+// is ErrNoDirectory: a file, a dangling symlink, or a directory git cannot
+// enter or use stays an error of its own.
+func openError(dir string, err error) error {
+	var gitErr *gitError
+	if errors.As(err, &gitErr) && strings.Contains(gitErr.stderr, "not a git repository") {
+		return fmt.Errorf("%s: %w", dir, ErrNotRepository)
+	}
+	if _, statErr := os.Lstat(dir); errors.Is(statErr, fs.ErrNotExist) {
+		return fmt.Errorf("%s: %w", dir, ErrNoDirectory)
+	}
+	return fmt.Errorf("find repository root: %w", err)
 }
 
 // Root is the absolute path of the working tree.

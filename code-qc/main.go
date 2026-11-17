@@ -125,7 +125,7 @@ func newAnalyzers(root, node string) (map[domain.Language]port.Analyzer, func())
 
 // openRepository opens the repository containing dir, the current directory
 // when dir is empty, and reports a directory outside any repository as
-// cli.ErrNoRepository.
+// cli.ErrNoRepository and one that does not exist as cli.ErrNoDirectory.
 func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error) {
 	if dir == "" {
 		wd, err := os.Getwd()
@@ -135,8 +135,11 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 		dir = wd
 	}
 	repo, err := gitrepo.Open(ctx, dir)
-	if errors.Is(err, gitrepo.ErrNotRepository) {
+	switch {
+	case errors.Is(err, gitrepo.ErrNotRepository):
 		return nil, fmt.Errorf("%w: %v", cli.ErrNoRepository, err)
+	case errors.Is(err, gitrepo.ErrNoDirectory):
+		return nil, fmt.Errorf("%w: %v", cli.ErrNoDirectory, err)
 	}
 	return repo, err
 }
