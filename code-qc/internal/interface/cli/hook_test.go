@@ -407,3 +407,97 @@ func TestHookWalksABoundedNumberOfParents(t *testing.T) {
 		t.Fatalf("released %d of %d dependency sets", tree.closed, len(tree.visited))
 	}
 }
+
+// pathMapper is a fake Deps.RepoPath: mapped paths map, failing ones fail as
+// given, and any other is outside the repository. It records what it was
+// asked.
+type pathMapper struct {
+	mapped map[string]string
+	errs   map[string]error
+	asked  []string
+}
+
+func (m *pathMapper) repoPath(arg string) (string, error) {
+	m.asked = append(m.asked, arg)
+	if err := m.errs[arg]; err != nil {
+		return "", err
+	}
+	if p, ok := m.mapped[arg]; ok {
+		return p, nil
+	}
+	return "", fmt.Errorf("%s: %w", arg, ErrOutsideRepository)
+}
+
+// guardedCase is one PreToolUse event whose path the hook maps for the guard.
+type guardedCase struct {
+	name     string
+	cwd      string
+	path     string
+	mapped   map[string]string
+	errs     map[string]error
+	want     []string
+	asked    []string
+	wantCode int
+	wantErr  string
+}
+
+// The guard sees each path a tool names both as named and with symlinks
+// resolved, never through the process's working directory. A path outside
+// the repository either way is left out; a path that cannot be mapped for
+// any other reason blocks the call.
+func TestPreToolUseMapsPathsForTheGuard(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "repo")
+	protected := filepath.Join(root, ".millennium", "config.json")
+	alias, rules := filepath.Join(root, "alias.json"), filepath.Join(root, "rules", "config.json")
+	throughLink := filepath.Join(parent, "repo-link", ".millennium", "config.json")
+	elsewhere := filepath.Join(parent, "elsewhere", "x.go")
+	gone := filepath.Join(root, "worktrees", "agent")
+	tests := []guardedCase{
+		{name: "a path in the repository is checked once", cwd: root, path: protected,
+			mapped: map[string]string{protected: ".millennium/config.json"}, want: []string{".millennium/config.json"}, asked: []string{protected}},
+		{name: "a symlink is checked as named and as resolved", cwd: root, path: alias,
+			mapped: map[string]string{alias: ".millennium/config.json"}, want: []string{"alias.json", ".millennium/config.json"}, asked: []string{alias}},
+		{name: "a path that resolves outside is checked as named", cwd: root, path: rules,
+			want: []string{"rules/config.json"}, asked: []string{rules}},
+		{name: "a symlink to the repository is checked as resolved", cwd: root, path: throughLink,
+			mapped: map[string]string{throughLink: ".millennium/config.json"}, want: []string{".millennium/config.json"}, asked: []string{throughLink}},
+		{name: "a path outside either way is left out", cwd: root, path: elsewhere, asked: []string{elsewhere}},
+		{name: "a relative path joins the removed cwd", cwd: gone, path: filepath.Join("..", "..", ".millennium", "config.json"),
+			mapped: map[string]string{protected: ".millennium/config.json"}, want: []string{".millennium/config.json"}, asked: []string{protected}},
+		{name: "a path that cannot be mapped blocks", cwd: root, path: protected,
+			errs:  map[string]error{protected: errors.New("inspect " + protected + ": permission denied")},
+			asked: []string{protected}, wantCode: 2, wantErr: "cannot check the tool's path, so the call is blocked: inspect"},
+		{name: "a relative cwd blocks", cwd: filepath.Join("relative", "dir"), path: "a.go",
+			wantCode: 2, wantErr: "is not absolute"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertGuardedPaths(t, root, tt)
+		})
+	}
+}
+
+func assertGuardedPaths(t *testing.T, root string, tt guardedCase) {
+	t.Helper()
+	mapper := &pathMapper{mapped: tt.mapped, errs: tt.errs}
+	guard := &fakeGuard{}
+	factory := func(context.Context, string) (Deps, error) {
+		return Deps{Guard: guard, Root: root, RepoPath: mapper.repoPath}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader(hookEvent(map[string]any{"hook_event_name": "PreToolUse", "cwd": tt.cwd, "tool_name": "Edit", "tool_input": map[string]any{"file_path": tt.path}}))
+	code := New("1.2.3", stdin, &stdout, &stderr, factory).Run(t.Context(), []string{"hook"})
+	if code != tt.wantCode || !strings.Contains(stderr.String(), tt.wantErr) || !slices.Equal(mapper.asked, tt.asked) {
+		t.Fatalf("exit %d (want %d), asked %q (want %q), stderr %q (want %q)", code, tt.wantCode, mapper.asked, tt.asked, stderr.String(), tt.wantErr)
+	}
+	if tt.wantCode != 0 {
+		if guard.got.Tool != "" {
+			t.Fatalf("a blocked call reached the guard: %+v", guard.got)
+		}
+		return
+	}
+	if guard.got.Tool != "Edit" || !slices.Equal(guard.got.Paths, tt.want) {
+		t.Fatalf("the guard got %+v, want paths %q", guard.got, tt.want)
+	}
+}
