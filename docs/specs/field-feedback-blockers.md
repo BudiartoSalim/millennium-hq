@@ -140,3 +140,4 @@ walk gives the same answer here.
 
 | id | from | severity | finding | disposition | reason |
 |---|---|---|---|---|---|
+| L-1 | tech lead (stop hook during this run) | medium | An untracked nested checkout (an agent worktree in a repository that does not ignore `.claude/worktrees/`) is listed by git as `dir/`, and the engine blocks with "git reported a path outside the repository", which names neither the cause nor the fix. | fix here (ignore), defer (message) | This repository's `.gitignore` lacked the entry `config apply` writes for users; added. The engine message should say "nested git checkout; ignore it or remove it": follow-up issue to file. |
