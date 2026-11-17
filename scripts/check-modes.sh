@@ -21,8 +21,11 @@ in_git() { git -C "$root" -c core.fsmonitor=false "$@"; }
 staged="$(in_git ls-files --stage -- plugin/scripts)" || unchecked "git cannot list the staged files"
 [ -n "$staged" ] || unchecked "git lists no files under plugin/scripts"
 committed=""
-# A repository without commits has nothing committed to check yet.
-if in_git rev-parse --verify --quiet HEAD >/dev/null; then
+# Only a branch with no commits yet has nothing committed to check; any
+# other HEAD git cannot read blocks.
+if head_ref="$(in_git symbolic-ref -q HEAD)" && ! in_git show-ref --verify --quiet "$head_ref"; then
+	:
+else
 	committed="$(in_git ls-tree -r HEAD -- plugin/scripts)" || unchecked "git cannot list the committed files"
 fi
 

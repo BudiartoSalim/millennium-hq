@@ -36,9 +36,10 @@ check "refuses a repository with no plugin scripts" 1 "lists no files" "" "$repo
 
 printf '#!/bin/sh\n' >"$repo/plugin/scripts/launcher"
 printf '#!/bin/sh\n' >"$repo/plugin/scripts/other tool"
-ln -s launcher "$repo/plugin/scripts/alias"
 git -C "$repo" add --chmod=+x -- plugin/scripts/launcher "plugin/scripts/other tool"
-git -C "$repo" add -- plugin/scripts/alias
+# A link, made in the index alone: Git Bash's ln -s copies instead.
+link="$(printf 'launcher' | git -C "$repo" hash-object -w --stdin)"
+git -C "$repo" update-index --add --cacheinfo "120000,$link,plugin/scripts/alias"
 check "passes staged executables before the first commit, and a link" 0 "" "" "$repo"
 
 git -C "$repo" update-index --chmod=-x -- "plugin/scripts/other tool"
@@ -51,6 +52,11 @@ check "names a script committed without the bit, even when staged with it" 1 "^p
 
 git -C "$repo" -c user.name=t -c user.email=t@example.com commit --quiet -m fix
 check "passes once the bit is committed" 0 "" "" "$repo"
+
+cp "$repo/.git/HEAD" "$work/HEAD"
+printf '0000000000000000000000000000000000000001\n' >"$repo/.git/HEAD"
+check "blocks when HEAD names no commit" 1 "git cannot list the committed files" "" "$repo"
+cp "$work/HEAD" "$repo/.git/HEAD"
 
 mkdir -p "$work/bin"
 printf '#!/bin/sh\nexit 2\n' >"$work/bin/grep"

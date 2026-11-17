@@ -106,10 +106,9 @@ func (g *Shell) strictMode(ctx context.Context, base string, file domain.Changed
 	// The finding names where an exception goes, since a millennium:allow
 	// comment in the file does not cover it.
 	return []domain.Finding{{Rule: rule, File: file.Path, Line: 1, Message: fmt.Sprintf(
-		"executable scripts must enable %s near the top (%s); no inline waiver covers this rule: a script that must not use it, "+
-			"such as a test harness that enables errexit inside each test, needs a disable entry for %s/%s limited to its paths "+
-			"in the config, which the user applies",
-		strings.Join(missing, ", "), domain.StrictModeCommand(content), g.Name(), rule)}}, nil
+		"executable scripts must enable %s near the top (%s); for a script that must not, such as a test harness, "+
+			"the user can disable %s/%s for its paths in the config, since no inline waiver covers it",
+		strings.Join(missing, ", "), domain.StrictModeCommand(missing), g.Name(), rule)}}, nil
 }
 
 func (g *Shell) lint(ctx context.Context, base string, file domain.ChangedFile, content []byte) ([]domain.Finding, error) {

@@ -165,7 +165,8 @@ export GOCACHE="$TMPDIR/go-cache" GOMODCACHE="$TMPDIR/go-mod" GOPATH="$TMPDIR/go
 - On a Windows drive under WSL, `core.fileMode` is false: every file looks
   executable, and git never records the bit. A new file under
   `plugin/scripts/` needs `git update-index --chmod=+x <file>`;
-  `scripts/check-modes.sh` fails without it.
+  `scripts/check-modes.sh` fails without it, and also until a fixed mode is
+  committed, since users get the committed one.
 - `CLAUDE.md` only imports this file: a `CLAUDE.md` in a directory above the
   repository stops Claude Code from loading `AGENTS.md` on its own.
 

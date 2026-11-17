@@ -40,15 +40,19 @@ func repeatLine(line string, n int) string {
 }
 
 func TestStrictModeCommand(t *testing.T) {
-	tests := map[string]string{
-		"#!/bin/bash\n":         "set -euo pipefail",
-		"#!/usr/bin/env ksh\n":  "set -euo pipefail",
-		"#!/bin/sh\n":           "set -eu",
-		"#!/usr/bin/env dash\n": "set -eu",
+	tests := []struct {
+		missing []string
+		want    string
+	}{
+		{[]string{"errexit", "nounset", "pipefail"}, "set -euo pipefail"},
+		{[]string{"errexit", "nounset"}, "set -eu"},
+		{[]string{"pipefail"}, "set -o pipefail"},
+		{[]string{"nounset", "pipefail"}, "set -uo pipefail"},
+		{[]string{"errexit"}, "set -e"},
 	}
-	for content, want := range tests {
-		if got := StrictModeCommand([]byte(content)); got != want {
-			t.Errorf("StrictModeCommand(%q) = %q, want %q", content, got, want)
+	for _, tt := range tests {
+		if got := StrictModeCommand(tt.missing); got != tt.want {
+			t.Errorf("StrictModeCommand(%q) = %q, want %q", tt.missing, got, tt.want)
 		}
 	}
 }

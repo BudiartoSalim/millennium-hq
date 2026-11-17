@@ -3,6 +3,7 @@ package domain
 import (
 	"bufio"
 	"bytes"
+	"slices"
 	"strings"
 )
 
@@ -34,13 +35,23 @@ func StrictModeMissing(content []byte) []string {
 	return missing
 }
 
-// StrictModeCommand is the command that switches strict mode on in the
-// script's dialect.
-func StrictModeCommand(content []byte) string {
-	if dialect, _ := ShellDialect(content); needsPipefail(dialect) {
-		return "set -euo pipefail"
+// StrictModeCommand is the set command that enables the missing options
+// StrictModeMissing listed: "set -euo pipefail", or "set -o pipefail" for a
+// script that already has "set -eu".
+func StrictModeCommand(missing []string) string {
+	flags := ""
+	for _, option := range missing {
+		switch option {
+		case "errexit":
+			flags += "e"
+		case "nounset":
+			flags += "u"
+		}
 	}
-	return "set -eu"
+	if !slices.Contains(missing, "pipefail") {
+		return "set -" + flags
+	}
+	return "set -" + flags + "o pipefail"
 }
 
 func needsPipefail(dialect string) bool { return dialect == "bash" || dialect == "ksh" }

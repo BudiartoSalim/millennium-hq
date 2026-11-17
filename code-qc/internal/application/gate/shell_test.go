@@ -78,7 +78,7 @@ func TestShellGate(t *testing.T) {
 			lint:   map[string][]domain.LintIssue{"scripts/a.sh": sc2086},
 		}, "shell/syntax-error", nil},
 		{"no strict mode, and where an exception goes", "scripts/a.sh", "#!/bin/bash\necho hi\n", &fakeShellTools{}, "shell/strict-mode",
-			[]string{"errexit, nounset, pipefail near the top (set -euo pipefail)", "no inline waiver", "disable entry for shell/strict-mode limited to its paths"}},
+			[]string{"errexit, nounset, pipefail near the top (set -euo pipefail)", "no inline waiver", "disable shell/strict-mode for its paths"}},
 		{"no strict mode in sh", "scripts/a.sh", "#!/bin/sh\necho hi\n", &fakeShellTools{}, "shell/strict-mode", []string{"enable errexit, nounset near the top (set -eu)"}},
 		{"shellcheck finding", "scripts/a.sh", strictScript, &fakeShellTools{lint: map[string][]domain.LintIssue{"scripts/a.sh": sc2086}}, "shell/shellcheck", nil},
 		{"extensionless script by shebang", "scripts/bin/deploy", "#!/bin/bash\necho hi\n", &fakeShellTools{}, "shell/strict-mode", nil},
