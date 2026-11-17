@@ -40,7 +40,7 @@ func (a *App) hook(ctx context.Context) int {
 		fmt.Fprintf(a.stderr, "millennium-code-qc: %v\n", err)
 		return exitBlocked
 	}
-	err = a.withDepsIn(ctx, in.Cwd, func(deps Deps) error {
+	err = a.withHookDeps(ctx, in.Cwd, func(deps Deps) error {
 		switch in.Event {
 		case "PreToolUse":
 			return a.preToolUse(ctx, deps, in)
@@ -59,6 +59,49 @@ func (a *App) hook(ctx context.Context) int {
 		return exitBlocked
 	}
 	return exitPass
+}
+
+// ErrNoDirectory is what a DepsFactory returns when dir does not exist.
+var ErrNoDirectory = errors.New("the directory does not exist")
+
+// maxVanishedLevels bounds the walk up from a hook event's cwd that no
+// longer exists. A removed worktree is one level; a session deep inside one
+// a few more.
+const maxVanishedLevels = 32
+
+// withHookDeps is withDepsIn for the event's cwd.
+func (a *App) withHookDeps(ctx context.Context, cwd string, use func(Deps) error) error {
+	deps, err := a.hookDeps(ctx, cwd)
+	if deps.Close != nil {
+		defer deps.Close()
+	}
+	if err != nil {
+		return err
+	}
+	return use(deps)
+}
+
+// hookDeps builds the dependencies for the event's cwd. A cwd that no longer
+// exists, such as a worktree removed while the session was in it, is
+// evaluated in its nearest existing parent; otherwise every tool call, cd
+// included, would block. Each step is the lexical parent of an absolute,
+// clean path, so the walk reaches only directories the event names, and it
+// moves up only past a directory that does not exist: the first one that
+// does exist decides, and any other failure blocks.
+func (a *App) hookDeps(ctx context.Context, cwd string) (Deps, error) {
+	walkable := filepath.IsAbs(cwd) && filepath.Clean(cwd) == cwd
+	dir := cwd
+	for range maxVanishedLevels + 1 {
+		deps, err := a.deps(ctx, dir)
+		if !walkable || !errors.Is(err, ErrNoDirectory) {
+			return deps, err
+		}
+		if deps.Close != nil {
+			deps.Close()
+		}
+		dir = filepath.Dir(dir)
+	}
+	return Deps{}, fmt.Errorf("the hook's cwd %s does not exist, nor do its %d nearest parents: change to a directory that exists", cwd, maxVanishedLevels)
 }
 
 func readHookInput(r io.Reader) (hookInput, error) {

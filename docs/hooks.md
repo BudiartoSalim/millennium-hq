@@ -21,6 +21,23 @@ as untrusted.
 The counter of blocked stops is kept per session and agent in the plugin's
 data directory, where sandboxed agents cannot write.
 
+## A working directory that is gone
+
+Every event names the session's working directory, and the engine handles
+it in the repository that contains that directory. When the directory no
+longer exists, typically a worktree removed while a session was still in it,
+the engine uses the nearest parent that does exist instead. For a worktree
+under `.claude/worktrees/` that is the main checkout: the guard and the gates
+apply as they do there, `.millennium/` stays protected, and the session can
+`cd` back into the repository. A parent outside any git repository passes,
+as any directory outside a repository does.
+
+The engine moves up only past directories that do not exist at all, at most
+32 levels, and only from an absolute path in clean form (no `.` or `..`
+parts, no trailing separator). A working directory that exists
+but cannot be used, such as a file, a dangling symlink, or a directory git
+cannot enter or refuses, blocks every event with git's message, as before.
+
 ## Convention guides
 
 Every convention pack carries a `guide.md`: what belongs in each layer and

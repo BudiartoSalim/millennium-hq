@@ -105,8 +105,43 @@ func TestOpenOutsideRepositoryFails(t *testing.T) {
 	if _, err := Open(t.Context(), t.TempDir()); !errors.Is(err, ErrNotRepository) {
 		t.Fatalf("err = %v, want ErrNotRepository outside a git repository", err)
 	}
-	if _, err := Open(t.Context(), filepath.Join(t.TempDir(), "missing")); err == nil || errors.Is(err, ErrNotRepository) {
+	if _, err := Open(t.Context(), filepath.Join(t.TempDir(), "missing")); !errors.Is(err, ErrNoDirectory) || errors.Is(err, ErrNotRepository) {
 		t.Fatalf("a directory that does not exist is a different error: %v", err)
+	}
+}
+
+// Callers walk up from a directory that is gone, so ErrNoDirectory must mean
+// exactly that: nothing exists at the path. Anything else that stops git is
+// an error of its own, which blocks.
+func TestOpenReportsAMissingDirectoryOnly(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "file.txt", "not a directory")
+	tests := []struct {
+		name        string
+		path        string
+		wantMissing bool
+	}{
+		{"removed directory", filepath.Join(dir, "gone"), true},
+		{"inside a removed directory", filepath.Join(dir, "gone", "deeper"), true},
+		{"a file, not a directory", filepath.Join(dir, "file.txt"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertOpenFailure(t, tt.path, tt.wantMissing)
+		})
+	}
+}
+
+// assertOpenFailure checks that Open fails on path, with ErrNoDirectory
+// exactly when wantMissing, and never as "not a repository", which passes.
+func assertOpenFailure(t *testing.T, path string, wantMissing bool) {
+	t.Helper()
+	repo, err := Open(t.Context(), path)
+	if err == nil {
+		t.Fatalf("Open(%s) = %q, want an error", path, repo.Root())
+	}
+	if errors.Is(err, ErrNoDirectory) != wantMissing || errors.Is(err, ErrNotRepository) {
+		t.Fatalf("Open(%s) error = %v, want ErrNoDirectory: %v", path, err, wantMissing)
 	}
 }
 
