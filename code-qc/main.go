@@ -82,7 +82,7 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 		Conventions:    usecase.NewConventions(files.Committed, files.Local, repo, configfile.Codec{}, writer, repo.Root()),
 		Root:           repo.Root(),
 		LocalConfigDir: localDir,
-		RepoPath:       repo.RepoPath,
+		RepoPath:       repoPath(repo),
 		ReadProposal:   configfile.ReadProposal,
 		Close:          closeAnalyzers,
 		EngineCommand:  engineCommand(),
@@ -142,6 +142,18 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 		return nil, fmt.Errorf("%w: %v", cli.ErrNoDirectory, err)
 	}
 	return repo, err
+}
+
+// repoPath is the repository's RepoPath, reporting a path outside the
+// repository as cli.ErrOutsideRepository.
+func repoPath(repo *gitrepo.Repository) func(string) (string, error) {
+	return func(arg string) (string, error) {
+		p, err := repo.RepoPath(arg)
+		if errors.Is(err, gitrepo.ErrOutsideRepository) {
+			return "", fmt.Errorf("%w: %v", cli.ErrOutsideRepository, err)
+		}
+		return p, err
+	}
 }
 
 // gates lists every gate in the order reports show them.

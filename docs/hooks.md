@@ -63,6 +63,17 @@ conventions.
 | Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
 | Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path |
 
+The guard checks every path a tool names twice: as written, and with its
+symlinks resolved (in the repository root, and in the longest part of the
+path that exists, since a write may create the rest). So a symlink to a
+protected file, or a path into the repository through a symlinked
+directory, is denied like the protected path itself. A relative path is
+taken from the event's working directory, even one that no longer exists,
+never from the engine's own. A path outside the repository both ways is
+left alone. A path the engine cannot map for any other reason, such as a
+dangling symlink, a path below a file, or a directory it may not search,
+blocks the call with the reason, because it might lead to a protected path.
+
 If the config cannot be read, every file change is denied until a human fixes
 it, because the protected paths are unknown; reads stay allowed.
 

@@ -3,8 +3,10 @@ package gitrepo
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -161,41 +163,89 @@ func (r *Repository) abs(p string) string {
 	return filepath.Join(r.root, filepath.FromSlash(p))
 }
 
-// RepoPath turns a command-line path, relative to the current directory or
-// absolute, into a repository-relative one. Both sides have symlinks
-// resolved, so a symlinked working directory still maps correctly. The
-// repository root itself becomes "".
+// ErrOutsideRepository means a path lies outside the repository. A caller
+// that cares only about the repository's files may skip such a path; any
+// other failure to map a path is an error of its own.
+var ErrOutsideRepository = errors.New("outside the repository")
+
+// RepoPath turns a path, relative to the current directory or absolute, into
+// a repository-relative one. Only a relative path reads the current
+// directory, so an absolute one still maps when the process's working
+// directory is gone. Symlinks are resolved on both sides, in the root and in
+// the longest part of the path that exists (a write may create the rest),
+// so a path through a symlink maps to what it reaches. The repository root
+// itself becomes "".
 func (r *Repository) RepoPath(arg string) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("find working directory: %w", err)
+	cwd := ""
+	if !filepath.IsAbs(arg) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("find the working directory for %s: %w", arg, err)
+		}
+		cwd = wd
 	}
 	return r.relativeTo(cwd, arg)
 }
 
+// relativeTo maps arg, a relative one taken from cwd. cwd's symlinks are
+// resolved before joining, so ".." leaves the directory cwd really is.
 func (r *Repository) relativeTo(cwd, arg string) (string, error) {
-	base, err := filepath.EvalSymlinks(cwd)
+	target := filepath.Clean(arg)
+	if !filepath.IsAbs(target) {
+		base, err := filepath.EvalSymlinks(cwd)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", cwd, err)
+		}
+		target = filepath.Join(base, target)
+	}
+	resolved, err := resolveExisting(target)
 	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", cwd, err)
+		return "", err
 	}
 	root, err := filepath.EvalSymlinks(r.root)
 	if err != nil {
 		return "", fmt.Errorf("resolve %s: %w", r.root, err)
 	}
-	target := arg
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(base, target)
+	return insideRoot(root, resolved, arg)
+}
+
+// resolveExisting resolves the symlinks of target, an absolute clean path,
+// in its longest part that exists, and appends the rest as given. A part
+// that exists but cannot be resolved, such as a dangling symlink, or that
+// cannot be looked at is an error: what the path reaches is then unknown.
+func resolveExisting(target string) (string, error) {
+	existing, rest := target, ""
+	for existing != filepath.Dir(existing) {
+		_, err := os.Lstat(existing)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("inspect %s: %w", existing, err)
+		}
+		rest = filepath.Join(filepath.Base(existing), rest)
+		existing = filepath.Dir(existing)
 	}
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", existing, err)
+	}
+	return filepath.Join(resolved, rest), nil
+}
+
+// insideRoot makes target relative to root, both resolved, or reports arg
+// as ErrOutsideRepository.
+func insideRoot(root, target, arg string) (string, error) {
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
-		return "", fmt.Errorf("%s is not inside the repository: %w", arg, err)
+		return "", fmt.Errorf("%s is %w: %v", arg, ErrOutsideRepository, err)
 	}
 	rel = filepath.ToSlash(rel)
 	if rel == "." {
 		return "", nil
 	}
 	if !domain.IsRepoRelative(rel) {
-		return "", fmt.Errorf("%s is outside the repository", arg)
+		return "", fmt.Errorf("%s is %w", arg, ErrOutsideRepository)
 	}
 	return rel, nil
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -124,13 +125,16 @@ func readHookInput(r io.Reader) (hookInput, error) {
 
 func (a *App) preToolUse(ctx context.Context, deps Deps, in hookInput) error {
 	call := domain.ToolCall{Tool: in.ToolName, Role: domain.RoleOf(in.AgentType), Command: stringField(in.ToolInput, "command")}
-	if domain.IsWriteTool(call.Tool) && writesLocalConfig(deps.LocalConfigDir, toolPaths(in)) {
+	named := toolPaths(in)
+	if domain.IsWriteTool(call.Tool) && writesLocalConfig(deps.LocalConfigDir, named) {
 		return a.deny("millennium-code-qc: local configs are protected: agents never change the rules they are checked against; the user changes them with `millennium-code-qc config apply --local`")
 	}
-	for _, raw := range toolPaths(in) {
-		if p, err := deps.RepoPath(raw); err == nil {
-			call.Paths = append(call.Paths, p)
+	for _, raw := range named {
+		paths, err := guardedPaths(deps, raw)
+		if err != nil {
+			return err
 		}
+		call.Paths = appendNew(call.Paths, paths...)
 	}
 	decision := deps.Guard.Execute(ctx, call)
 	if !decision.Deny {
@@ -143,6 +147,54 @@ func (a *App) deny(reason string) error {
 	return a.writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
 	}})
+}
+
+// guardedPaths maps a path a tool call names, absolute, into the repository
+// for the guard, both as named and with its symlinks resolved: resolved
+// catches a symlink that leads to a protected path, and as named a
+// protected path that is itself a symlink. A path outside the repository
+// either way is left out, since the guard's rules cover only the
+// repository. Any other failure blocks the call: an unmapped path might be
+// a protected one.
+func guardedPaths(deps Deps, raw string) ([]string, error) {
+	if !filepath.IsAbs(raw) {
+		return nil, fmt.Errorf("cannot check the tool's path %s: it is not absolute, so the hook event's cwd is not either; run the session from an absolute directory", raw)
+	}
+	var paths []string
+	if named, ok := namedPath(deps.Root, raw); ok {
+		paths = append(paths, named)
+	}
+	resolved, err := deps.RepoPath(raw)
+	switch {
+	case errors.Is(err, ErrOutsideRepository):
+		return paths, nil
+	case err != nil:
+		return nil, fmt.Errorf("cannot check the tool's path, so the call is blocked: %w", err)
+	}
+	return appendNew(paths, resolved), nil
+}
+
+// namedPath is raw relative to the repository root as written, without
+// resolving any symlink, if it lies inside.
+func namedPath(root, raw string) (string, bool) {
+	rel, err := filepath.Rel(root, raw)
+	if err != nil {
+		return "", false
+	}
+	if rel = filepath.ToSlash(rel); rel == "." {
+		return "", true
+	}
+	return rel, domain.IsRepoRelative(rel)
+}
+
+// appendNew appends each path list does not hold yet.
+func appendNew(list []string, paths ...string) []string {
+	for _, p := range paths {
+		if !slices.Contains(list, p) {
+			list = append(list, p)
+		}
+	}
+	return list
 }
 
 // writesLocalConfig reports whether any path is inside the local config

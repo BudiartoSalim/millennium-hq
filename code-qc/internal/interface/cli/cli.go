@@ -130,6 +130,11 @@ type Discoverer interface {
 // hooks then do nothing, since nothing there is opted in.
 var ErrNoRepository = errors.New("not inside a git repository")
 
+// ErrOutsideRepository is what Deps.RepoPath returns for a path outside the
+// repository; the guard then leaves the path out, since its rules cover
+// only the repository.
+var ErrOutsideRepository = errors.New("not inside the repository")
+
 // Deps are what the commands call.
 type Deps struct {
 	Gates   GateRunner
@@ -147,8 +152,10 @@ type Deps struct {
 	Root string
 	// LocalConfigDir holds the local configs; no agent may write there.
 	LocalConfigDir string
-	// RepoPath turns a command-line path, relative to the current
-	// directory, into a repository-relative one.
+	// RepoPath turns a path, relative to the current directory or
+	// absolute, into a repository-relative one, with symlinks resolved; an
+	// absolute path needs no current directory. A path outside the
+	// repository is ErrOutsideRepository.
 	RepoPath func(arg string) (string, error)
 	// ReadProposal reads a proposal file named on the command line,
 	// bounded and strictly.
