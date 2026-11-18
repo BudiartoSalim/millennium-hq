@@ -82,31 +82,55 @@ func checkouts(ctx context.Context, deps Deps) ([]tree, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot check the tool's path in every worktree of the repository, so the call is blocked: %w", err)
 	}
-	return resolveTrees(deps, append([]string{deps.Root}, others...)...), nil
+	return resolveTrees(deps, append([]string{deps.Root}, others...))
 }
 
 // tree is the root of a tree of files, slash-separated, as named and with
-// its symlinks resolved; resolved is "" when the root cannot be resolved.
+// its symlinks resolved; resolved is "" when the root reaches nothing.
 type tree struct {
 	named, resolved string
 }
 
-// resolveTrees resolves each root once. A root that cannot be resolved,
-// its parent replaced by a dangling symlink or a file, reaches no file
-// through its resolved form, so it is compared as named: a worktree whose
-// root is gone must not block the calls in every other. (A protected
-// location whose lead is unknown below a root that resolves does block;
-// see protectedSpellings.)
-func resolveTrees(deps Deps, roots ...string) []tree {
+// resolveTrees resolves each worktree root once, and an error naming each
+// root that resolveTree cannot compare.
+func resolveTrees(deps Deps, roots []string) ([]tree, error) {
 	trees := make([]tree, 0, len(roots))
+	var unknown []error
 	for _, root := range roots {
-		t := tree{named: filepath.ToSlash(filepath.Clean(root))}
-		if resolved, err := deps.ResolvePath(root); err == nil {
-			t.resolved = filepath.ToSlash(resolved)
+		t, err := resolveTree(deps, root)
+		if err != nil {
+			unknown = append(unknown, err)
+			continue
 		}
 		trees = append(trees, t)
 	}
-	return trees
+	return trees, errors.Join(unknown...)
+}
+
+// resolveTree resolves a worktree root. A root that reaches nothing, its
+// parent replaced by a dangling symlink or a file, holds no file, nor
+// protected location, through its resolved form, so it is compared as
+// named: a worktree whose root is gone must not block the calls in every
+// other. A root that cannot be resolved otherwise, as one that may not be
+// looked at, may hold a protected location that leads anywhere, so it is
+// an error, and the call is blocked (see locationSpellings).
+func resolveTree(deps Deps, root string) (tree, error) {
+	t := tree{named: filepath.ToSlash(filepath.Clean(root))}
+	resolved, err := deps.ResolvePath(root)
+	switch {
+	case err == nil:
+		t.resolved = filepath.ToSlash(resolved)
+	case !reachesNothing(err):
+		return tree{}, fmt.Errorf("cannot resolve the worktree %s, so its protected locations cannot be checked and every write is blocked until it can be: %w; restore access to it (such as with chmod), or, if it is a linked worktree you no longer need, remove it (`git worktree remove --force %s`, or `git worktree prune` once its directory is gone)", t.named, err, t.named)
+	}
+	return t, nil
+}
+
+// reachesNothing reports whether err, from Deps.ResolvePath, says that the
+// path reaches nothing (see Deps.ResolvePath).
+func reachesNothing(err error) bool {
+	var nothing interface{ ReachesNothing() bool }
+	return errors.As(err, &nothing) && nothing.ReachesNothing()
 }
 
 // treeForms are the roots of trees, each as named and, where it resolves,
@@ -146,7 +170,7 @@ func protectedSpellings(deps Deps, trees []tree, targets []string) ([]string, er
 // locationSpellings are the spellings of targets below where the tree's
 // protected locations lead (see respelled), each location resolved once,
 // and an error naming each location whose lead is unknown. A tree whose
-// root cannot be resolved is not looked at (see resolveTrees), and a
+// root reaches nothing is not looked at (see resolveTree), and a
 // location below a file or through a link loop reaches nothing.
 func (t tree) locationSpellings(deps Deps, targets []string) ([]string, error) {
 	if t.resolved == "" {
@@ -182,14 +206,17 @@ func respelled(targets []string, resolved, location string) []string {
 // writesLocalConfig reports whether a file tool writes inside the local
 // config directory, which lies outside the repository the guard's rules
 // cover and holds the local configs of every repository on the machine.
-// The targets are compared with the directory as named and resolved,
-// without regard to case, so a link in the repository does not reach the
-// local configs either.
+// The targets are compared with the directory as named and, where it
+// resolves, as resolved, without regard to case, so a link in the
+// repository does not reach the local configs either.
 func writesLocalConfig(deps Deps, call domain.ToolCall) bool {
 	if !domain.IsWriteTool(call.Tool) || deps.LocalConfigDir == "" {
 		return false
 	}
-	local := treeForms(resolveTrees(deps, deps.LocalConfigDir))
+	local := []string{filepath.ToSlash(filepath.Clean(deps.LocalConfigDir))}
+	if resolved, err := deps.ResolvePath(deps.LocalConfigDir); err == nil {
+		local = appendNew(local, filepath.ToSlash(resolved))
+	}
 	return slices.ContainsFunc(call.Targets, func(target string) bool {
 		return slices.ContainsFunc(local, func(dir string) bool { return domain.WithinFold(target, dir) })
 	})

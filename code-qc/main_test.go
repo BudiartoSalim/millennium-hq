@@ -257,9 +257,9 @@ func breakWorktreesDir(t *testing.T, root string, replace func(path string) erro
 	}
 }
 
-// A worktree whose root cannot be resolved, its parent replaced by a
-// dangling symlink or a file, blocks no call: it is compared as git names
-// it, and a repository that is not opted in never lists its worktrees.
+// A worktree whose root reaches nothing, its parent replaced by a dangling
+// symlink or a file, blocks no call: it is compared as git names it, and a
+// repository that is not opted in never lists its worktrees.
 func TestHookToleratesAWorktreeThatCannotBeResolved(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks on Windows needs a privilege tests do not have")
@@ -450,6 +450,36 @@ func TestHookBlocksWritesWhileAWorktreesLocationIsUnknown(t *testing.T) {
 			})
 		})
 	}
+}
+
+// While a worktree's root cannot be resolved for any reason but that it
+// reaches nothing, such as `chmod 000` on the directory that holds the
+// worktrees, its protected locations may lead anywhere, so every write
+// blocks, and every call a role rule checks, with a message naming the
+// worktree and how to fix it; other reads pass. Before, such a root was
+// compared as named and its locations never looked at, so with
+// `other/.pi` a link to the main checkout's `conf`, a write of
+// `conf/extensions/evil.ts` passed once `.claude/worktrees` was locked.
+func TestHookBlocksWritesWhileAWorktreeRootIsUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows needs a privilege tests do not have")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the permissions these cases rely on")
+	}
+	root, other, _ := optedInRepo(t)
+	symlink(t, filepath.Join(root, "conf"), filepath.Join(other, ".pi"))
+	evil := filepath.Join(root, "conf", "extensions", "evil.ts")
+	assertHookCases(t, []hookCase{{name: "while the root can be resolved", event: toolEvent(root, "Write", "", evil), want: denied}})
+	lock(t, filepath.Join(root, ".claude", "worktrees"))
+	unknown := "cannot resolve the worktree " + filepath.ToSlash(other) + ", so its protected locations cannot be checked and every write is blocked until it can be"
+	fix := "restore access to it (such as with chmod), or, if it is a linked worktree you no longer need, remove it (`git worktree remove --force " + filepath.ToSlash(other) + "`"
+	assertHookCases(t, []hookCase{
+		{name: "an extension where the locked worktree's .pi leads", event: toolEvent(root, "Write", "", evil), wantCode: 2, want: unknown},
+		{name: "a write in the main checkout", event: toolEvent(root, "Write", "", filepath.Join(root, "main.go")), wantCode: 2, want: fix},
+		{name: "qa-tester's read, which a role rule checks", event: toolEvent(root, "Read", "millennium:qa-tester", filepath.Join(root, "docs", "a.md")), wantCode: 2, want: unknown},
+		{name: "a read", event: toolEvent(root, "Read", "", filepath.Join(root, "main.go"))},
+	})
 }
 
 // On Windows a directory junction, which `mklink /J` makes without any

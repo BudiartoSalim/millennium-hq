@@ -75,5 +75,8 @@ jobs:
           # junction tests must have run and passed, not just matched nothing.
           go test -count=1 -v -run 'Junction|ShortNames' ./internal/infrastructure/gitrepo/ | tee ../../walk.log
           grep -q -- '--- PASS: TestWalkFollowsAJunction ' ../../walk.log
+          # Hosted runners have mountvol, so the volume test must pass too: a
+          # skip would leave the kernel32 call that lists mount paths unrun.
+          grep -q -- '--- PASS: TestWalkFollowsAJunctionToAVolumeByItsGUID ' ../../walk.log
           go test -count=1 -v -run '^TestHookFollowsJunctionsOnWindows$' . | tee ../../hook.log
           grep -q -- '--- PASS: TestHookFollowsJunctionsOnWindows ' ../../hook.log

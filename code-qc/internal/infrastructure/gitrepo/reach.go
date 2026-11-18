@@ -82,14 +82,27 @@ const (
 	danglingFollowed
 )
 
+// nothingThere is the error of a path that reaches nothing: a link that
+// leads to nothing, a part below a file, or more links than the OS
+// follows. The OS opens nothing there, so a caller may tell it from a path
+// whose lead is unknown, as one that may not be looked at. Its
+// ReachesNothing method says so to callers that do not import this
+// package (see Resolver.Resolve).
+type nothingThere struct{ reason string }
+
+func (e *nothingThere) Error() string { return e.reason }
+
+// ReachesNothing reports that the path reaches nothing.
+func (e *nothingThere) ReachesNothing() bool { return true }
+
 // errBelowFile is a path that goes on below a part that is not a
 // directory: nothing can be created there.
-var errBelowFile = errors.New("not a directory, so nothing lies below it")
+var errBelowFile = &nothingThere{"not a directory, so nothing lies below it"}
 
 // errTooManyLinks is a path through more links than the OS follows in one
 // path (maxLinks), such as a link that leads to itself: the OS opens
 // nothing through it, so nothing can be created there either.
-var errTooManyLinks = fmt.Errorf("more than %d links one after another, more than the OS follows in one path, so it may loop", maxLinks)
+var errTooManyLinks = &nothingThere{fmt.Sprintf("more than %d links one after another, more than the OS follows in one path, so it may loop", maxLinks)}
 
 // perProcessPaths lead somewhere else for each process that opens a path
 // through them, so the engine would resolve them in its own process rather
@@ -187,7 +200,7 @@ func (w *walker) follow(dir, link string) (reached, error) {
 	}
 	end, err := w.walk(from, parts)
 	if err == nil && end.kind == entryMissing && w.dangling == danglingUnknown {
-		return reached{}, fmt.Errorf("resolve %s: it leads to %s, which does not exist", link, end.path)
+		return reached{}, &nothingThere{fmt.Sprintf("resolve %s: it leads to %s, which does not exist", link, end.path)}
 	}
 	return end, err
 }
@@ -357,7 +370,10 @@ func NewResolver() *Resolver { return &Resolver{files: newOSFiles()} }
 // be followed or looked at is an error, and so is a link that leads to
 // nothing, a walk through more links than the OS follows, a part below a
 // file, and a path through one that leads elsewhere for each process
-// (`/proc/self`): what the path reaches is unknown.
+// (`/proc/self`). The error of a path that reaches nothing, as a link that
+// leads to nothing, a part below a file or a loop, has a ReachesNothing
+// method that reports true; any other error means that what the path
+// reaches is unknown.
 func (r *Resolver) Resolve(abs string) (string, error) { return resolvePath(r.files, abs) }
 
 // Location is where a write to protected, a protected location such as
@@ -388,7 +404,7 @@ func resolvePath(files fileSystem, abs string) (string, error) {
 // location is Resolver.Location over files.
 func location(files fileSystem, root, protected string) (string, error) {
 	end, err := (&walker{files: files, dangling: danglingFollowed}).walk(root, splitPath(filepath.FromSlash(protected)))
-	if errors.Is(err, errBelowFile) || errors.Is(err, errTooManyLinks) {
+	if nothing := new(*nothingThere); errors.As(err, nothing) {
 		return "", nil
 	}
 	if err != nil {

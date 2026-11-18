@@ -97,8 +97,11 @@ read-only token, and Go comes from the official
 reads only (`contents: read`; the workflow's default is no permissions).
 
 A junction to a volume by its GUID is made with `mountvol` and
-`mklink /J`; if the runner cannot make one, that test reports a skip in
-the log, and the rest still runs. A folder-mounted second volume cannot be
+`mklink /J`. Hosted runners can make one, so the workflow fails unless
+`TestWalkFollowsAJunctionToAVolumeByItsGUID` passes: if it skips, the
+call that lists where Windows mounts a volume never ran. Run elsewhere,
+such as on a machine without `mountvol`, the test reports a skip in its
+log and the rest still runs. A folder-mounted second volume cannot be
 made on a hosted runner, so that case is covered by the Linux tests with a
 fake file system (`TestWalkFollowsVolumesWhereWindowsMountsThem`).
 

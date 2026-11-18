@@ -93,6 +93,13 @@ type walkCase struct {
 	resolveErr string // Resolve's, which allows no dangling link nor a part below a file; "" when it agrees
 }
 
+// reachesNothing reports whether err says, as callers outside this package
+// read it, that its path reaches nothing.
+func reachesNothing(err error) bool {
+	var nothing interface{ ReachesNothing() bool }
+	return errors.As(err, &nothing) && nothing.ReachesNothing()
+}
+
 // runWalkCases walks each case's rel below root, as a protected location
 // and as a tool's path.
 func runWalkCases(t *testing.T, root string, tests []walkCase) {
@@ -109,14 +116,27 @@ func runWalkCases(t *testing.T, root string, tests []walkCase) {
 			if got != want || !errorMatches(err, tt.wantErr) {
 				t.Fatalf("location(%q) = %q, %v; want %q, error %q", tt.rel, got, err, want, tt.wantErr)
 			}
-			resolveWant, resolveErr := want, tt.wantErr
-			if tt.resolveErr != "" {
-				resolveWant, resolveErr = "", tt.resolveErr
-			}
-			if got, err := resolvePath(files, at(tt.rel)); got != resolveWant || !errorMatches(err, resolveErr) {
-				t.Fatalf("resolvePath(%q) = %q, %v; want %q, error %q", tt.rel, got, err, resolveWant, resolveErr)
-			}
+			assertResolves(t, files, at(tt.rel), want, tt)
 		})
+	}
+}
+
+// assertResolves checks resolvePath of abs against a case whose location
+// is want: the same, unless the case gives Resolve its own error.
+// Resolve's own errors are where the path reaches nothing; the others
+// leave where it leads unknown.
+func assertResolves(t *testing.T, files fakeFiles, abs, want string, tt walkCase) {
+	t.Helper()
+	resolveWant, resolveErr := want, tt.wantErr
+	if tt.resolveErr != "" {
+		resolveWant, resolveErr = "", tt.resolveErr
+	}
+	got, err := resolvePath(files, abs)
+	if got != resolveWant || !errorMatches(err, resolveErr) {
+		t.Fatalf("resolvePath(%q) = %q, %v; want %q, error %q", abs, got, err, resolveWant, resolveErr)
+	}
+	if nothing := reachesNothing(err); nothing != (tt.resolveErr != "") {
+		t.Fatalf("resolvePath(%q): error %v reaches nothing = %v, want %v", abs, err, nothing, tt.resolveErr != "")
 	}
 }
 

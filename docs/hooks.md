@@ -148,7 +148,8 @@ checkout's `conf/` included, so no write can be checked. The message
 names the location and the way out: restore access to it, fix or remove
 the link it leads through, or remove a linked worktree you no longer need
 (`git worktree remove --force <path>`). Reads are not affected.
-A worktree whose root cannot be resolved is not looked at (see below).
+A worktree whose root reaches nothing is not looked at, and one whose
+root cannot be resolved otherwise blocks every write (see below).
 
 The guard acts only for a session whose own checkout is opted in (it has a
 config, in the repository or a local one). A session in a checkout that is
@@ -176,10 +177,22 @@ holds a newline, blocks the call with the reason, every write included,
 until you remove that worktree; the list may name no more worktrees than
 git keeps records for (entries under `.git/worktrees` with a `gitdir`
 file git can read at least one byte of, the ones git lists). A worktree
-whose root cannot be resolved, its parent replaced by a dangling symlink
-or a file, is compared as git names it and blocks nothing; a protected
-location below a root that resolves blocks while its lead is unknown
-(see above).
+whose root reaches nothing (its parent replaced by a dangling symlink, a
+file, or a link loop) holds no file the OS can open, so it is compared
+as git names it and blocks nothing; nor does one whose directory is
+simply gone. A
+worktree whose root cannot be resolved for any other reason, such as
+`chmod 000` on the `.claude/worktrees` that holds it, a link on its way
+that cannot be read, or a link to a per-process or device path, may hold
+protected locations that lead anywhere, the main checkout's `conf/`
+included: every write blocks, and so does every read a role rule checks
+(the qa-tester's), until it can be resolved. The message names the
+worktree, why it cannot be resolved, and the way out: restore access to
+it (such as with `chmod`), or, if it is a linked worktree you no longer
+need, remove it (`git worktree remove --force <path>`, or
+`git worktree prune` once its directory is gone). Other reads are not
+affected. A protected location below a root that resolves blocks while
+its lead is unknown (see above).
 
 The role rules reach only the worktrees `git worktree list` names. A
 worktree moved with plain `mv` rather than `git worktree move` is listed
