@@ -26,7 +26,8 @@ func (r *Repository) OtherWorktrees(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	records, err := os.ReadDir(filepath.Join(common, "worktrees"))
+	recordsDir := filepath.Join(common, "worktrees")
+	records, err := os.ReadDir(recordsDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -37,12 +38,29 @@ func (r *Repository) OtherWorktrees(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list the repository's worktrees: %w", err)
 	}
-	roots, err := parseWorktrees(out, len(records)+1)
+	roots, err := parseWorktrees(out, listedRecords(recordsDir, records)+1)
 	if err != nil {
 		return nil, err
 	}
 	own := filepath.Clean(r.root)
 	return slices.DeleteFunc(roots, func(root string) bool { return root == own }), nil
+}
+
+// listedRecords counts the worktree records in dir that git lists: those
+// with a gitdir file that is not empty, which names the worktree; git skips
+// every other entry. Counting those too would leave room in the listing for
+// a record forged by a worktree path with a newline. An entry whose gitdir
+// cannot be looked at is not counted: counting too few refuses the listing,
+// which blocks, and never hides a worktree.
+func listedRecords(dir string, entries []fs.DirEntry) int {
+	listed := 0
+	for _, entry := range entries {
+		info, err := os.Stat(filepath.Join(dir, entry.Name(), "gitdir"))
+		if err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+			listed++
+		}
+	}
+	return listed
 }
 
 // gitCommonDir is git's common directory, absolute: the one every worktree

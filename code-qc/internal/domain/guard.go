@@ -21,10 +21,12 @@ type ToolCall struct {
 	// Role is the calling agent's role, "" for the main session.
 	Role string
 	// Targets are the absolute paths the call names, slash-separated, as
-	// named and with their symlinks resolved. The protected paths are
-	// matched in them wherever they lie, in this repository or any other
-	// directory: a checkout git no longer lists (moved, or named with a
-	// newline) is still a checkout whose rules no agent may change.
+	// named and with their symlinks resolved, and one that lies inside
+	// where a protected location of a checkout resolves to (`.pi` a
+	// symlink to `conf`) also as that location spells it. The protected
+	// paths are matched in them wherever they lie, in this repository or
+	// any other directory: a checkout git no longer lists (moved, or named
+	// with a newline) is still a checkout whose rules no agent may change.
 	Targets []string
 	// Paths are the paths the call names relative to the worktree of the
 	// repository each lies in, the agent's own or any other (the main
@@ -35,35 +37,63 @@ type ToolCall struct {
 	Command string
 }
 
-// PathNeed says what the guard needs to know about the paths a tool call
-// names, so the hook works out no more than that.
-type PathNeed string
+// PathNeed says which of a call's located paths the guard's rules read, so
+// the hook works out no more than that. Both are false for a call no path
+// rule applies to.
+type PathNeed struct {
+	// Targets: a rule matches the protected paths in the Targets.
+	Targets bool
+	// Paths: a role rule reads the Paths, in every worktree of the
+	// repository; they are placed from the Targets.
+	Paths bool
+}
 
-// What the guard needs to know about a call's paths.
-const (
-	// NeedNoPaths: no rule reads the call's paths.
-	NeedNoPaths PathNeed = "none"
-	// NeedTargets: the protected paths, matched in the Targets.
-	NeedTargets PathNeed = "targets"
-	// NeedWorktreePaths: a role rule too, which reads Paths in every
-	// worktree of the repository.
-	NeedWorktreePaths PathNeed = "worktree paths"
-)
+// Any reports whether a rule reads any of the call's paths.
+func (n PathNeed) Any() bool { return n.Targets || n.Paths }
 
-// PathNeedOf is what the guard needs to know about the paths of a call of
-// tool by role: every write is matched against the protected paths; the
+// PathNeedOf is what the guard's rules read of the paths of a call of tool
+// by role, from the rules that apply to it (guardRules), the same ones
+// Guard runs: every write is matched against the protected paths; the
 // software engineer's writes and qa-tester's reads also get their role's
 // rule, in every worktree of the repository.
 func PathNeedOf(tool, role string) PathNeed {
-	switch {
-	case IsWriteTool(tool) && role == RoleSoftwareEngineer:
-		return NeedWorktreePaths
-	case IsWriteTool(tool):
-		return NeedTargets
-	case slices.Contains(readTools(), tool) && role == RoleQATester:
-		return NeedWorktreePaths
+	var need PathNeed
+	for _, rule := range guardRules() {
+		if rule.appliesTo(tool, role) {
+			need.Targets = need.Targets || rule.reads.Targets
+			need.Paths = need.Paths || rule.reads.Paths
+		}
 	}
-	return NeedNoPaths
+	return need
+}
+
+// guardRule is one rule of the guard: the calls it applies to, which of
+// their located paths it reads, and its check.
+type guardRule struct {
+	tools []string
+	// roles are the roles it applies to; nil is every role, the main
+	// session's included.
+	roles []string
+	reads PathNeed
+	check func(Config, ToolCall) GuardDecision
+}
+
+// appliesTo reports whether the rule applies to a call of tool by role.
+func (r guardRule) appliesTo(tool, role string) bool {
+	return slices.Contains(r.tools, tool) && (r.roles == nil || slices.Contains(r.roles, role))
+}
+
+// guardRules are the guard's rules, in the order Guard runs them. Each
+// declares what it reads of a call's paths, and PathNeedOf derives from
+// these declarations what the hook locates, so a rule cannot be given
+// fewer paths than it reads.
+func guardRules() []guardRule {
+	return []guardRule{
+		{tools: writeTools(), reads: PathNeed{Targets: true}, check: guardProtected},
+		{tools: writeTools(), roles: []string{RoleSoftwareEngineer}, reads: PathNeed{Paths: true}, check: guardAcceptanceTests},
+		{tools: readTools(), roles: []string{RoleQATester}, reads: PathNeed{Paths: true}, check: guardBlackBox},
+		{tools: []string{"Bash"}, check: guardShell},
+	}
 }
 
 // WorktreePaths places each target, an absolute slash-separated path, in
@@ -151,29 +181,35 @@ var (
 // Shell commands are matched best-effort: the OS sandbox, not this, is what
 // stops a determined command.
 func Guard(cfg Config, call ToolCall) GuardDecision {
-	switch {
-	case slices.Contains(writeTools(), call.Tool):
-		return guardWrite(cfg, call)
-	case slices.Contains(readTools(), call.Tool) && call.Role == RoleQATester:
-		return guardBlackBox(cfg, call)
-	case call.Tool == "Bash":
-		return guardShell(call.Command)
+	for _, rule := range guardRules() {
+		if !rule.appliesTo(call.Tool, call.Role) {
+			continue
+		}
+		if decision := rule.check(cfg, call); decision.Deny {
+			return decision
+		}
 	}
 	return GuardDecision{}
 }
 
-// guardWrite matches paths without regard to case (see WithinFold): the
-// protected paths anywhere in a path the call names, and for the software
-// engineer the acceptance tests in every worktree of the repository.
-func guardWrite(cfg Config, call ToolCall) GuardDecision {
+// guardProtected denies a write that names a protected path anywhere in a
+// target (see ProtectedPathIn). The Paths are matched too, for a caller
+// that gives only those; the hook places them from the Targets, so they
+// hold no protected path the Targets do not, and the rule needs only the
+// Targets located.
+func guardProtected(_ Config, call ToolCall) GuardDecision {
 	for _, p := range slices.Concat(call.Targets, call.Paths) {
-		if protected, ok := protectedPath(p); ok {
+		if protected, ok := ProtectedPathIn(p); ok {
 			return deny("%s is protected: agents never change the rules they are checked against; the user changes them with `millennium-code-qc config apply`", protected)
 		}
 	}
-	if call.Role != RoleSoftwareEngineer {
-		return GuardDecision{}
-	}
+	return GuardDecision{}
+}
+
+// guardAcceptanceTests keeps the software engineer out of the acceptance
+// tests in every worktree of the repository, matched without regard to
+// case (see WithinFold).
+func guardAcceptanceTests(cfg Config, call ToolCall) GuardDecision {
 	for _, p := range call.Paths {
 		if WithinFold(p, cfg.AcceptanceTests) {
 			return deny("%s is an acceptance test; the software-engineer agent cannot change the tests that judge its work (qa-tester owns them)", p)
@@ -182,10 +218,12 @@ func guardWrite(cfg Config, call ToolCall) GuardDecision {
 	return GuardDecision{}
 }
 
-// protectedPath reports the protected path that p holds as whole segments,
-// anywhere in it: a protected path is protected in every checkout and
-// every directory, wherever it lies.
-func protectedPath(p string) (string, bool) {
+// ProtectedPathIn reports the protected path that p, slash-separated, holds
+// as whole segments, anywhere in it, matched without regard to case and
+// with each segment read as Win32 opens it (a trailing dot or space, a
+// `:stream`): a protected path is protected in every checkout and every
+// directory, wherever it lies, and in whatever spelling reaches it.
+func ProtectedPathIn(p string) (string, bool) {
 	for _, protected := range ProtectedPaths() {
 		if hasSegmentsFold(p, protected) {
 			return protected, true
@@ -236,7 +274,9 @@ func IsDocument(p string) bool {
 	return false
 }
 
-func guardShell(command string) GuardDecision {
+// guardShell matches a Bash call's command; it reads no paths.
+func guardShell(_ Config, call ToolCall) GuardDecision {
+	command := call.Command
 	if applyCommand.MatchString(command) {
 		return deny("only the user runs `millennium-code-qc config apply`; write a proposal instead and ask them to apply it")
 	}

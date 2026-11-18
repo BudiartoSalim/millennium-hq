@@ -59,9 +59,63 @@ func TestHasSegmentsFold(t *testing.T) {
 		{"/repo/.claude/x/settings.json", ".claude/settings.json", false},
 		{"/repo/.claude", ".claude/settings.json", false},
 		{"", ".millennium", false},
+		{"C:/repo/.claude/settings.local.json.", ".claude/settings.local.json", true},
+		{"C:/repo/.pi/extensions./x.ts", ".pi/extensions", true},
+		{"C:/repo/.claude/settings.json::$DATA", ".claude/settings.json", true},
+		{"C:/repo/.pi::$INDEX_ALLOCATION/settings.json", ".pi/settings.json", true},
+		{"C:/repo/.millennium . ./config.json", ".millennium", true},
+		{"C:/repo/.claude/settings.json.bak", ".claude/settings.json", false},
+		{"C:/repo/.claude/settings:json", ".claude/settings.json", false},
 	} {
 		if got := hasSegmentsFold(tt.p, tt.seq); got != tt.want {
 			t.Errorf("hasSegmentsFold(%q, %q) = %v, want %v", tt.p, tt.seq, got, tt.want)
+		}
+	}
+}
+
+// A target below where a symlink leads is named below the symlink, in any
+// spelling that reaches it.
+func TestRebaseFold(t *testing.T) {
+	tests := []struct {
+		target, from, to string
+		want             string
+		ok               bool
+	}{
+		{"/repo/conf/extensions/evil.ts", "/repo/conf/extensions", "/repo/.pi/extensions", "/repo/.pi/extensions/evil.ts", true},
+		{"/repo/conf/extensions", "/repo/conf/extensions", "/repo/.pi/extensions", "/repo/.pi/extensions", true},
+		{"/REPO/Conf/Extensions/A/b.ts", "/repo/conf/extensions", "/repo/.pi/extensions", "/repo/.pi/extensions/A/b.ts", true},
+		{"C:/repo/conf/extensions./x.ts", "C:/repo/conf/extensions", "C:/repo/.pi/extensions", "C:/repo/.pi/extensions/x.ts", true},
+		{"C:/repo/conf.json::$DATA", "C:/repo/conf.json", "C:/repo/.claude/settings.json", "C:/repo/.claude/settings.json", true},
+		{"/etc/passwd", "/", "/repo/.millennium", "/repo/.millennium/etc/passwd", true},
+		{"/repo/conf/extensionsx/x.ts", "/repo/conf/extensions", "/repo/.pi/extensions", "", false},
+		{"/repo/conf", "/repo/conf/extensions", "/repo/.pi/extensions", "", false},
+		{"/other/conf/extensions/x.ts", "/repo/conf/extensions", "/repo/.pi/extensions", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := RebaseFold(tt.target, tt.from, tt.to)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("RebaseFold(%q, %q, %q) = %q, %v; want %q, %v", tt.target, tt.from, tt.to, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+// Win32 opens `name:stream` as a stream of name and strips trailing dots
+// and spaces, so those spellings name the protected files on Windows.
+func TestWin32Name(t *testing.T) {
+	for segment, want := range map[string]string{
+		"settings.json":          "settings.json",
+		"settings.json.":         "settings.json",
+		"settings.json .. ":      "settings.json",
+		"settings.json::$DATA":   "settings.json",
+		"settings.json:x:$DATA":  "settings.json",
+		"settings.json. :stream": "settings.json",
+		".millennium":            ".millennium",
+		".pi.":                   ".pi",
+		"..":                     "",
+		"":                       "",
+	} {
+		if got := win32Name(segment); got != want {
+			t.Errorf("win32Name(%q) = %q, want %q", segment, got, want)
 		}
 	}
 }

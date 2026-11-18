@@ -41,12 +41,12 @@ func TestGuard(t *testing.T) {
 		want string // "" means allowed
 	}{
 		{"main session edits code", ToolCall{Tool: "Edit", Paths: []string{"services/a/api/main.go"}}, ""},
-		{"main session edits the config", ToolCall{Tool: "Edit", Paths: []string{".millennium/config.json"}}, ".millennium is protected"},
-		{"engineer writes a dependency approval", ToolCall{Tool: "Write", Role: RoleSoftwareEngineer, Paths: []string{".millennium/deps/npm/x.json"}}, ".millennium is protected"},
-		{"anyone edits project settings", ToolCall{Tool: "MultiEdit", Paths: []string{".claude/settings.json"}}, ".claude/settings.json is protected"},
-		{"anyone edits pi's project settings", ToolCall{Tool: "Write", Paths: []string{".pi/settings.json"}}, ".pi/settings.json is protected"},
-		{"anyone adds a pi extension", ToolCall{Tool: "Write", Paths: []string{".pi/extensions/off.ts"}}, ".pi/extensions is protected"},
-		{"engineer works in a pi worktree", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Paths: []string{".pi/worktrees/p1/main.go"}}, ""},
+		{"main session edits the config", ToolCall{Tool: "Edit", Targets: []string{"/repo/.millennium/config.json"}}, ".millennium is protected"},
+		{"engineer writes a dependency approval", ToolCall{Tool: "Write", Role: RoleSoftwareEngineer, Targets: []string{"/repo/.millennium/deps/npm/x.json"}}, ".millennium is protected"},
+		{"anyone edits project settings", ToolCall{Tool: "MultiEdit", Targets: []string{"/repo/.claude/settings.json"}}, ".claude/settings.json is protected"},
+		{"anyone edits pi's project settings", ToolCall{Tool: "Write", Targets: []string{"/repo/.pi/settings.json"}}, ".pi/settings.json is protected"},
+		{"anyone adds a pi extension", ToolCall{Tool: "Write", Targets: []string{"/repo/.pi/extensions/off.ts"}}, ".pi/extensions is protected"},
+		{"engineer works in a pi worktree", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Targets: []string{"/repo/.pi/worktrees/p1/main.go"}}, ""},
 		{"engineer edits an acceptance test", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Paths: []string{"tests/acceptance/login_test.go"}}, "acceptance test"},
 		{"qa-tester writes an acceptance test", ToolCall{Tool: "Write", Role: RoleQATester, Paths: []string{"tests/acceptance/login_test.go"}}, ""},
 		{"qa-tester reads code", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"services/a/api/internal/domain/user.go"}}, "implementation code"},
@@ -85,13 +85,13 @@ func TestGuardIgnoresCaseInProtectedPaths(t *testing.T) {
 		call ToolCall
 		want string // "" means allowed
 	}{
-		{"the config, upper case", ToolCall{Tool: "Write", Paths: []string{".MILLENNIUM/config.json"}}, ".millennium is protected"},
-		{"the config, mixed case", ToolCall{Tool: "Edit", Paths: []string{".Millennium/Config.json"}}, ".millennium is protected"},
-		{"settings, mixed case", ToolCall{Tool: "Write", Paths: []string{".claude/Settings.json"}}, ".claude/settings.json is protected"},
-		{"a long s that folds to s", ToolCall{Tool: "Write", Paths: []string{".claude/ſettings.json"}}, ".claude/settings.json is protected"},
-		{"pi extensions, upper case", ToolCall{Tool: "Write", Paths: []string{".PI/EXTENSIONS/off.ts"}}, ".pi/extensions is protected"},
+		{"the config, upper case", ToolCall{Tool: "Write", Targets: []string{"/repo/.MILLENNIUM/config.json"}}, ".millennium is protected"},
+		{"the config, mixed case", ToolCall{Tool: "Edit", Targets: []string{"/repo/.Millennium/Config.json"}}, ".millennium is protected"},
+		{"settings, mixed case", ToolCall{Tool: "Write", Targets: []string{"/repo/.claude/Settings.json"}}, ".claude/settings.json is protected"},
+		{"a long s that folds to s", ToolCall{Tool: "Write", Targets: []string{"/repo/.claude/ſettings.json"}}, ".claude/settings.json is protected"},
+		{"pi extensions, upper case", ToolCall{Tool: "Write", Targets: []string{"/repo/.PI/EXTENSIONS/off.ts"}}, ".pi/extensions is protected"},
 		{"an acceptance test, mixed case", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Paths: []string{"Tests/Acceptance/login_test.go"}}, "acceptance test"},
-		{"a name that only starts like one", ToolCall{Tool: "Write", Paths: []string{".MILLENNIUMX/config.json"}}, ""},
+		{"a name that only starts like one", ToolCall{Tool: "Write", Targets: []string{"/repo/.MILLENNIUMX/config.json"}}, ""},
 		{"shell writes the config, upper case", ToolCall{Tool: "Bash", Command: "echo '{}' > .MILLENNIUM/config.json"}, "changes .millennium"},
 		{"shell sed on settings, mixed case", ToolCall{Tool: "Bash", Command: "sed -i 's/x/y/' .Claude/Settings.JSON"}, "changes .claude/settings.json"},
 	}
@@ -117,11 +117,39 @@ func TestGuardMatchesProtectedPathsAnywhere(t *testing.T) {
 		{"resolved into another checkout", ToolCall{Tool: "Write", Targets: []string{"/repo/src/link.json", "/elsewhere/.Millennium/deps/x.json"}}, ".millennium is protected"},
 		{"another directory's settings, upper case", ToolCall{Tool: "Edit", Targets: []string{"/home/u/.CLAUDE/settings.local.json"}}, ".claude/settings.local.json is protected"},
 		{"a pi extension anywhere", ToolCall{Tool: "MultiEdit", Targets: []string{"C:/work/app/.pi/extensions/sub/off.ts"}}, ".pi/extensions is protected"},
-		{"pi settings in a subdirectory", ToolCall{Tool: "NotebookEdit", Paths: []string{"vendor/x/.pi/settings.json"}}, ".pi/settings.json is protected"},
+		{"pi settings in a subdirectory", ToolCall{Tool: "NotebookEdit", Targets: []string{"/repo/vendor/x/.pi/settings.json"}}, ".pi/settings.json is protected"},
 		{"a name that only starts like one", ToolCall{Tool: "Write", Targets: []string{"/repo/.millenniumx/config.json", "/repo/.claude/settings.json.bak"}}, ""},
 		{"a sequence split by another segment", ToolCall{Tool: "Write", Targets: []string{"/repo/.claude/x/settings.json"}}, ""},
 		{"a read names no rule path", ToolCall{Tool: "Read", Targets: []string{"/tmp/x/moved/.millennium/config.json"}}, ""},
 		{"a shell command is not a path", ToolCall{Tool: "Bash", Command: "ls", Targets: []string{"/repo/.millennium/config.json"}}, ""},
+		{"a relative path from the repository", ToolCall{Tool: "Write", Targets: []string{".millennium/config.json"}}, ".millennium is protected"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertGuard(t, cfg, tt.call, tt.want)
+		})
+	}
+}
+
+// Win32 strips a name's trailing dots and spaces and opens `name:stream`
+// as a stream of name, so on Windows these spellings create or change the
+// protected files themselves. The guard reads every segment that way on
+// every OS.
+func TestGuardReadsProtectedNamesAsWin32Does(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct {
+		name string
+		call ToolCall
+		want string // "" means allowed
+	}{
+		{"local settings with a trailing dot", ToolCall{Tool: "Write", Targets: []string{`C:/repo/.claude/settings.local.json.`}}, ".claude/settings.local.json is protected"},
+		{"settings with a trailing space", ToolCall{Tool: "Write", Targets: []string{`C:/repo/.claude/settings.json `}}, ".claude/settings.json is protected"},
+		{"extensions with a trailing dot", ToolCall{Tool: "Write", Targets: []string{`C:/repo/.pi/extensions./x.ts`}}, ".pi/extensions is protected"},
+		{"the data stream of settings", ToolCall{Tool: "Edit", Targets: []string{`C:/repo/.claude/settings.json::$DATA`}}, ".claude/settings.json is protected"},
+		{"a named stream of pi settings", ToolCall{Tool: "Write", Targets: []string{`C:/repo/.pi/settings.json:x`}}, ".pi/settings.json is protected"},
+		{"the config directory with dots and spaces", ToolCall{Tool: "Write", Targets: []string{`C:/repo/.Millennium. ./config.json`}}, ".millennium is protected"},
+		{"a directory stream of .pi", ToolCall{Tool: "Write", Targets: []string{`C:/repo/.pi::$INDEX_ALLOCATION/extensions/x.ts`}}, ".pi/extensions is protected"},
+		{"another name that only starts like one", ToolCall{Tool: "Write", Targets: []string{`C:/repo/.claude/settings.json.bak`, `C:/repo/.millennium-old/x`}}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -184,25 +212,72 @@ func TestQATesterReadRuleIgnoresCase(t *testing.T) {
 }
 
 func TestPathNeedOf(t *testing.T) {
+	targets, paths, both := PathNeed{Targets: true}, PathNeed{Paths: true}, PathNeed{Targets: true, Paths: true}
 	tests := []struct {
 		tool, role string
 		want       PathNeed
 	}{
-		{"Write", "", NeedTargets},
-		{"Edit", RoleQATester, NeedTargets},
-		{"NotebookEdit", RoleSoftwareEngineer, NeedWorktreePaths},
-		{"MultiEdit", RoleSoftwareEngineer, NeedWorktreePaths},
-		{"Read", RoleQATester, NeedWorktreePaths},
-		{"Glob", RoleQATester, NeedWorktreePaths},
-		{"Read", "", NeedNoPaths},
-		{"Grep", RoleSoftwareEngineer, NeedNoPaths},
-		{"Bash", RoleQATester, NeedNoPaths},
-		{"WebFetch", "", NeedNoPaths},
+		{"Write", "", targets},
+		{"Edit", RoleQATester, targets},
+		{"NotebookEdit", RoleSoftwareEngineer, both},
+		{"MultiEdit", RoleSoftwareEngineer, both},
+		{"Read", RoleQATester, paths},
+		{"Glob", RoleQATester, paths},
+		{"Read", "", PathNeed{}},
+		{"Grep", RoleSoftwareEngineer, PathNeed{}},
+		{"Bash", RoleQATester, PathNeed{}},
+		{"WebFetch", "", PathNeed{}},
 	}
 	for _, tt := range tests {
-		if got := PathNeedOf(tt.tool, tt.role); got != tt.want {
-			t.Errorf("PathNeedOf(%q, %q) = %q, want %q", tt.tool, tt.role, got, tt.want)
+		got := PathNeedOf(tt.tool, tt.role)
+		if got != tt.want || got.Any() != (tt.want != PathNeed{}) {
+			t.Errorf("PathNeedOf(%q, %q) = %+v (any %v), want %+v", tt.tool, tt.role, got, got.Any(), tt.want)
 		}
+	}
+}
+
+// What the hook locates (PathNeedOf) must cover everything the guard
+// reads: a rule that reads the Paths or the Targets of a call that
+// PathNeedOf says needs none would get none from the hook and allow
+// silently. So for every tool and role, a path a rule would deny must not
+// change the decision through a field PathNeedOf leaves out, and must
+// change it through a field it names, which shows the probes reach the
+// rules. The Paths are probed with what only a role rule denies: the
+// protected paths in them are also in the Targets they are placed from.
+func TestPathNeedOfCoversWhatGuardReads(t *testing.T) {
+	cfg := guardConfig(t)
+	tools := slices.Concat(writeTools(), readTools(), []string{"Bash", "WebFetch", "Task", ""})
+	roles := []string{"", RoleSoftwareEngineer, RoleQATester, "tech-lead"}
+	roleProbes := []string{"tests/acceptance/a_test.go", "services/a/api/main.go", ""}
+	targetProbes := append([]string{"/repo/.millennium/config.json", "/repo/.pi/extensions/x.ts"}, roleProbes...)
+	for _, tool := range tools {
+		for _, role := range roles {
+			need := PathNeedOf(tool, role)
+			base := ToolCall{Tool: tool, Role: role, Command: "ls"}
+			assertProbes(t, cfg, base, need.Paths, func(c *ToolCall, p string) { c.Paths = []string{p} }, roleProbes)
+			assertProbes(t, cfg, base, need.Targets, func(c *ToolCall, p string) { c.Targets = []string{p} }, targetProbes)
+		}
+	}
+}
+
+// assertProbes sets each probe in a field of base with set: when the field
+// is not needed no probe may change the decision; when it is, some probe
+// must deny.
+func assertProbes(t *testing.T, cfg Config, base ToolCall, needed bool, set func(*ToolCall, string), probes []string) {
+	t.Helper()
+	if Guard(cfg, base).Deny {
+		t.Fatalf("%s by %q: denied with no paths", base.Tool, base.Role)
+	}
+	denied := 0
+	for _, p := range probes {
+		call := base
+		set(&call, p)
+		if Guard(cfg, call).Deny {
+			denied++
+		}
+	}
+	if needed != (denied > 0) {
+		t.Errorf("%s by %q: %d of %d probes denied, but PathNeedOf says the field is needed: %v", base.Tool, base.Role, denied, len(probes), needed)
 	}
 }
 

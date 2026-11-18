@@ -284,6 +284,47 @@ func TestHookToleratesAWorktreeThatCannotBeResolved(t *testing.T) {
 	}
 }
 
+// symlink makes link lead to target, a directory it creates.
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := errors.Join(os.MkdirAll(target, 0o755), os.Symlink(target, link)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A protected location reached through a symlink is protected by its real
+// path too: with `.pi` a symlink to `conf`, pi loads `conf/extensions` as
+// its extensions. This holds in the acting checkout and, for an engineer's
+// write, in every other worktree; a protected location that cannot be
+// resolved blocks the writes.
+func TestHookProtectsLocationsReachedThroughASymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows needs a privilege tests do not have")
+	}
+	root, other, _ := optedInRepo(t)
+	symlink(t, filepath.Join(root, "conf"), filepath.Join(root, ".pi"))
+	symlink(t, filepath.Join(other, "cl"), filepath.Join(other, ".claude"))
+	if err := os.Rename(filepath.Join(other, ".millennium"), filepath.Join(other, "m2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(other, "m2"), filepath.Join(other, ".millennium")); err != nil {
+		t.Fatal(err)
+	}
+	engineer := "millennium:software-engineer"
+	assertHookCases(t, []hookCase{
+		{name: "a pi extension by its real path", event: toolEvent(root, "Write", "", filepath.Join(root, "conf", "extensions", "evil.ts")), want: denied},
+		{name: "pi's settings by its real path", event: toolEvent(root, "Edit", "", filepath.Join(root, "conf", "settings.json")), want: denied},
+		{name: "a file beside them", event: toolEvent(root, "Write", "", filepath.Join(root, "conf", "notes.md"))},
+		{name: "Claude settings by their real path, in the acting worktree", event: toolEvent(other, "Write", "", filepath.Join(other, "cl", "settings.json")), want: denied},
+		{name: "another worktree's config by its real path, for an engineer", event: toolEvent(root, "Write", engineer, filepath.Join(other, "m2", "config.json")), want: denied},
+	})
+	if err := os.Symlink(filepath.Join(root, "nowhere"), filepath.Join(other, ".pi")); err != nil {
+		t.Fatal(err)
+	}
+	assertHookCases(t, []hookCase{{name: "a dangling protected location", event: toolEvent(other, "Write", "", filepath.Join(other, "main.go")),
+		wantCode: 2, want: "cannot resolve the protected location"}})
+}
+
 // The hooks compare absolute paths, so a relative local config directory
 // is refused rather than compared with nothing.
 func TestLocalConfigNeedsAnAbsoluteDirectory(t *testing.T) {

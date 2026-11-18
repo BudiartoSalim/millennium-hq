@@ -36,18 +36,52 @@ func RelativeFold(base, target string) (string, bool) {
 	return strings.Join(targetSegments[len(baseSegments):], "/"), true
 }
 
+// RebaseFold moves target, slash-separated, from below from to below to:
+// when target is from or lies below it, comparing whole segments without
+// regard to case and each as Win32 opens it (see win32Name), it returns to
+// joined with the rest of target, in target's spelling. It names a target
+// reached through a symlink as the path the symlink is reached by.
+func RebaseFold(target, from, to string) (string, bool) {
+	fromSegments := strings.Split(strings.TrimSuffix(from, "/"), "/")
+	targetSegments := strings.Split(target, "/")
+	if len(targetSegments) < len(fromSegments) {
+		return "", false
+	}
+	for i, segment := range fromSegments {
+		if !strings.EqualFold(win32Name(targetSegments[i]), win32Name(segment)) {
+			return "", false
+		}
+	}
+	return strings.Join(append([]string{strings.TrimSuffix(to, "/")}, targetSegments[len(fromSegments):]...), "/"), true
+}
+
 // hasSegmentsFold reports whether p, slash-separated, holds the segments of
 // seq one after another anywhere, comparing whole segments without regard
-// to case: "/x/.Millennium/config.json" holds ".millennium", and
-// "a/.claude/settings.json" holds ".claude/settings.json".
+// to case and each of p's as Win32 opens it (see win32Name):
+// "/x/.Millennium/config.json" holds ".millennium", and
+// "a/.claude/settings.json." holds ".claude/settings.json".
 func hasSegmentsFold(p, seq string) bool {
 	segments, want := strings.Split(p, "/"), strings.Split(seq, "/")
+	for i, segment := range segments {
+		segments[i] = win32Name(segment)
+	}
 	for start := 0; start+len(want) <= len(segments); start++ {
 		if equalSegmentsFold(segments[start:start+len(want)], want) {
 			return true
 		}
 	}
 	return false
+}
+
+// win32Name is the name Win32 opens for a path segment: it cuts the
+// segment at its first ':', which starts an alternate data stream
+// (`settings.json::$DATA` is the file itself, `.pi::$INDEX_ALLOCATION` the
+// directory), and strips trailing dots and spaces (`extensions.` is
+// `extensions`). It applies on every OS: the engine cannot tell from a path
+// which OS opens it, and elsewhere it only matches a few more names.
+func win32Name(segment string) string {
+	name, _, _ := strings.Cut(segment, ":")
+	return strings.TrimRight(name, ". ")
 }
 
 // equalSegmentsFold reports whether a and b, of equal length, hold the same

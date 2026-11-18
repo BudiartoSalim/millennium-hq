@@ -138,7 +138,7 @@ written.
 |---|---|
 | `scope/out-of-scope` | A changed file matches no `--allow` pattern. |
 | `scope/acceptance-test-changed` | The branch changes an acceptance test. |
-| `scope/protected-path` | The branch changes `.millennium/`, the project's Claude settings, or pi's project settings or extensions (`.pi/settings.json`, `.pi/extensions/`). |
+| `scope/protected-path` | The branch changes `.millennium/`, the project's Claude settings, or pi's project settings or extensions (`.pi/settings.json`, `.pi/extensions/`), matched as the guard matches them: anywhere in the path (`sub/.millennium/config.json`, `pkg/.pi/extensions/a.ts`), without regard to case (`.Claude/Settings.json`), and with each name read as Windows opens it (`settings.json.`, `settings.json::$DATA`). It fires even inside the `--allow` patterns. |
 
 ## `millennium-code-qc hook`
 
