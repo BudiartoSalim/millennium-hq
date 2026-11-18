@@ -109,39 +109,35 @@ func TestRepoPathFailsOnAnUnresolvablePath(t *testing.T) {
 	}
 }
 
-// MapPath maps into any tree, such as the local config directory: one that
-// does not exist yet, one reached through a symlink, and one named in a
-// different case, as a case-insensitive file system would read it.
-func TestMapPath(t *testing.T) {
-	base := t.TempDir()
+// Resolve names what a path reaches: through a symlink, below a part that
+// does not exist yet, and as an error when an existing part cannot be
+// resolved, since what the path reaches is then unknown.
+func TestResolve(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	local := filepath.Join(base, "config", "millennium", "projects")
-	fresh := filepath.Join(base, "fresh", "millennium", "projects")
 	repo := filepath.Join(base, "repo")
 	if err := errors.Join(os.MkdirAll(local, 0o755), os.MkdirAll(repo, 0o755)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(local, filepath.Join(repo, "lclink")); err != nil {
+	if err := errors.Join(os.Symlink(local, filepath.Join(repo, "lclink")), os.Symlink(filepath.Join(base, "nowhere"), filepath.Join(repo, "dangling"))); err != nil {
 		t.Fatal(err)
 	}
-	tests := []struct {
-		name, root, abs, want string
-		outside               bool
-	}{
-		{name: "a root that does not exist yet", root: fresh, abs: filepath.Join(fresh, "ab", "config.json"), want: "ab/config.json"},
-		{name: "through a symlink into the root", root: local, abs: filepath.Join(repo, "lclink", "abc", "config.json"), want: "abc/config.json"},
-		{name: "the root in another case", root: repo, abs: filepath.Join(base, "REPO", "x.go"), want: "x.go"},
-		{name: "the root itself", root: repo, abs: repo, want: ""},
-		{name: "outside", root: local, abs: filepath.Join(repo, "x.go"), outside: true},
+	tests := []struct{ name, abs, want, wantErr string }{
+		{name: "through a symlink", abs: filepath.Join(repo, "lclink", "abc", "config.json"), want: filepath.Join(local, "abc", "config.json")},
+		{name: "a path that does not exist yet", abs: filepath.Join(base, "fresh", "a", "b.json"), want: filepath.Join(base, "fresh", "a", "b.json")},
+		{name: "cleaned as text", abs: repo + "//x/./y", want: filepath.Join(repo, "x", "y")},
+		{name: "a dangling symlink", abs: filepath.Join(repo, "dangling", "x"), wantErr: "resolve"},
+		{name: "a relative path", abs: filepath.Join("relative", "config.json"), wantErr: "not an absolute path"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MapPath(tt.root, tt.abs)
-			if errors.Is(err, ErrOutsideRepository) != tt.outside || !tt.outside && (err != nil || got != tt.want) {
-				t.Fatalf("MapPath(%q, %q) = %q, %v; want %q, outside %v", tt.root, tt.abs, got, err, tt.want, tt.outside)
+			got, err := Resolve(tt.abs)
+			if got != tt.want || !errorMatches(err, tt.wantErr) {
+				t.Fatalf("Resolve(%q) = %q, %v; want %q, error %q", tt.abs, got, err, tt.want, tt.wantErr)
 			}
 		})
-	}
-	if _, err := MapPath(local, "relative/config.json"); err == nil || errors.Is(err, ErrOutsideRepository) || !strings.Contains(err.Error(), "not an absolute path") {
-		t.Fatalf("a relative path: err = %v, want a failure other than outside", err)
 	}
 }

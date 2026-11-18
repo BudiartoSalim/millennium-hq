@@ -60,41 +60,64 @@ conventions.
 
 | Rule | Applies to | Denied |
 |---|---|---|
-| Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off) |
-| Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`): the engineer cannot change the tests that judge its work |
-| Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
+| Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off), wherever they lie |
+| Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`), in any worktree of the repository: the engineer cannot change the tests that judge its work |
+| Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one, in any worktree of the repository; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
 | Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path |
 
 The guard checks every path a tool names twice: as written, and with its
-symlinks resolved (in the repository root, and in the longest part of the
-path that exists, since a write may create the rest). So a symlink to a
-protected file, or a path into the repository through a symlinked
-directory, is denied like the protected path itself. A relative path is
-taken from the event's working directory, even one that no longer exists,
-never from the engine's own. A path outside the repository both ways is
-left alone. A path the engine cannot map for any other reason, such as a
-dangling symlink, a path below a file, or a directory it may not search,
-blocks the call with the reason, because it might lead to a protected path.
-So does a path with a `..` part: the OS follows a symlink before it takes
-`..`, so such a path can lead elsewhere than it reads. Name the path
-without `..`, such as by its absolute path.
+symlinks resolved in the longest part of the path that exists (a write may
+create the rest). So a symlink to a protected file, or a path through a
+symlinked directory, is denied like the protected path itself. A relative
+path is taken from the event's working directory, even one that no longer
+exists, never from the engine's own. A path the engine cannot resolve,
+such as one through a dangling symlink, below a file, or in a directory it
+may not search, blocks the call with the reason, because it might lead to
+a protected path. So does a path with a `..` part: the OS follows a
+symlink before it takes `..`, so such a path can lead elsewhere than it
+reads. Name the path without `..`, such as by its absolute path. On
+Windows, so does a path that is neither absolute nor plainly relative: a
+rooted one (`\repo\file`, on the current drive) or a drive-relative one
+(`C:file`, from that drive's own working directory), which the OS does not
+read from the session's directory. Name such a path in full.
 
-The write rules (protected paths, and acceptance tests for the
-software-engineer) apply in every worktree of the repository, not only the
-one the agent is in: each path is also checked against the main checkout
-and every linked worktree that `git worktree list` names, so an agent in
-one worktree cannot change the rules of another, nor of the main checkout.
-What qa-tester may read is decided in the worktree it works in.
+A protected path is protected wherever it lies: `.millennium` as any
+segment of a path, and `.claude/settings.json`, `.claude/settings.local.json`,
+`.pi/settings.json` and `.pi/extensions` as segments one after another
+anywhere in it. So no agent writes the rules of the repository, of any of
+its worktrees (the main checkout, a linked worktree, one moved with plain
+`mv` that git no longer lists, or one whose path git cannot list clearly),
+or of any other checkout on the machine. A directory of yours that merely
+has such a segment in its path is protected too.
 
-Protected paths and the acceptance tests match without regard to case, on
-every OS: on a case-insensitive file system (macOS, Windows, WSL on a
-Windows drive) `.MILLENNIUM/config.json` is the config. On a
-case-sensitive one this denies a few extra paths.
+The role rules (acceptance tests, black box) apply in every worktree of
+the repository: each path is placed in the worktree it lies in, the
+innermost one where worktrees nest (Claude Code's lie inside the main
+checkout's `.claude/worktrees/`), and checked there; a searched directory
+that holds a whole worktree reaches all of it. They apply the acting
+session's config, the rules that session is checked against, to every
+worktree: another worktree's acceptance tests are those under the acting
+session's `paths.acceptanceTests`, and its components those of the acting
+session's config. The worktrees are those `git worktree list` names, asked
+only for a role rule (the software-engineer's writes and the qa-tester's
+reads) in an opted-in repository whose git directory has linked worktrees.
+A list that cannot be read unambiguously, such as one with a worktree whose
+path holds a newline, blocks the call with the reason. A worktree whose
+root cannot be resolved, its parent replaced by a dangling symlink or a
+file, is compared as git names it and blocks nothing.
+
+Every path rule matches without regard to case, on every OS: on a
+case-insensitive file system (macOS, Windows, WSL on a Windows drive)
+`.MILLENNIUM/config.json` is the config, and `SRC/Main.go` is code in the
+`src` component. On a case-sensitive one this denies a few extra paths.
+The one exception is the acceptance tests for the qa-tester, which only
+allow: they match as spelled, so another spelling never allows more.
 
 The local configs, which lie outside the repository, are matched the same
 way: as written and with symlinks resolved, without regard to case, so a
-symlink in the repository does not reach them. A path that cannot be
-resolved there blocks the call.
+symlink in the repository does not reach them. Paths are compared
+absolute, so `MILLENNIUM_LOCAL_DIR`, when set, must be an absolute path; a
+relative one blocks every event with a message saying so.
 
 If the config cannot be read, every file change is denied until a human fixes
 it, because the protected paths are unknown; reads stay allowed.

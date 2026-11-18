@@ -201,20 +201,17 @@ func (r *Repository) relativeTo(cwd, arg string) (string, error) {
 	return mapResolved(r.root, target, arg)
 }
 
-// MapPath maps abs, an absolute path, into the tree at root, which need not
-// be a repository: the result is relative to root, slash-separated, and ""
-// for root itself. Symlinks are resolved on both sides, in the longest part
-// of each that exists, so a path through a symlink maps to what it reaches,
-// and a root or path that does not exist yet still maps. Case is ignored
-// in the part that names root, as a case-insensitive file system would.
-// abs is cleaned as text, so a caller that cannot trust its ".." parts
-// refuses them first. A path outside root is ErrOutsideRepository; any
-// other failure is an error of its own.
-func MapPath(root, abs string) (string, error) {
+// Resolve is abs, an absolute path, cleaned and with its symlinks resolved
+// in the longest part of it that exists, so a path through a symlink names
+// what it reaches, and one that does not exist yet (a write may create the
+// rest) still resolves. abs is cleaned as text, so a caller that cannot
+// trust its ".." parts refuses them first. A part that exists but cannot
+// be resolved or looked at is an error: what the path reaches is unknown.
+func Resolve(abs string) (string, error) {
 	if !filepath.IsAbs(abs) {
-		return "", fmt.Errorf("cannot map %s: it is not an absolute path", abs)
+		return "", fmt.Errorf("cannot resolve %s: it is not an absolute path", abs)
 	}
-	return mapResolved(root, filepath.Clean(abs), abs)
+	return resolveExisting(filepath.Clean(abs))
 }
 
 // mapResolved maps target, absolute and clean, into root, both with their
@@ -344,13 +341,9 @@ func parentDir(dir string) string {
 // Identity names the repository stably across its worktrees: the resolved
 // path of git's common directory, which every worktree of a clone shares.
 func (r *Repository) Identity(ctx context.Context) (string, error) {
-	out, err := r.git(ctx, "rev-parse", "--git-common-dir")
+	dir, err := r.gitCommonDir(ctx)
 	if err != nil {
-		return "", fmt.Errorf("find the git directory: %w", err)
-	}
-	dir := trimLine(out)
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(r.root, dir)
+		return "", err
 	}
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {

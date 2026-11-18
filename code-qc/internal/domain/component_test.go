@@ -117,6 +117,45 @@ func TestComponentForReportsTiesAndMisses(t *testing.T) {
 	}
 }
 
+// Reaches decides what qa-tester may read, so it matches without regard to
+// case: on a case-insensitive file system each spelling is the same file.
+func TestReaches(t *testing.T) {
+	cfg := serverScriptsConfig(t)
+	tied, err := NewConfig(monorepo(
+		ComponentInput{Paths: []string{"services/*/api"}, Languages: []string{"go"}},
+		ComponentInput{Paths: []string{"*/game/api"}, Languages: []string{"go"}},
+	))
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	single, err := NewConfig(minimalInput())
+	if err != nil {
+		t.Fatalf("NewConfig: %v", err)
+	}
+	tests := []struct {
+		name string
+		cfg  Config
+		dir  string
+		want bool
+	}{
+		{"inside a component", cfg, "services/game/api/internal", true},
+		{"inside a component, upper case", cfg, "SERVICES/GAME/API/internal", true},
+		{"a component root, mixed case", cfg, "Services/Identity/Api", true},
+		{"above a component, mixed case", cfg, "Services", true},
+		{"the repository root", cfg, "", true},
+		{"claimed by two components", tied, "services/game/api", true},
+		{"outside every component", cfg, "scripts/install", false},
+		{"a directory a pattern can match", cfg, "scripts", true},
+		{"outside, upper case", cfg, "SCRIPTS/x", false},
+		{"anywhere in a single project", single, "Docs/x", true},
+	}
+	for _, tt := range tests {
+		if got := tt.cfg.Reaches(tt.dir); got != tt.want {
+			t.Errorf("%s: Reaches(%q) = %v, want %v", tt.name, tt.dir, got, tt.want)
+		}
+	}
+}
+
 func TestConfigExcluded(t *testing.T) {
 	in := minimalInput()
 	in.Exclude = []string{"**/node_modules/**", "dist"}

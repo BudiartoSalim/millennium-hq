@@ -101,20 +101,31 @@ func (c Config) ComponentFor(file string) (ComponentMatch, bool, error) {
 
 // Reaches reports whether dir holds component code: it is inside a component,
 // or a component root can lie inside it, so reading or searching dir would
-// reach that component's files.
+// reach that component's files. Segments match without regard to case, as
+// on a case-insensitive file system `Services/API` is `services/api`: a
+// read rule that matched only one spelling would let the others through.
 func (c Config) Reaches(dir string) bool {
-	if _, owned, err := c.ComponentFor(path.Join(dir, "x")); owned || err != nil {
-		return true
-	}
 	segments := splitPath(dir)
 	for _, component := range c.Components {
 		for _, pattern := range component.Patterns {
-			if len(segments) <= len(pattern.segments) && matchSegments(pattern.segments[:len(segments)], segments) {
+			if prefixesMatchFold(pattern.segments, segments) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// prefixesMatchFold reports whether pattern and segments match as far as
+// the shorter of them goes: dir is then inside the component, or holds a
+// directory the pattern can match.
+func prefixesMatchFold(pattern, segments []string) bool {
+	for i := range min(len(pattern), len(segments)) {
+		if !matchSegmentFold(pattern[i], segments[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // components validates the component list, or turns the single-project form

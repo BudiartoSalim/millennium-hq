@@ -44,6 +44,46 @@ func TestWithinFold(t *testing.T) {
 	}
 }
 
+func TestHasSegmentsFold(t *testing.T) {
+	for _, tt := range []struct {
+		p, seq string
+		want   bool
+	}{
+		{"/tmp/x/moved/.millennium/config.json", ".millennium", true},
+		{".millennium", ".millennium", true},
+		{"/home/u/.CLAUDE/Settings.json", ".claude/settings.json", true},
+		{"C:/work/.pi/extensions", ".pi/extensions", true},
+		{"/repo/.claude/\u017fettings.json", ".claude/settings.json", true},
+		{"/repo/.millenniumx/config.json", ".millennium", false},
+		{"/repo/x.millennium/config.json", ".millennium", false},
+		{"/repo/.claude/x/settings.json", ".claude/settings.json", false},
+		{"/repo/.claude", ".claude/settings.json", false},
+		{"", ".millennium", false},
+	} {
+		if got := hasSegmentsFold(tt.p, tt.seq); got != tt.want {
+			t.Errorf("hasSegmentsFold(%q, %q) = %v, want %v", tt.p, tt.seq, got, tt.want)
+		}
+	}
+}
+
+func TestMatchSegmentFold(t *testing.T) {
+	for _, tt := range []struct {
+		pattern, name string
+		want          bool
+	}{
+		{"api", "API", true},
+		{"svc-*", "SVC-Billing", true},
+		{"?pi", "Api", true},
+		{"services", "\u017fervices", true},
+		{"api", "apis", false},
+		{"svc-*", "web", false},
+	} {
+		if got := matchSegmentFold(tt.pattern, tt.name); got != tt.want {
+			t.Errorf("matchSegmentFold(%q, %q) = %v, want %v", tt.pattern, tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestContainsFold(t *testing.T) {
 	for _, tt := range []struct {
 		s, sub string

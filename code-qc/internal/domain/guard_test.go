@@ -3,6 +3,7 @@ package domain
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -101,27 +102,138 @@ func TestGuardIgnoresCaseInProtectedPaths(t *testing.T) {
 	}
 }
 
-// An agent may change the rules of no checkout of the repository: paths in
-// the other worktrees get the write rules. What qa-tester may read is
-// decided in its own worktree only, so a path elsewhere does not deny a read.
-func TestGuardChecksWritesInOtherWorktrees(t *testing.T) {
+// A protected path is protected wherever it lies: matched as whole
+// segments anywhere in a path the call names, as named or resolved, in any
+// checkout or directory, so a worktree git no longer lists keeps its rules.
+func TestGuardMatchesProtectedPathsAnywhere(t *testing.T) {
 	cfg := guardConfig(t)
 	tests := []struct {
 		name string
 		call ToolCall
 		want string // "" means allowed
 	}{
-		{"the main checkout's config", ToolCall{Tool: "Write", Paths: []string{".claude/worktrees/a/x"}, OtherWorktreePaths: []string{".millennium/config.json"}}, ".millennium is protected"},
-		{"another worktree's settings, upper case", ToolCall{Tool: "Edit", OtherWorktreePaths: []string{".CLAUDE/settings.local.json"}}, ".claude/settings.local.json is protected"},
-		{"another worktree's acceptance tests", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, OtherWorktreePaths: []string{"tests/acceptance/a_test.go"}}, "acceptance test"},
-		{"code in another worktree", ToolCall{Tool: "Edit", OtherWorktreePaths: []string{"services/a/api/main.go"}}, ""},
-		{"qa-tester reads code there", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"docs/spec.md"}, OtherWorktreePaths: []string{"services/a/api/main.go"}}, ""},
-		{"a shell command is not a path", ToolCall{Tool: "Bash", Command: "ls", OtherWorktreePaths: []string{".millennium/config.json"}}, ""},
+		{"a moved worktree's config", ToolCall{Tool: "Write", Targets: []string{"/tmp/x/moved/.millennium/config.json"}}, ".millennium is protected"},
+		{"a worktree named with a newline", ToolCall{Tool: "Edit", Targets: []string{"/repo/.claude/worktrees/a\nb/.millennium/config.json"}}, ".millennium is protected"},
+		{"resolved into another checkout", ToolCall{Tool: "Write", Targets: []string{"/repo/src/link.json", "/elsewhere/.Millennium/deps/x.json"}}, ".millennium is protected"},
+		{"another directory's settings, upper case", ToolCall{Tool: "Edit", Targets: []string{"/home/u/.CLAUDE/settings.local.json"}}, ".claude/settings.local.json is protected"},
+		{"a pi extension anywhere", ToolCall{Tool: "MultiEdit", Targets: []string{"C:/work/app/.pi/extensions/sub/off.ts"}}, ".pi/extensions is protected"},
+		{"pi settings in a subdirectory", ToolCall{Tool: "NotebookEdit", Paths: []string{"vendor/x/.pi/settings.json"}}, ".pi/settings.json is protected"},
+		{"a name that only starts like one", ToolCall{Tool: "Write", Targets: []string{"/repo/.millenniumx/config.json", "/repo/.claude/settings.json.bak"}}, ""},
+		{"a sequence split by another segment", ToolCall{Tool: "Write", Targets: []string{"/repo/.claude/x/settings.json"}}, ""},
+		{"a read names no rule path", ToolCall{Tool: "Read", Targets: []string{"/tmp/x/moved/.millennium/config.json"}}, ""},
+		{"a shell command is not a path", ToolCall{Tool: "Bash", Command: "ls", Targets: []string{"/repo/.millennium/config.json"}}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assertGuard(t, cfg, tt.call, tt.want)
 		})
+	}
+}
+
+// The role rules read the paths in every worktree of the repository, with
+// the acting session's config: the software engineer writes no acceptance
+// test of any checkout, and qa-tester reads no component code through
+// another checkout's path.
+func TestGuardAppliesRoleRulesInEveryWorktree(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct {
+		name string
+		call ToolCall
+		want string // "" means allowed
+	}{
+		{"another worktree's acceptance tests", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Paths: []string{".claude/worktrees/a/tests/acceptance/a_test.go", "tests/acceptance/a_test.go"}}, "acceptance test"},
+		{"code in another worktree", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Paths: []string{"services/a/api/main.go"}}, ""},
+		{"qa-tester reads code there", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"docs/spec.md", "services/a/api/main.go"}}, "services/a/api/main.go is implementation code"},
+		{"qa-tester searches a directory holding a worktree", ToolCall{Tool: "Grep", Role: RoleQATester, Paths: []string{".claude", ""}}, "the repository root is implementation code"},
+		{"qa-tester reads acceptance tests there", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"tests/acceptance/login_test.go"}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertGuard(t, cfg, tt.call, tt.want)
+		})
+	}
+}
+
+// On a case-insensitive file system qa-tester could otherwise read
+// component code under another spelling. The acceptance tests, an
+// exception that allows, still match only as spelled.
+func TestQATesterReadRuleIgnoresCase(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct {
+		name string
+		call ToolCall
+		want string // "" means allowed
+	}{
+		{"code, upper case", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"SERVICES/A/API/main.go"}}, "implementation code"},
+		{"code, mixed case", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"Services/b/Api/internal/x.go"}}, "implementation code"},
+		{"a search above a component, mixed case", ToolCall{Tool: "Glob", Role: RoleQATester, Paths: []string{"Services/A"}}, "implementation code"},
+		{"a document, upper case", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"SERVICES/A/API/README.MD"}}, ""},
+		{"elsewhere, upper case", ToolCall{Tool: "Grep", Role: RoleQATester, Paths: []string{"DOCS"}}, ""},
+		{"acceptance tests in another case inside a component", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"Services/A/API/tests/acceptance/x_test.go"}}, "implementation code"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertGuard(t, cfg, tt.call, tt.want)
+		})
+	}
+	single, err := NewConfig(minimalInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGuard(t, single, ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"Tests/Acceptance/login_test.go"}}, "implementation code")
+}
+
+func TestPathNeedOf(t *testing.T) {
+	tests := []struct {
+		tool, role string
+		want       PathNeed
+	}{
+		{"Write", "", NeedTargets},
+		{"Edit", RoleQATester, NeedTargets},
+		{"NotebookEdit", RoleSoftwareEngineer, NeedWorktreePaths},
+		{"MultiEdit", RoleSoftwareEngineer, NeedWorktreePaths},
+		{"Read", RoleQATester, NeedWorktreePaths},
+		{"Glob", RoleQATester, NeedWorktreePaths},
+		{"Read", "", NeedNoPaths},
+		{"Grep", RoleSoftwareEngineer, NeedNoPaths},
+		{"Bash", RoleQATester, NeedNoPaths},
+		{"WebFetch", "", NeedNoPaths},
+	}
+	for _, tt := range tests {
+		if got := PathNeedOf(tt.tool, tt.role); got != tt.want {
+			t.Errorf("PathNeedOf(%q, %q) = %q, want %q", tt.tool, tt.role, got, tt.want)
+		}
+	}
+}
+
+// A path is placed in the worktree it lies in, the innermost one, since
+// Claude Code's worktrees lie inside the main checkout; a directory that
+// holds a worktree reaches it whole.
+func TestWorktreePaths(t *testing.T) {
+	roots := []string{"/repo", "/repo/.claude/worktrees/a", "/data/a", "/repo/.claude/worktrees/b"}
+	tests := []struct {
+		name    string
+		targets []string
+		want    []string
+	}{
+		{"a file in the main checkout", []string{"/repo/src/a.go"}, []string{"src/a.go"}},
+		{"a file in a nested worktree", []string{"/repo/.claude/worktrees/a/tests/acceptance/t.go"}, []string{"tests/acceptance/t.go"}},
+		{"named and resolved", []string{"/link/x.go", "/data/a/src/x.go"}, []string{"src/x.go"}},
+		{"another case", []string{"/REPO/.Claude/Worktrees/B/Src"}, []string{"Src"}},
+		{"a worktree root", []string{"/repo/.claude/worktrees/b"}, []string{""}},
+		{"a directory holding worktrees", []string{"/repo/.claude"}, []string{".claude", ""}},
+		{"a directory above every root", []string{"/"}, []string{""}},
+		{"outside every root", []string{"/elsewhere/x.go", "/repository/x.go"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := WorktreePaths(tt.targets, roots); !slices.Equal(got, tt.want) {
+				t.Fatalf("WorktreePaths(%q) = %q, want %q", tt.targets, got, tt.want)
+			}
+		})
+	}
+	if got := WorktreePaths([]string{"/repo/x"}, nil); got != nil {
+		t.Fatalf("no roots: %q", got)
 	}
 }
 

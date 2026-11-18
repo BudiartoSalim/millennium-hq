@@ -82,9 +82,9 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 		Conventions:    usecase.NewConventions(files.Committed, files.Local, repo, configfile.Codec{}, writer, repo.Root()),
 		Root:           repo.Root(),
 		LocalConfigDir: localDir,
-		RepoPath:       repoPath(repo),
+		RepoPath:       repo.RepoPath,
 		OtherWorktrees: repo.OtherWorktrees,
-		MapPath:        mapPath,
+		ResolvePath:    gitrepo.Resolve,
 		ReadProposal:   configfile.ReadProposal,
 		Close:          closeAnalyzers,
 		EngineCommand:  engineCommand(),
@@ -146,31 +146,6 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 	return repo, err
 }
 
-// repoPath is the repository's RepoPath, reporting a path outside the
-// repository as cli.ErrOutsideRepository.
-func repoPath(repo *gitrepo.Repository) func(string) (string, error) {
-	return func(arg string) (string, error) {
-		p, err := repo.RepoPath(arg)
-		return p, outsideError(err)
-	}
-}
-
-// mapPath is gitrepo.MapPath, reporting a path outside root as
-// cli.ErrOutsideRepository.
-func mapPath(root, abs string) (string, error) {
-	p, err := gitrepo.MapPath(root, abs)
-	return p, outsideError(err)
-}
-
-// outsideError reports gitrepo.ErrOutsideRepository as
-// cli.ErrOutsideRepository, with its message, and passes any other error on.
-func outsideError(err error) error {
-	if errors.Is(err, gitrepo.ErrOutsideRepository) {
-		return fmt.Errorf("%w: %v", cli.ErrOutsideRepository, err)
-	}
-	return err
-}
-
 // gates lists every gate in the order reports show them.
 func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]port.Analyzer, approved port.ApprovalSource) []port.Gate {
 	tools := buildtools.New(repo.Root(), node)
@@ -189,13 +164,17 @@ func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]
 // per clone, named after the hash of git's common directory so every
 // worktree finds the same one, under MILLENNIUM_LOCAL_DIR or the user
 // config directory. Sandboxed agents cannot write there, and the hooks deny
-// their file tools too.
+// their file tools too, comparing absolute paths, so the directory must be
+// absolute.
 func localConfig(ctx context.Context, repo *gitrepo.Repository) (base, file string, err error) {
 	identity, err := repo.Identity(ctx)
 	if err != nil {
 		return "", "", err
 	}
 	base = os.Getenv("MILLENNIUM_LOCAL_DIR")
+	if base != "" && !filepath.IsAbs(base) {
+		return "", "", fmt.Errorf("MILLENNIUM_LOCAL_DIR is %s, which is not an absolute path; set it to one, or unset it", base)
+	}
 	if base == "" {
 		configDir, err := os.UserConfigDir()
 		if err != nil {
