@@ -1,0 +1,79 @@
+# Runs the engine's Windows-specific code on Windows: the path walk that
+# follows directory junctions and volume mount points, 8.3 short names, and
+# the guard end to end through a junction. Nothing else runs it, and it
+# cannot be run on Linux. See docs/releasing.md.
+#
+# No third-party actions, as in release-code-qc.yml: the commit is fetched
+# with git, and Go comes from the official zip, checked against a pinned
+# SHA-256.
+name: test-code-qc-windows
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: test-code-qc-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: go1.26.10
+  GO_SHA256_WINDOWS: 7ecd2d7260e82c59bcbd7f1077a07cee2dea607295b858df67195a1e4e09629b
+  GOTOOLCHAIN: local
+
+jobs:
+  test:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the commit
+        shell: bash
+        env:
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git init --quiet src
+          git -C src remote add origin "https://github.com/$REPO.git"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="Authorization: Basic $auth" \
+            git -C src -c core.autocrlf=false fetch --quiet --depth 1 origin "$SHA"
+          git -C src -c core.autocrlf=false checkout --quiet FETCH_HEAD
+      - name: Install Go
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'go.zip'
+          Invoke-WebRequest -Uri "https://dl.google.com/go/$env:GO_VERSION.windows-amd64.zip" -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:GO_SHA256_WINDOWS) { throw "go.zip has SHA-256 $hash, want $env:GO_SHA256_WINDOWS" }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
+          Join-Path $env:RUNNER_TEMP 'go\bin' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Check the Go version
+        shell: bash
+        run: |
+          set -euo pipefail
+          go version
+          test "$(go env GOVERSION)" = "$GO_VERSION"
+      - name: Vet the engine
+        working-directory: src/code-qc
+        shell: bash
+        run: go vet ./...
+      - name: Test the Windows-specific code
+        working-directory: src/code-qc
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 ./internal/infrastructure/gitrepo/... ./internal/domain/... ./internal/interface/cli/...
+          # The Windows tests by name, verbose, so a skip shows in the log; the
+          # junction tests must have run and passed, not just matched nothing.
+          go test -count=1 -v -run 'Junction|ShortNames' ./internal/infrastructure/gitrepo/ | tee ../../walk.log
+          grep -q -- '--- PASS: TestWalkFollowsAJunction ' ../../walk.log
+          go test -count=1 -v -run '^TestHookFollowsJunctionsOnWindows$' . | tee ../../hook.log
+          grep -q -- '--- PASS: TestHookFollowsJunctionsOnWindows ' ../../hook.log
