@@ -303,8 +303,10 @@ func (v *vanishedTree) deps(_ context.Context, dir string) (Deps, error) {
 	if err := v.failing[dir]; err != nil {
 		return Deps{Close: release}, err
 	}
-	return Deps{Guard: v.guard, Stop: &fakeStop{}, RepoPath: repoPath, Close: release}, nil
+	return Deps{Guard: v.guard, Stop: &fakeStop{}, RepoPath: repoPath, MapPath: mapPath, OtherWorktrees: noWorktrees, Close: release}, nil
 }
+
+func noWorktrees(context.Context) ([]string, error) { return nil, nil }
 
 func missingDirs(dirs ...string) func(string) bool {
 	return func(dir string) bool { return slices.Contains(dirs, dir) }
@@ -356,9 +358,9 @@ func TestHookInAVanishedCwd(t *testing.T) {
 			failing: map[string]error{worktree: errors.New("cannot change to it: Permission denied")},
 			tool:    "Bash", wantCode: 2, visited: []string{worktree}, wantOut: "Permission denied"},
 		{name: "a relative cwd does not walk", cwd: relative, missing: missingEverywhere,
-			tool: "Bash", wantCode: 2, visited: []string{relative}, wantOut: "does not exist"},
+			tool: "Bash", wantCode: 2, visited: []string{relative}, wantOut: "millennium-code-qc: the hook's cwd " + relative + " does not exist, and the engine looks for an existing parent only of an absolute path in clean form"},
 		{name: "an unclean cwd does not walk", cwd: unclean, missing: missingEverywhere,
-			tool: "Bash", wantCode: 2, visited: []string{unclean}, wantOut: "does not exist"},
+			tool: "Bash", wantCode: 2, visited: []string{unclean}, wantOut: "so the hook blocks: change to a directory that exists, such as the repository root\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -408,16 +410,16 @@ func TestHookWalksABoundedNumberOfParents(t *testing.T) {
 	}
 }
 
-// pathMapper is a fake Deps.RepoPath: mapped paths map, failing ones fail as
-// given, and any other is outside the repository. It records what it was
-// asked.
+// pathMapper is a fake Deps.MapPath for the repository's own root: mapped
+// paths map, failing ones fail as given, and any other is outside the
+// repository. It records what it was asked.
 type pathMapper struct {
 	mapped map[string]string
 	errs   map[string]error
 	asked  []string
 }
 
-func (m *pathMapper) repoPath(arg string) (string, error) {
+func (m *pathMapper) mapPath(_, arg string) (string, error) {
 	m.asked = append(m.asked, arg)
 	if err := m.errs[arg]; err != nil {
 		return "", err
@@ -444,7 +446,9 @@ type guardedCase struct {
 // The guard sees each path a tool names both as named and with symlinks
 // resolved, never through the process's working directory. A path outside
 // the repository either way is left out; a path that cannot be mapped for
-// any other reason blocks the call.
+// any other reason blocks the call, and so does one with a ".." part, which
+// the OS takes after following a symlink while text cleaning takes it
+// before.
 func TestPreToolUseMapsPathsForTheGuard(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "repo")
@@ -453,7 +457,17 @@ func TestPreToolUseMapsPathsForTheGuard(t *testing.T) {
 	throughLink := filepath.Join(parent, "repo-link", ".millennium", "config.json")
 	elsewhere := filepath.Join(parent, "elsewhere", "x.go")
 	gone := filepath.Join(root, "worktrees", "agent")
+	sep := string(filepath.Separator)
 	tests := []guardedCase{
+		{name: "a root named in another case is the root", cwd: root, path: filepath.Join(parent, "REPO", ".Millennium", "config.json"),
+			want: []string{".Millennium/config.json"}, asked: []string{filepath.Join(parent, "REPO", ".Millennium", "config.json")}},
+		{name: "a relative path without '..' joins the removed cwd", cwd: gone, path: filepath.Join("src", "new.go"),
+			mapped: map[string]string{filepath.Join(gone, "src", "new.go"): "worktrees/agent/src/new.go"},
+			want:   []string{"worktrees/agent/src/new.go"}, asked: []string{filepath.Join(gone, "src", "new.go")}},
+		{name: "a relative path with '..' blocks", cwd: gone, path: ".." + sep + ".." + sep + filepath.Join(".millennium", "config.json"),
+			wantCode: 2, wantErr: "has a '..' part, which the hook cannot check"},
+		{name: "an absolute path with '..' blocks", cwd: root, path: filepath.Join(parent, "l") + sep + ".." + sep + filepath.Join(".millennium", "config.json"),
+			wantCode: 2, wantErr: "name the path without '..', such as its absolute path"},
 		{name: "a path in the repository is checked once", cwd: root, path: protected,
 			mapped: map[string]string{protected: ".millennium/config.json"}, want: []string{".millennium/config.json"}, asked: []string{protected}},
 		{name: "a symlink is checked as named and as resolved", cwd: root, path: alias,
@@ -463,8 +477,6 @@ func TestPreToolUseMapsPathsForTheGuard(t *testing.T) {
 		{name: "a symlink to the repository is checked as resolved", cwd: root, path: throughLink,
 			mapped: map[string]string{throughLink: ".millennium/config.json"}, want: []string{".millennium/config.json"}, asked: []string{throughLink}},
 		{name: "a path outside either way is left out", cwd: root, path: elsewhere, asked: []string{elsewhere}},
-		{name: "a relative path joins the removed cwd", cwd: gone, path: filepath.Join("..", "..", ".millennium", "config.json"),
-			mapped: map[string]string{protected: ".millennium/config.json"}, want: []string{".millennium/config.json"}, asked: []string{protected}},
 		{name: "a path that cannot be mapped blocks", cwd: root, path: protected,
 			errs:  map[string]error{protected: errors.New("inspect " + protected + ": permission denied")},
 			asked: []string{protected}, wantCode: 2, wantErr: "cannot check the tool's path, so the call is blocked: inspect"},
@@ -483,7 +495,7 @@ func assertGuardedPaths(t *testing.T, root string, tt guardedCase) {
 	mapper := &pathMapper{mapped: tt.mapped, errs: tt.errs}
 	guard := &fakeGuard{}
 	factory := func(context.Context, string) (Deps, error) {
-		return Deps{Guard: guard, Root: root, RepoPath: mapper.repoPath}, nil
+		return Deps{Guard: guard, Root: root, MapPath: mapper.mapPath, OtherWorktrees: noWorktrees}, nil
 	}
 	var stdout, stderr bytes.Buffer
 	stdin := strings.NewReader(hookEvent(map[string]any{"hook_event_name": "PreToolUse", "cwd": tt.cwd, "tool_name": "Edit", "tool_input": map[string]any{"file_path": tt.path}}))
@@ -499,5 +511,120 @@ func assertGuardedPaths(t *testing.T, root string, tt guardedCase) {
 	}
 	if guard.got.Tool != "Edit" || !slices.Equal(guard.got.Paths, tt.want) {
 		t.Fatalf("the guard got %+v, want paths %q", guard.got, tt.want)
+	}
+}
+
+// domainGuard decides with the domain's guard, so a hook test sees the real
+// decision on the paths the hook mapped.
+type domainGuard struct{}
+
+func (domainGuard) Execute(_ context.Context, call domain.ToolCall) domain.GuardDecision {
+	return domain.Guard(domain.Config{AcceptanceTests: "tests/acceptance"}, call)
+}
+
+// worktreeCase is one PreToolUse event in a repository with several
+// worktrees.
+type worktreeCase struct {
+	name      string
+	root      string
+	worktrees []string
+	listErr   error
+	tool      string
+	input     map[string]any
+	want      string // "" means allowed
+	wantCode  int
+}
+
+// No agent changes the rules of any checkout of the repository: each path
+// is checked in the worktree the agent is in and in every other one, the
+// main checkout included, wherever the event's cwd is.
+func TestPreToolUseGuardsEveryWorktree(t *testing.T) {
+	main := filepath.Join(t.TempDir(), "repo")
+	linked := filepath.Join(main, ".claude", "worktrees", "agent")
+	other := filepath.Join(main, ".claude", "worktrees", "other")
+	file := func(p string) map[string]any { return map[string]any{"file_path": p} }
+	tests := []worktreeCase{
+		{name: "the main checkout's config from a linked worktree", root: linked, worktrees: []string{main, other},
+			tool: "Write", input: file(filepath.Join(main, ".millennium", "config.json")), want: ".millennium is protected"},
+		{name: "another worktree's config from the main checkout", root: main, worktrees: []string{linked, other},
+			tool: "Write", input: file(filepath.Join(other, ".millennium", "config.json")), want: ".millennium is protected"},
+		{name: "another worktree's settings in another case", root: main, worktrees: []string{other},
+			tool: "Edit", input: file(filepath.Join(other, ".Claude", "Settings.json")), want: ".claude/settings.json is protected"},
+		{name: "code in another worktree", root: linked, worktrees: []string{main, other},
+			tool: "Write", input: file(filepath.Join(other, "src", "a.go"))},
+		{name: "reading another worktree's config", root: linked, worktrees: []string{main},
+			tool: "Read", input: file(filepath.Join(main, ".millennium", "config.json"))},
+		{name: "worktrees that cannot be listed block a path", root: main, listErr: errors.New("git worktree list: exit status 129"),
+			tool: "Read", input: file(filepath.Join(main, "a.go")), wantCode: 2, want: "cannot check the tool's path in every worktree of the repository, so the call is blocked: git worktree list"},
+		{name: "a call without a path lists no worktree", root: main, listErr: errors.New("not listed"),
+			tool: "Bash", input: map[string]any{"command": "ls"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertWorktreeGuard(t, tt)
+		})
+	}
+}
+
+func assertWorktreeGuard(t *testing.T, tt worktreeCase) {
+	t.Helper()
+	factory := func(context.Context, string) (Deps, error) {
+		list := func(context.Context) ([]string, error) { return tt.worktrees, tt.listErr }
+		return Deps{Guard: domainGuard{}, Root: tt.root, MapPath: mapPath, OtherWorktrees: list}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader(hookEvent(map[string]any{"hook_event_name": "PreToolUse", "cwd": tt.root, "tool_name": tt.tool, "tool_input": tt.input}))
+	code := New("1.2.3", stdin, &stdout, &stderr, factory).Run(t.Context(), []string{"hook"})
+	out := stdout.String() + stderr.String()
+	if code != tt.wantCode || !strings.Contains(out, tt.want) {
+		t.Fatalf("exit %d (want %d), output %q, want %q", code, tt.wantCode, out, tt.want)
+	}
+	if denied := strings.Contains(out, `"permissionDecision":"deny"`); denied != (tt.want != "" && tt.wantCode == 0) {
+		t.Fatalf("denied %v, output %q", denied, out)
+	}
+}
+
+// localCase is one Write event that may reach the local configs.
+type localCase struct {
+	name     string
+	path     string
+	mapped   map[string]string
+	errs     map[string]error
+	wantCode int
+	want     string // "" means allowed, with no output
+}
+
+// The local configs are matched like the repository's paths: through a
+// symlink, as the real MapPath resolves it, and without regard to case. A
+// path that cannot be mapped there blocks.
+func TestPreToolUseDeniesWritesToLocalConfigsThroughAnyPath(t *testing.T) {
+	local := filepath.Join(t.TempDir(), "config", "millennium", "projects")
+	repo := filepath.Join(t.TempDir(), "repo")
+	link := filepath.Join(repo, "lclink", "abc", "config.json")
+	tests := []localCase{
+		{name: "through a symlink in the repository", path: link, mapped: map[string]string{link: "abc/config.json"}, want: "local configs are protected"},
+		{name: "in another case", path: filepath.Join(strings.ToUpper(local), "ab", "config.json"), want: "local configs are protected"},
+		{name: "a path that cannot be resolved", path: link, errs: map[string]error{link: errors.New("resolve " + link + ": too many links")},
+			wantCode: 2, want: "cannot check the tool's path, so the call is blocked: resolve"},
+		{name: "a path elsewhere", path: filepath.Join(repo, "a.go")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertLocalConfigGuard(t, local, repo, tt)
+		})
+	}
+}
+
+func assertLocalConfigGuard(t *testing.T, local, repo string, tt localCase) {
+	t.Helper()
+	mapper := &pathMapper{mapped: tt.mapped, errs: tt.errs}
+	factory := func(context.Context, string) (Deps, error) {
+		return Deps{Guard: domainGuard{}, Root: repo, LocalConfigDir: local, MapPath: mapper.mapPath, OtherWorktrees: noWorktrees}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader(hookEvent(map[string]any{"hook_event_name": "PreToolUse", "cwd": repo, "tool_name": "Write", "tool_input": map[string]any{"file_path": tt.path}}))
+	code := New("1.2.3", stdin, &stdout, &stderr, factory).Run(t.Context(), []string{"hook"})
+	if out := stdout.String() + stderr.String(); code != tt.wantCode || !strings.Contains(out, tt.want) || tt.want == "" && out != "" {
+		t.Fatalf("exit %d (want %d), output %q, want %q", code, tt.wantCode, out, tt.want)
 	}
 }

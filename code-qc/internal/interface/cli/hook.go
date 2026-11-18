@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -62,9 +63,6 @@ func (a *App) hook(ctx context.Context) int {
 	return exitPass
 }
 
-// ErrNoDirectory is what a DepsFactory returns when dir does not exist.
-var ErrNoDirectory = errors.New("the directory does not exist")
-
 // maxVanishedLevels bounds the walk up from a hook event's cwd that no
 // longer exists. A removed worktree is one level; a session deep inside one
 // a few more.
@@ -90,19 +88,32 @@ func (a *App) withHookDeps(ctx context.Context, cwd string, use func(Deps) error
 // moves up only past a directory that does not exist: the first one that
 // does exist decides, and any other failure blocks.
 func (a *App) hookDeps(ctx context.Context, cwd string) (Deps, error) {
-	walkable := filepath.IsAbs(cwd) && filepath.Clean(cwd) == cwd
+	deps, err := a.deps(ctx, cwd)
+	if !errors.Is(err, ErrNoDirectory) {
+		return deps, err
+	}
+	release(deps)
+	if !filepath.IsAbs(cwd) || filepath.Clean(cwd) != cwd {
+		return Deps{}, fmt.Errorf("the hook's cwd %s does not exist, and the engine looks for an existing parent only of an absolute path in clean form "+
+			"(no . or .. parts, no trailing separator), so the hook blocks: change to a directory that exists, such as the repository root", cwd)
+	}
 	dir := cwd
-	for range maxVanishedLevels + 1 {
+	for range maxVanishedLevels {
+		dir = filepath.Dir(dir)
 		deps, err := a.deps(ctx, dir)
-		if !walkable || !errors.Is(err, ErrNoDirectory) {
+		if !errors.Is(err, ErrNoDirectory) {
 			return deps, err
 		}
-		if deps.Close != nil {
-			deps.Close()
-		}
-		dir = filepath.Dir(dir)
+		release(deps)
 	}
 	return Deps{}, fmt.Errorf("the hook's cwd %s does not exist, nor do its %d nearest parents: change to a directory that exists", cwd, maxVanishedLevels)
+}
+
+// release frees what deps hold, if anything.
+func release(deps Deps) {
+	if deps.Close != nil {
+		deps.Close()
+	}
 }
 
 func readHookInput(r io.Reader) (hookInput, error) {
@@ -125,16 +136,19 @@ func readHookInput(r io.Reader) (hookInput, error) {
 
 func (a *App) preToolUse(ctx context.Context, deps Deps, in hookInput) error {
 	call := domain.ToolCall{Tool: in.ToolName, Role: domain.RoleOf(in.AgentType), Command: stringField(in.ToolInput, "command")}
-	named := toolPaths(in)
-	if domain.IsWriteTool(call.Tool) && writesLocalConfig(deps.LocalConfigDir, named) {
+	named, err := toolPaths(in)
+	if err != nil {
+		return err
+	}
+	local, err := writesLocalConfig(deps, call.Tool, named)
+	if err != nil {
+		return err
+	}
+	if local {
 		return a.deny("millennium-code-qc: local configs are protected: agents never change the rules they are checked against; the user changes them with `millennium-code-qc config apply --local`")
 	}
-	for _, raw := range named {
-		paths, err := guardedPaths(deps, raw)
-		if err != nil {
-			return err
-		}
-		call.Paths = appendNew(call.Paths, paths...)
+	if call.Paths, call.OtherWorktreePaths, err = worktreePaths(ctx, deps, named); err != nil {
+		return err
 	}
 	decision := deps.Guard.Execute(ctx, call)
 	if !decision.Deny {
@@ -143,28 +157,75 @@ func (a *App) preToolUse(ctx context.Context, deps Deps, in hookInput) error {
 	return a.deny(decision.Reason)
 }
 
+// worktreePaths maps the named paths into the working tree the agent is in
+// and into every other worktree of the repository, so that no agent writes
+// the rules of a checkout it is not in.
+func worktreePaths(ctx context.Context, deps Deps, named []string) (own, others []string, err error) {
+	if len(named) == 0 {
+		return nil, nil, nil
+	}
+	roots, err := deps.OtherWorktrees(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot check the tool's path in every worktree of the repository, so the call is blocked: %w", err)
+	}
+	if own, err = pathsIn(deps, []string{deps.Root}, named); err != nil {
+		return nil, nil, err
+	}
+	if others, err = pathsIn(deps, roots, named); err != nil {
+		return nil, nil, err
+	}
+	return own, others, nil
+}
+
+// writesLocalConfig reports whether a file tool writes inside the local
+// config directory, which lies outside the repository the guard's rules
+// cover. The paths are mapped as for the guard, symlinks resolved, so a
+// link in the repository does not reach the local configs either.
+func writesLocalConfig(deps Deps, tool string, named []string) (bool, error) {
+	if !domain.IsWriteTool(tool) || deps.LocalConfigDir == "" {
+		return false, nil
+	}
+	local, err := pathsIn(deps, []string{deps.LocalConfigDir}, named)
+	return len(local) > 0, err
+}
+
+// pathsIn maps each named path into each tree root, leaving out the paths
+// outside it.
+func pathsIn(deps Deps, roots, named []string) ([]string, error) {
+	var paths []string
+	for _, root := range roots {
+		for _, raw := range named {
+			mapped, err := guardedPaths(deps, root, raw)
+			if err != nil {
+				return nil, err
+			}
+			paths = appendNew(paths, mapped...)
+		}
+	}
+	return paths, nil
+}
+
 func (a *App) deny(reason string) error {
 	return a.writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
 	}})
 }
 
-// guardedPaths maps a path a tool call names, absolute, into the repository
-// for the guard, both as named and with its symlinks resolved: resolved
-// catches a symlink that leads to a protected path, and as named a
-// protected path that is itself a symlink. A path outside the repository
-// either way is left out, since the guard's rules cover only the
-// repository. Any other failure blocks the call: an unmapped path might be
-// a protected one.
-func guardedPaths(deps Deps, raw string) ([]string, error) {
+// guardedPaths maps a path a tool call names, absolute, into the tree at
+// root for the guard, both as named and with its symlinks resolved:
+// resolved catches a symlink that leads to a protected path, and as named a
+// protected path that is itself a symlink. A path outside the tree either
+// way is left out, since the guard's rules cover only what is inside. Any
+// other failure blocks the call: an unmapped path might be a protected one.
+func guardedPaths(deps Deps, root, raw string) ([]string, error) {
 	if !filepath.IsAbs(raw) {
 		return nil, fmt.Errorf("cannot check the tool's path %s: it is not absolute, so the hook event's cwd is not either; run the session from an absolute directory", raw)
 	}
 	var paths []string
-	if named, ok := namedPath(deps.Root, raw); ok {
+	if named, ok := namedPath(root, raw); ok {
 		paths = append(paths, named)
 	}
-	resolved, err := deps.RepoPath(raw)
+	resolved, err := deps.MapPath(root, raw)
 	switch {
 	case errors.Is(err, ErrOutsideRepository):
 		return paths, nil
@@ -174,17 +235,12 @@ func guardedPaths(deps Deps, raw string) ([]string, error) {
 	return appendNew(paths, resolved), nil
 }
 
-// namedPath is raw relative to the repository root as written, without
-// resolving any symlink, if it lies inside.
+// namedPath is raw relative to root as written, without resolving any
+// symlink, if it lies inside; root's part is matched without regard to
+// case, as a case-insensitive file system would.
 func namedPath(root, raw string) (string, bool) {
-	rel, err := filepath.Rel(root, raw)
-	if err != nil {
-		return "", false
-	}
-	if rel = filepath.ToSlash(rel); rel == "." {
-		return "", true
-	}
-	return rel, domain.IsRepoRelative(rel)
+	rel, ok := domain.RelativeFold(filepath.ToSlash(filepath.Clean(root)), filepath.ToSlash(raw))
+	return rel, ok && (rel == "" || domain.IsRepoRelative(rel))
 }
 
 // appendNew appends each path list does not hold yet.
@@ -197,48 +253,35 @@ func appendNew(list []string, paths ...string) []string {
 	return list
 }
 
-// writesLocalConfig reports whether any path is inside the local config
-// directory, which lies outside the repository the guard's rules cover.
-func writesLocalConfig(dir string, paths []string) bool {
-	if dir == "" {
-		return false
-	}
-	for _, p := range paths {
-		if rel, err := filepath.Rel(dir, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return true
-		}
-	}
-	return false
-}
-
 // toolPaths lists the paths a tool call names, absolute or relative to the
-// session's cwd. Grep and Glob without a path search the cwd.
-func toolPaths(in hookInput) []string {
-	resolve := func(p string) string {
-		if filepath.IsAbs(p) {
-			return p
-		}
-		return filepath.Join(in.Cwd, p)
-	}
+// session's cwd, cleaned. Grep and Glob without a path search the cwd.
+func toolPaths(in hookInput) ([]string, error) {
+	var p string
 	switch in.ToolName {
 	case "Edit", "Write", "MultiEdit", "Read":
-		return nonEmpty(resolve, stringField(in.ToolInput, "file_path"))
+		p = stringField(in.ToolInput, "file_path")
 	case "NotebookEdit":
-		return nonEmpty(resolve, stringField(in.ToolInput, "notebook_path"))
+		p = stringField(in.ToolInput, "notebook_path")
 	case "Grep", "Glob":
-		if p := stringField(in.ToolInput, "path"); p != "" {
-			return []string{resolve(p)}
-		}
-		return []string{in.Cwd}
+		p = cmp.Or(stringField(in.ToolInput, "path"), ".")
 	}
-	return nil
+	if p == "" {
+		return nil, nil
+	}
+	if !filepath.IsAbs(p) {
+		p = in.Cwd + string(filepath.Separator) + p
+	}
+	if hasParentPart(p) {
+		return nil, fmt.Errorf("the tool's path %s has a '..' part, which the hook cannot check: the OS follows a symlink before '..', so the path may lead elsewhere than it reads; name the path without '..', such as its absolute path", p)
+	}
+	return []string{filepath.Clean(p)}, nil
 }
 
-func nonEmpty(resolve func(string) string, p string) []string {
-	if p == "" {
-		return nil
-	}
-	return []string{resolve(p)}
+// hasParentPart reports whether p has a ".." part, between any separators
+// the OS accepts.
+func hasParentPart(p string) bool {
+	parts := strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == filepath.Separator })
+	return slices.Contains(parts, "..")
 }
 
 func stringField(fields map[string]any, name string) string {

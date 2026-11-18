@@ -130,9 +130,13 @@ type Discoverer interface {
 // hooks then do nothing, since nothing there is opted in.
 var ErrNoRepository = errors.New("not inside a git repository")
 
-// ErrOutsideRepository is what Deps.RepoPath returns for a path outside the
-// repository; the guard then leaves the path out, since its rules cover
-// only the repository.
+// ErrNoDirectory is what a DepsFactory returns when the directory does not
+// exist; a hook then looks in its nearest existing parent.
+var ErrNoDirectory = errors.New("the directory does not exist")
+
+// ErrOutsideRepository is what Deps.RepoPath and Deps.MapPath return for a
+// path outside the repository or tree; the guard then leaves the path out
+// there, since its rules cover only the repository.
 var ErrOutsideRepository = errors.New("not inside the repository")
 
 // Deps are what the commands call.
@@ -157,6 +161,15 @@ type Deps struct {
 	// absolute path needs no current directory. A path outside the
 	// repository is ErrOutsideRepository.
 	RepoPath func(arg string) (string, error)
+	// OtherWorktrees lists the absolute roots of the repository's other
+	// working trees, the main checkout and every linked worktree, Root
+	// excepted.
+	OtherWorktrees func(ctx context.Context) ([]string, error)
+	// MapPath maps an absolute path into the tree at root, a repository's
+	// or any other directory's: relative to it, slash-separated, with
+	// symlinks resolved on both sides and the root matched without regard
+	// to case. A path outside it is ErrOutsideRepository.
+	MapPath func(root, abs string) (string, error)
 	// ReadProposal reads a proposal file named on the command line,
 	// bounded and strictly.
 	ReadProposal func(path string) ([]byte, error)

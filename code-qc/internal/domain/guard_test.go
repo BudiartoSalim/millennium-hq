@@ -74,6 +74,70 @@ func TestGuard(t *testing.T) {
 	}
 }
 
+// On a case-insensitive file system a case variant of a protected path is
+// that path, so the guard folds case on every OS, for file tools and shell
+// commands alike.
+func TestGuardIgnoresCaseInProtectedPaths(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct {
+		name string
+		call ToolCall
+		want string // "" means allowed
+	}{
+		{"the config, upper case", ToolCall{Tool: "Write", Paths: []string{".MILLENNIUM/config.json"}}, ".millennium is protected"},
+		{"the config, mixed case", ToolCall{Tool: "Edit", Paths: []string{".Millennium/Config.json"}}, ".millennium is protected"},
+		{"settings, mixed case", ToolCall{Tool: "Write", Paths: []string{".claude/Settings.json"}}, ".claude/settings.json is protected"},
+		{"a long s that folds to s", ToolCall{Tool: "Write", Paths: []string{".claude/ſettings.json"}}, ".claude/settings.json is protected"},
+		{"pi extensions, upper case", ToolCall{Tool: "Write", Paths: []string{".PI/EXTENSIONS/off.ts"}}, ".pi/extensions is protected"},
+		{"an acceptance test, mixed case", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, Paths: []string{"Tests/Acceptance/login_test.go"}}, "acceptance test"},
+		{"a name that only starts like one", ToolCall{Tool: "Write", Paths: []string{".MILLENNIUMX/config.json"}}, ""},
+		{"shell writes the config, upper case", ToolCall{Tool: "Bash", Command: "echo '{}' > .MILLENNIUM/config.json"}, "changes .millennium"},
+		{"shell sed on settings, mixed case", ToolCall{Tool: "Bash", Command: "sed -i 's/x/y/' .Claude/Settings.JSON"}, "changes .claude/settings.json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertGuard(t, cfg, tt.call, tt.want)
+		})
+	}
+}
+
+// An agent may change the rules of no checkout of the repository: paths in
+// the other worktrees get the write rules. What qa-tester may read is
+// decided in its own worktree only, so a path elsewhere does not deny a read.
+func TestGuardChecksWritesInOtherWorktrees(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct {
+		name string
+		call ToolCall
+		want string // "" means allowed
+	}{
+		{"the main checkout's config", ToolCall{Tool: "Write", Paths: []string{".claude/worktrees/a/x"}, OtherWorktreePaths: []string{".millennium/config.json"}}, ".millennium is protected"},
+		{"another worktree's settings, upper case", ToolCall{Tool: "Edit", OtherWorktreePaths: []string{".CLAUDE/settings.local.json"}}, ".claude/settings.local.json is protected"},
+		{"another worktree's acceptance tests", ToolCall{Tool: "Edit", Role: RoleSoftwareEngineer, OtherWorktreePaths: []string{"tests/acceptance/a_test.go"}}, "acceptance test"},
+		{"code in another worktree", ToolCall{Tool: "Edit", OtherWorktreePaths: []string{"services/a/api/main.go"}}, ""},
+		{"qa-tester reads code there", ToolCall{Tool: "Read", Role: RoleQATester, Paths: []string{"docs/spec.md"}, OtherWorktreePaths: []string{"services/a/api/main.go"}}, ""},
+		{"a shell command is not a path", ToolCall{Tool: "Bash", Command: "ls", OtherWorktreePaths: []string{".millennium/config.json"}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertGuard(t, cfg, tt.call, tt.want)
+		})
+	}
+}
+
+// assertGuard checks a decision: allowed when want is "", otherwise denied
+// with a reason containing want.
+func assertGuard(t *testing.T, cfg Config, call ToolCall, want string) {
+	t.Helper()
+	got := Guard(cfg, call)
+	if want == "" && got.Deny {
+		t.Fatalf("denied: %s", got.Reason)
+	}
+	if want != "" && (!got.Deny || !strings.Contains(got.Reason, want)) {
+		t.Fatalf("decision %+v, want a denial mentioning %q", got, want)
+	}
+}
+
 func TestRoleOf(t *testing.T) {
 	for agentType, want := range map[string]string{"millennium:software-engineer": "software-engineer", "qa-tester": "qa-tester", "": "", "a:b:qa-tester": "qa-tester"} {
 		if got := RoleOf(agentType); got != want {

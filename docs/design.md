@@ -472,7 +472,7 @@ Hooks:
 |---|---|
 | Hook input | JSON on stdin: tool, file, calling agent |
 | Per-agent rules | Engineer cannot edit acceptance tests; qa-tester cannot read source; edit content checked for new suppressions |
-| Protected paths | Edit/Write on protected paths denied for every agent |
+| Protected paths | Edit/Write on protected paths denied for every agent, in every worktree of the repository (main checkout and linked worktrees) whichever the agent is in, matched without regard to case on every OS; a tool path with a `..` part blocks, since the OS follows a symlink before `..` and text cleaning does not |
 | Stop gating | Block "done" while gates fail; escalate after repeated attempts |
 
 Supply chain: see [Supply chain](#supply-chain).

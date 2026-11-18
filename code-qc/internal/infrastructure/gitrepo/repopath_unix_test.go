@@ -8,20 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"millennium-code-qc/internal/domain"
 )
 
-// assertEditDenied checks that the guard denies an Edit of what arg maps to:
-// the mapping is what the hooks hand the guard.
-func assertEditDenied(t *testing.T, repo *Repository, arg string) {
+// assertMapsTo checks what arg maps to: the mapping is what the hooks hand
+// the guard, whose decisions the guard's and the hook's tests cover.
+func assertMapsTo(t *testing.T, repo *Repository, arg, want string) {
 	t.Helper()
-	p, err := repo.RepoPath(arg)
-	if err != nil {
-		t.Fatalf("RepoPath(%q): %v", arg, err)
-	}
-	if decision := domain.Guard(domain.Config{}, domain.ToolCall{Tool: "Edit", Paths: []string{p}}); !decision.Deny {
-		t.Fatalf("RepoPath(%q) = %q, and the guard allows an Edit of it", arg, p)
+	if got, err := repo.RepoPath(arg); err != nil || got != want {
+		t.Fatalf("RepoPath(%q) = %q, %v; want %q", arg, got, err, want)
 	}
 }
 
@@ -41,9 +35,8 @@ func TestRepoPathWithoutAWorkingDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertEditDenied(t, repo, filepath.Join(dir, ".millennium", "config.json"))
-	// The hook joins a relative tool path to the event's cwd, unresolved.
-	assertEditDenied(t, repo, worktree+"/../../.millennium/config.json")
+	assertMapsTo(t, repo, filepath.Join(dir, ".millennium", "config.json"), ".millennium/config.json")
+	assertMapsTo(t, repo, filepath.Join(worktree, "src", "new.go"), "worktrees/agent/src/new.go")
 	if _, err := repo.RepoPath("a.go"); err == nil || errors.Is(err, ErrOutsideRepository) {
 		t.Fatalf("a relative path without a working directory: err = %v, want a failure other than outside", err)
 	}
@@ -67,14 +60,14 @@ func TestRepoPathResolvesSymlinks(t *testing.T) {
 	link(filepath.Join(dir, ".millennium"), filepath.Join(dir, "rules"))
 	repo := open(t, dir)
 
-	for name, arg := range map[string]string{
-		"through a symlink to the repository": filepath.Join(repoLink, ".millennium", "config.json"),
-		"a symlink to the file":               filepath.Join(dir, "alias.json"),
-		"through a symlinked directory":       filepath.Join(dir, "rules", "config.json"),
-		"a new file in a symlinked directory": filepath.Join(dir, "rules", "new", "approval.json"),
+	for name, tt := range map[string]struct{ arg, want string }{
+		"through a symlink to the repository": {filepath.Join(repoLink, ".millennium", "config.json"), ".millennium/config.json"},
+		"a symlink to the file":               {filepath.Join(dir, "alias.json"), ".millennium/config.json"},
+		"through a symlinked directory":       {filepath.Join(dir, "rules", "config.json"), ".millennium/config.json"},
+		"a new file in a symlinked directory": {filepath.Join(dir, "rules", "new", "approval.json"), ".millennium/new/approval.json"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assertEditDenied(t, repo, arg)
+			assertMapsTo(t, repo, tt.arg, tt.want)
 		})
 	}
 	throughRoot := &Repository{root: repoLink}
@@ -113,5 +106,42 @@ func TestRepoPathFailsOnAnUnresolvablePath(t *testing.T) {
 				t.Fatalf("RepoPath(%q): err = %v, want a %q failure other than outside", tt.arg, err, tt.want)
 			}
 		})
+	}
+}
+
+// MapPath maps into any tree, such as the local config directory: one that
+// does not exist yet, one reached through a symlink, and one named in a
+// different case, as a case-insensitive file system would read it.
+func TestMapPath(t *testing.T) {
+	base := t.TempDir()
+	local := filepath.Join(base, "config", "millennium", "projects")
+	fresh := filepath.Join(base, "fresh", "millennium", "projects")
+	repo := filepath.Join(base, "repo")
+	if err := errors.Join(os.MkdirAll(local, 0o755), os.MkdirAll(repo, 0o755)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(local, filepath.Join(repo, "lclink")); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, root, abs, want string
+		outside               bool
+	}{
+		{name: "a root that does not exist yet", root: fresh, abs: filepath.Join(fresh, "ab", "config.json"), want: "ab/config.json"},
+		{name: "through a symlink into the root", root: local, abs: filepath.Join(repo, "lclink", "abc", "config.json"), want: "abc/config.json"},
+		{name: "the root in another case", root: repo, abs: filepath.Join(base, "REPO", "x.go"), want: "x.go"},
+		{name: "the root itself", root: repo, abs: repo, want: ""},
+		{name: "outside", root: local, abs: filepath.Join(repo, "x.go"), outside: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := MapPath(tt.root, tt.abs)
+			if errors.Is(err, ErrOutsideRepository) != tt.outside || !tt.outside && (err != nil || got != tt.want) {
+				t.Fatalf("MapPath(%q, %q) = %q, %v; want %q, outside %v", tt.root, tt.abs, got, err, tt.want, tt.outside)
+			}
+		})
+	}
+	if _, err := MapPath(local, "relative/config.json"); err == nil || errors.Is(err, ErrOutsideRepository) || !strings.Contains(err.Error(), "not an absolute path") {
+		t.Fatalf("a relative path: err = %v, want a failure other than outside", err)
 	}
 }
