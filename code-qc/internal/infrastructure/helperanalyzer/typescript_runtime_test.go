@@ -158,13 +158,23 @@ func TestTypeScriptInlineTypeSpecifiersAreErased(t *testing.T) {
 }
 
 // A hashbang picks the program that runs the file, and the emit keeps it,
-// so it is runtime (QT-2).
-func TestTypeScriptHashbangIsRuntime(t *testing.T) {
+// so it is in the digest (QT-2). It is no runtime line: no test can run it,
+// and Node's lcov gives it DA:1,0, an uncovered change nothing could clear
+// (QT2-6).
+func TestTypeScriptHashbangIsInTheDigestOnly(t *testing.T) {
 	a, _ := runtimeProject(t, `{}`)
 	const body = "export const x = 1;\n"
-	node, bun := knownRuntime(t, a, "web/src/m.ts", "#!/usr/bin/env node\n"+body), knownRuntime(t, a, "web/src/m.ts", "#!/usr/bin/env bun\n"+body)
-	if domain.SameRuntime(node, bun) || !bun.Holds(1) {
-		t.Fatalf("changing the hashbang must change the digest, and its line must be runtime; lines %v", heldLines("#!\n"+body, bun))
+	for _, eol := range []string{"\n", "\r\n"} {
+		node, bun := knownRuntime(t, a, "web/src/m.ts", "#!/usr/bin/env node"+eol+body), knownRuntime(t, a, "web/src/m.ts", "#!/usr/bin/env bun"+eol+body)
+		if domain.SameRuntime(node, bun) {
+			t.Fatalf("%q: changing the hashbang must change the digest", eol)
+		}
+		if got := heldLines("#!"+eol+body, bun); !slices.Equal(got, []int{2}) {
+			t.Fatalf("%q: runtime lines = %v, want [2]: the hashbang's line is no runtime line", eol, got)
+		}
+	}
+	if only := knownRuntime(t, a, "web/src/m.ts", "#!/usr/bin/env node"); only.Holds(1) {
+		t.Fatal("a file that is only a hashbang has no runtime line")
 	}
 }
 
@@ -213,6 +223,50 @@ func TestTypeScriptRuntimeWalkMakesNoChildTokenNodes(t *testing.T) {
 	facts, err := a.AnalyzeRuntime(t.Context(), "web/src/m.ts", []byte(src))
 	if err != nil || !facts.Runtime.Known() {
 		t.Fatalf("AnalyzeRuntime = %+v, %v; want known runtime code without getChildren", facts.Runtime, err)
+	}
+}
+
+// rescanningTypeScript is a typescript package that wraps the fixture's and
+// makes a scanner throw when it scans a token at the same position more
+// than three times: a walk that rescans an empty gap rescans the leftmost
+// token of a left-nested chain once per level, which on a crafted 3.9 MB
+// file took 14 seconds instead of 0.4.
+const rescanningTypeScript = `
+const ts = require(process.env.MILLENNIUM_TYPESCRIPT + '/node_modules/typescript');
+const createScanner = ts.createScanner;
+module.exports = Object.assign({}, ts, {
+  createScanner(...args) {
+    const scanner = createScanner(...args);
+    const scan = scanner.scan;
+    const scans = new Map();
+    scanner.scan = () => {
+      const kind = scan();
+      const start = scanner.getTokenStart ? scanner.getTokenStart() : scanner.getTokenPos();
+      scans.set(start, (scans.get(start) || 0) + 1);
+      if (scans.get(start) > 3) throw new Error('the token at ' + start + ' was scanned ' + scans.get(start) + ' times');
+      return kind;
+    };
+    return scanner;
+  },
+});
+`
+
+// The token walk scans no empty gap, so it scans each token a bounded
+// number of times however deep the tree nests (R2-PERF-3).
+func TestTypeScriptRuntimeWalkScansEachTokenABoundedNumberOfTimes(t *testing.T) {
+	node, fixture := typeScriptFixture(t)
+	t.Setenv("MILLENNIUM_TYPESCRIPT", fixture)
+	root := repoWith(t, map[string]string{
+		"web/package.json":                         `{"name":"web"}`,
+		"web/node_modules/typescript/package.json": `{"name":"typescript","main":"index.js"}`,
+		"web/node_modules/typescript/index.js":     rescanningTypeScript,
+	})
+	a := TypeScript(root, node)
+	t.Cleanup(a.Close)
+	src := "const a = 'b';\nexport const x = 'leftmost'" + strings.Repeat(" + a", 20) + ";\nexport const y = f(g(h(1).p).q)[0].r;\n"
+	facts, err := a.AnalyzeRuntime(t.Context(), "web/src/m.ts", []byte(src))
+	if err != nil || !facts.Runtime.Known() {
+		t.Fatalf("AnalyzeRuntime = %+v, %v; want known runtime code, each token scanned a bounded number of times", facts.Runtime, err)
 	}
 }
 

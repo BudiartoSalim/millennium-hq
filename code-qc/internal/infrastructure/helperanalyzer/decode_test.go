@@ -49,6 +49,23 @@ func TestDecodeRuntimeFacts(t *testing.T) {
 	}
 }
 
+// Construct kinds are an allowlist of risky constructs. A line directive is
+// a Go fact of its own, never a construct (R2-MR-2), so a helper that
+// reports one is not trusted.
+func TestDecodeRejectsConstructKindsOutsideTheAllowlist(t *testing.T) {
+	answerWith := func(kind string) []byte {
+		return []byte(`{"facts":{"generated":false,"test":false,"imports":[],"functions":[],"comments":[],"constructs":[{"kind":"` + kind + `","line":1,"detail":"x"}]}}` + "\n")
+	}
+	for _, kind := range []string{"line-directive", "made-up"} {
+		if _, err := decode("a.ts", []byte("a\n"), answerWith(kind)); err == nil || !strings.Contains(err.Error(), kind) {
+			t.Errorf("construct kind %q: err = %v, want it rejected", kind, err)
+		}
+	}
+	if facts, err := decode("a.ts", []byte("a\n"), answerWith("explicit-any")); err != nil || len(facts.Constructs) != 1 {
+		t.Fatalf("an allowed kind: %+v, %v", facts.Constructs, err)
+	}
+}
+
 func TestDecodeRejectsMalformedRuntimeFacts(t *testing.T) {
 	const content = "a\nb\nc\n"
 	tests := []struct {

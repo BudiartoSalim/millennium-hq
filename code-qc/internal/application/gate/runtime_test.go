@@ -38,10 +38,10 @@ func (a *countingAnalyzer) Analyze(ctx context.Context, path string, content []b
 func (a *countingAnalyzer) AnalyzeRuntime(_ context.Context, path string, content []byte) (domain.FileFacts, error) {
 	a.calls++
 	failure := errors.New("parse " + path + ": syntax error")
-	if partial, ok := strings.CutPrefix(string(content), "partly "); ok {
+	if partial, ok := strings.CutPrefix(factsKey(content), "partly "); ok {
 		return a.facts[partial], failure
 	}
-	facts, ok := a.facts[string(content)]
+	facts, ok := a.facts[factsKey(content)]
 	if !ok {
 		return domain.FileFacts{}, failure
 	}
@@ -165,7 +165,7 @@ func TestTestsAnalysesEachCandidateAtMostTwice(t *testing.T) {
 	working, base := map[string]string{}, map[string]string{}
 	var changes []domain.ChangedFile
 	for i, f := range files {
-		working[f] = []string{"v1, new doc", "v2", "unknown"}[i]
+		working[f] = long([]string{"v1, new doc", "v2", "unknown"}[i])
 		base[f] = "v1"
 		changes = append(changes, modified(f))
 	}
@@ -217,7 +217,7 @@ func TestUncoveredChangeCountsOnlyRuntimeLines(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			runner := &fakeRunner{results: map[string]port.TestResult{"go svc": {Coverage: domain.Coverage{userFile: tt.coverage}}}}
 			source := &recordingSource{fakeSource: &fakeSource{
-				working: map[string]string{userFile: tt.working}, base: map[string]string{userFile: tt.base},
+				working: map[string]string{userFile: long(tt.working)}, base: map[string]string{userFile: tt.base},
 				changed: map[string]domain.LineSet{userFile: touched},
 			}}
 			findings := runRuntimeGate(t, source, &countingAnalyzer{facts: runtimeFacts(t)}, runner, domain.TierFull, "base-rev", modified(userFile))
@@ -250,7 +250,7 @@ func TestUncoveredChangeIgnoresACommentOnlyEditOfAnUnexecutedFile(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			runner := &fakeRunner{results: map[string]port.TestResult{"go svc": {Coverage: domain.Coverage{}}}}
 			source := &recordingSource{fakeSource: &fakeSource{
-				working: map[string]string{userFile: tt.working}, base: map[string]string{userFile: tt.base}, changed: tt.changed,
+				working: map[string]string{userFile: long(tt.working)}, base: map[string]string{userFile: tt.base}, changed: tt.changed,
 			}}
 			findings := runRuntimeGate(t, source, &countingAnalyzer{facts: runtimeFacts(t)}, runner, domain.TierFull, "base-rev", modified(userFile))
 			if got := coverageFindings(findings); !slices.Equal(got, tt.want) {

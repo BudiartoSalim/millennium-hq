@@ -272,6 +272,9 @@ DROPPED = (tokenize.COMMENT, tokenize.NL)
 # LAYOUT tokens stay in the digest but mark no line of their own.
 LAYOUT = (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER)
 LAYOUT_NAMES = {tokenize.tok_name[kind] for kind in LAYOUT}
+# UNMARKED kinds mark no line: the layout, and a hashbang, which picks the
+# program that runs the file but is no line a test can run.
+UNMARKED = LAYOUT_NAMES | {"HASHBANG"}
 # TEMPLATE_STARTS and TEMPLATE_ENDS bound an f-string (3.12+) or a t-string
 # (3.14+), which tokenize splits into parts. Whitespace inside a replacement
 # field is no token, yet f"{x = }" prints "x = 1" where f"{x=}" prints "x=1".
@@ -293,7 +296,7 @@ def runtime_code(content):
         for field in (kind, text):
             data = field.encode("utf-8")
             digest.update(len(data).to_bytes(8, "big") + data)
-        if kind not in LAYOUT_NAMES:
+        if kind not in UNMARKED:
             lines.update(range(start, end + 1))
     return {"lines": sorted(lines), "digest": digest.hexdigest()}
 
@@ -315,7 +318,8 @@ def runtime_tokens(content):
                 yield "TEMPLATE", source_text(source_lines, opened, token.end), opened[0], token.end[0]
                 opened = None
         elif depth == 0 and (token.type not in DROPPED or is_read_comment(token)):
-            yield tokenize.tok_name[token.type], token.string, token.start[0], token.end[0]
+            kind = "HASHBANG" if is_hashbang(token) else tokenize.tok_name[token.type]
+            yield kind, token.string, token.start[0], token.end[0]
 
 
 def source_text(source_lines, start, end):
@@ -342,8 +346,12 @@ def is_read_comment(token):
     a hashbang, which picks the program that runs the file."""
     if token.type != tokenize.COMMENT:
         return False
-    is_hashbang = token.start == (1, 0) and token.string.startswith("#!")
-    return is_hashbang or (token.start[0] <= 2 and bool(COOKIE.match(token.line)))
+    return is_hashbang(token) or (token.start[0] <= 2 and bool(COOKIE.match(token.line)))
+
+
+def is_hashbang(token):
+    """A hashbang is a "#!" comment at the very start of the file."""
+    return token.type == tokenize.COMMENT and token.start == (1, 0) and token.string.startswith("#!")
 
 
 # --- constructs ---

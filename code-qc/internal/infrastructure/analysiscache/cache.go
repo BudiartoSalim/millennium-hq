@@ -56,16 +56,17 @@ func (a *Analyzer) Analyze(ctx context.Context, path string, content []byte) (do
 }
 
 // AnalyzeRuntime returns the cached runtime result or asks the wrapped
-// analyzer for the runtime code. A wrapped analyzer that cannot establish
-// it gives unknown runtime code.
+// analyzer for the runtime code (see port.AnalyzeRuntime). A cached plain
+// failure answers too: a runtime analysis does all a plain one does, so it
+// would fail the same way, after the costly part (a TypeScript transpile).
+// A plain success never answers, since it may lack the runtime code.
 func (a *Analyzer) AnalyzeRuntime(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
-	return a.cached(key{path, sha256.Sum256(content), runtime}, func() (domain.FileFacts, error) {
-		if inner, ok := a.inner.(port.RuntimeAnalyzer); ok {
-			return inner.AnalyzeRuntime(ctx, path, content)
-		}
-		facts, err := a.inner.Analyze(ctx, path, content)
-		facts.Runtime = domain.RuntimeCode{}
-		return facts, err
+	sum := sha256.Sum256(content)
+	if r, ok := a.results[key{path, sum, plain}]; ok && r.err != nil {
+		return r.facts, r.err
+	}
+	return a.cached(key{path, sum, runtime}, func() (domain.FileFacts, error) {
+		return port.AnalyzeRuntime(ctx, a.inner, path, content)
 	})
 }
 

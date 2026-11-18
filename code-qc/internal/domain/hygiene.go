@@ -19,6 +19,14 @@ var (
 	// switch coverage back on included. Like a suppression, it steers a tool,
 	// so it never explains the suppression below it.
 	coverageDirective = regexp.MustCompile(`node:coverage\b`)
+	// nodeCoverage matches a comment that reads like one of Node's coverage
+	// directives, including the one that switches coverage back on.
+	nodeCoverage = regexp.MustCompile(`node:coverage\s+(enable|disable|ignore\s+next)`)
+	// nodeCoverageExact is a coverage directive as Node's test runner reads
+	// it: the runner looks for these exact comments anywhere on a line, so
+	// it ignores one with other spacing, with text added inside, or written
+	// with //.
+	nodeCoverageExact = regexp.MustCompile(`/\* node:coverage (enable|disable|ignore next( \d+)?) \*/`)
 	// todo matches a work-left-to-do marker word at the start of a comment,
 	// or anywhere when a colon or an opening parenthesis follows it. The same
 	// word inside prose, or hyphenated, is not a marker.
@@ -30,26 +38,46 @@ var (
 	waiver = regexp.MustCompile(`millennium:allow\s+([a-z-]+)\s*--\s*(.*)`)
 )
 
-// SuppressionFindings reports suppression directives that carry no reason.
-// A reason is text after the directive, separated by " -- " or a further
-// comment marker ("//nolint:gosec // reason"), or a comment on the line
-// directly above that is not itself a suppression or coverage directive. Only comments on touched
-// lines are checked.
+// SuppressionFindings reports suppression directives that carry no reason,
+// and Node coverage directives that Node does not read. A reason is text
+// after the directive, separated by " -- " or a further comment marker
+// ("//nolint:gosec // reason"), or a comment on the line directly above
+// that is not itself a suppression or coverage directive. Only comments on
+// touched lines are checked.
 func SuppressionFindings(file string, comments []Comment, touched LineSet) []Finding {
 	byLine := commentsByLine(comments)
 	var findings []Finding
 	for _, c := range comments {
-		loc := suppression.FindStringIndex(c.Text)
-		if loc == nil || !touched.Contains(c.Line) {
+		if !touched.Contains(c.Line) {
 			continue
 		}
-		if hasReason(c.Text[loc[1]:]) || explainedAbove(byLine, c.Line) {
-			continue
+		if finding, ok := suppressionFinding(file, c, byLine); ok {
+			findings = append(findings, finding)
 		}
-		findings = append(findings, Finding{Rule: "suppression-without-reason", File: file, Line: c.Line, Message: fmt.Sprintf(
-			"%q switches a check off without saying why; add \" -- <reason>\" or a comment on the line above", strings.TrimSpace(c.Text))})
 	}
 	return findings
+}
+
+// suppressionFinding checks one comment. Node reads its coverage
+// directives only as written, so text after one, a reason included, makes
+// Node ignore it (ignored-directive); its reason goes on the line above.
+func suppressionFinding(file string, c Comment, byLine map[int]Comment) (Finding, bool) {
+	text := strings.TrimSpace(c.Text)
+	node := nodeCoverage.MatchString(text)
+	if node && !nodeCoverageExact.MatchString(text) {
+		return Finding{Rule: "ignored-directive", File: file, Line: c.Line, Message: fmt.Sprintf(
+			"Node does not read %q, so it switches nothing: Node reads only \"/* node:coverage disable */\", \"/* node:coverage enable */\" and \"/* node:coverage ignore next */\" (with an optional count), written exactly; write it so, and put the reason in a comment on the line above", text)}, true
+	}
+	loc := suppression.FindStringIndex(text)
+	if loc == nil || hasReason(text[loc[1]:]) || explainedAbove(byLine, c.Line) {
+		return Finding{}, false
+	}
+	advice := `add " -- <reason>" or a comment on the line above`
+	if node {
+		advice = "Node reads the directive only as written, so add the reason as a comment on the line above"
+	}
+	return Finding{Rule: "suppression-without-reason", File: file, Line: c.Line, Message: fmt.Sprintf(
+		"%q switches a check off without saying why; %s", text, advice)}, true
 }
 
 // TodoFindings reports TODO-style markers without an issue reference on
@@ -132,12 +160,11 @@ func (w Waivers) Covers(rule string, line int) bool {
 }
 
 // ConstructFindings reports risky constructs on touched lines, except where
-// a waiver for "banned-construct" explains them. A line directive is not
-// banned everywhere: LineDirectiveFindings reports it where it matters.
+// a waiver for "banned-construct" explains them.
 func ConstructFindings(file string, constructs []Construct, touched LineSet, waivers Waivers) []Finding {
 	var findings []Finding
 	for _, c := range constructs {
-		if c.Kind == ConstructLineDirective || !touched.Contains(c.Line) || waivers.Covers("banned-construct", c.Line) {
+		if !touched.Contains(c.Line) || waivers.Covers("banned-construct", c.Line) {
 			continue
 		}
 		findings = append(findings, Finding{Rule: "banned-construct", File: file, Line: c.Line, Message: fmt.Sprintf(
@@ -160,8 +187,6 @@ func constructAdvice(kind ConstructKind) string {
 		return "raw HTML from data is a cross-site scripting hole; render text or sanitise first"
 	case ConstructExplicitAny:
 		return "`any` switches type checking off; use `unknown` and narrow it"
-	case ConstructLineDirective:
-		return "it moves the line numbers that coverage reports, so untested code could pass as tested"
 	}
 	return "risky construct"
 }

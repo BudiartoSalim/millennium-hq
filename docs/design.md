@@ -416,11 +416,23 @@ additions, not rewrites:
   for its candidates and their base: the TypeScript transpile costs several
   times a plain analysis, and every other gate reads every changed file on
   every Stop hook. The analysis cache keys a result by what was asked, so a
-  plain result never answers a request for runtime facts. Lines are
-  physical, as git numbers them: Go's `//line` directives move none. They
-  do move cover-profile positions, so the tests gate blocks them in tested
-  layers (`line-directive`) and the Go runner rejects a profile that names
-  a line or file the module does not have. Go is analysed in
+  plain result never answers a request for runtime facts; a plain failure
+  does, since the runtime analysis would fail the same way after its costly
+  part. `port.AnalyzeRuntime` is the one place where an analyzer without
+  the method gives unknown runtime code. Lines are physical, as git numbers
+  them: Go's `//line` directives (their own fact, `FileFacts.LineDirectives`,
+  not a risky construct) move none. They do move cover-profile positions,
+  and cover credits the code after one to the base name it gives, in the
+  directive's own directory. So the test runners report coverage as the
+  tool wrote it (a Go profile naming a file outside the module is still an
+  error), the Go runner also reports which code its directives credit to
+  another file (`TestResult.Foreign`), and the tests gate checks the
+  coverage of the files it judges only: no line past the end of the file
+  (`tool-failed`, for every coverage source, by `domain.LineCount`), no
+  directive in a tested-layer file (`line-directive`), and no other file's
+  code credited to it, an excluded file's included (`foreign-coverage`).
+  Generated code elsewhere, goyacc's `//line yaccpar:1` for one, blocks
+  nothing. Go is analysed in
   the engine (`go/ast`); TypeScript and Python by two small helpers of ours (a
   JS file using the project's own `typescript`, a stdlib Python script using
   `ast`), run with the project's runtime, because a correct TS or Python parser

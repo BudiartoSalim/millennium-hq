@@ -115,14 +115,18 @@ func TestPythonRuntimeUnknownWhereGitNumbersOtherwise(t *testing.T) {
 	}
 }
 
-// A hashbang picks the program that runs the file, so it is runtime
-// (QT-2); a "#!" comment anywhere else is a comment.
-func TestPythonHashbangIsRuntime(t *testing.T) {
+// A hashbang picks the program that runs the file, so it is in the digest
+// (QT-2), but no test can run its line, so that is no runtime line (QT2-6);
+// a "#!" comment anywhere else is a comment.
+func TestPythonHashbangIsInTheDigestOnly(t *testing.T) {
 	a := pythonAnalyzer(t, nil)
 	const body = "x = 1\n"
 	python, pypy := knownRuntime(t, a, "m.py", "#!/usr/bin/env python3\n"+body), knownRuntime(t, a, "m.py", "#!/usr/bin/env pypy3\n"+body)
-	if domain.SameRuntime(python, pypy) || !pypy.Holds(1) {
-		t.Fatal("changing the hashbang must change the digest, and its line must be runtime")
+	if domain.SameRuntime(python, pypy) {
+		t.Fatal("changing the hashbang must change the digest")
+	}
+	if got := heldLines("#!\n"+body, pypy); !slices.Equal(got, []int{2}) {
+		t.Fatalf("runtime lines = %v, want [2]: the hashbang's line is no runtime line", got)
 	}
 	later := knownRuntime(t, a, "m.py", body+"#!/not/a/hashbang\n")
 	if later.Holds(2) || !domain.SameRuntime(later, knownRuntime(t, a, "m.py", body+"#!/other\n")) {

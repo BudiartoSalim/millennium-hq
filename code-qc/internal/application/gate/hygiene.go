@@ -26,6 +26,7 @@ func (*Hygiene) Rules() []port.Rule {
 		{Name: "secret", Disableable: true},
 		{Name: "banned-construct", Disableable: true},
 		{Name: "suppression-without-reason", Disableable: true},
+		{Name: "ignored-directive", Disableable: true},
 		{Name: "todo-without-link", Disableable: true},
 		{Name: "scan-failed", Disableable: false},
 	}

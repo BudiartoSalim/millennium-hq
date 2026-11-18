@@ -63,11 +63,6 @@ const (
 	// ConstructExplicitAny is a TypeScript `any`, which switches the type
 	// checker off for that value.
 	ConstructExplicitAny ConstructKind = "explicit-any"
-	// ConstructLineDirective is a Go //line or /*line directive, which moves
-	// the positions the compiler and the coverage tool report. It is not
-	// risky in itself: the tests gate blocks it in tested layers, where it
-	// could move coverage off untested lines (see LineDirectiveFindings).
-	ConstructLineDirective ConstructKind = "line-directive"
 )
 
 // ConstructKinds lists every construct kind in a stable order.
@@ -75,7 +70,6 @@ func ConstructKinds() []ConstructKind {
 	return []ConstructKind{
 		ConstructDynamicCode, ConstructShellCommand, ConstructTLSVerifyOff,
 		ConstructUnsafeDeserialization, ConstructHTMLInjection, ConstructExplicitAny,
-		ConstructLineDirective,
 	}
 }
 
@@ -85,6 +79,20 @@ type Construct struct {
 	Line int
 	// Detail is what was found, for the message: "eval", "shell=True".
 	Detail string
+}
+
+// LineDirective is a Go //line or /*line directive. It is not risky in
+// itself, but it moves the positions the compiler and the coverage tool
+// report, so the tests gate holds it to rules of its own (see
+// LineDirectiveFindings and ForeignCoverage).
+type LineDirective struct {
+	// Line is the physical line the directive is on.
+	Line int
+	// Text is the directive as written.
+	Text string
+	// File is the file name the directive gives, as written; empty when it
+	// gives none.
+	File string
 }
 
 // FileFacts is what a language analyzer extracts from one source file. Every
@@ -101,6 +109,8 @@ type FileFacts struct {
 	Functions  []FunctionFacts
 	Comments   []Comment
 	Constructs []Construct
+	// LineDirectives are the file's line directives; only Go has them.
+	LineDirectives []LineDirective
 	// Runtime is the file's runtime code; its zero value is unknown.
 	Runtime RuntimeCode
 }

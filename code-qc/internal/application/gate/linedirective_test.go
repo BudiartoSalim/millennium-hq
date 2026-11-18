@@ -12,13 +12,13 @@ import (
 // covers, so the tests gate blocks it there, touched or not, in every tier
 // (SEC-4). Outside tested layers it is generated code's business.
 func TestTestsBlocksLineDirectivesInTestedLayers(t *testing.T) {
-	directive := []domain.Construct{{Kind: domain.ConstructLineDirective, Line: 3, Detail: "//line user.go:5000"}}
+	directive := []domain.LineDirective{{Line: 3, Text: "//line user.go:5000", File: "user.go"}}
 	withDirective := logic
-	withDirective.Constructs = directive
+	withDirective.LineDirectives = directive
 	analyzer := fakeAnalyzer{facts: map[string]domain.FileFacts{
 		"directive":      withDirective,
-		"type directive": {Constructs: directive},
-		"test directive": {Test: true, Constructs: directive},
+		"type directive": {LineDirectives: directive},
+		"test directive": {Test: true, LineDirectives: directive},
 		"clean":          logic,
 	}}
 	tests := []struct {

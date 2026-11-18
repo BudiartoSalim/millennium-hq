@@ -39,7 +39,7 @@ func runMarkerGates(t *testing.T, path, base, now string) []domain.Finding {
 	analyzer := fakeAnalyzer{facts: markerFacts()}
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer, domain.LanguagePython: analyzer, domain.LanguageTypeScript: analyzer}
 	source := &fakeSource{
-		working: map[string]string{path: now},
+		working: map[string]string{path: long(now)},
 		base:    map[string]string{path: base},
 		changed: map[string]domain.LineSet{path: {Ranges: []domain.LineRange{{First: 1, Last: 5}}}},
 	}

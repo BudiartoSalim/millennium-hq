@@ -36,6 +36,7 @@ func TestCodeGateFindsEachKind(t *testing.T) {
 		Comments: []domain.Comment{
 			{Line: 3, Text: "//nolint:gosec"},
 			{Line: 4, Text: "// TODO: later"},
+			{Line: 5, Text: "/* node:coverage disable -- the platform branch runs only on Windows */"},
 		},
 	}
 	source := &fakeSource{working: map[string]string{
@@ -47,7 +48,7 @@ func TestCodeGateFindsEachKind(t *testing.T) {
 	findings := runCode(t, source, map[string]domain.FileFacts{"risky": risky}, "",
 		added("svc/a.go"), added("config/.env"), added("svc/logo.png"), added("docs/notes.md"))
 	got := rules(findings)
-	want := []string{"hygiene/banned-construct", "hygiene/suppression-without-reason", "hygiene/todo-without-link", "hygiene/secret"}
+	want := []string{"hygiene/banned-construct", "hygiene/suppression-without-reason", "hygiene/todo-without-link", "hygiene/ignored-directive", "hygiene/secret"}
 	if strings.Join(sortedCopy(got), ",") != strings.Join(sortedCopy(want), ",") {
 		t.Fatalf("findings %q, want %q", got, want)
 	}
