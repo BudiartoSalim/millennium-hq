@@ -34,6 +34,19 @@ func (f *fakeRunner) Command(_ context.Context, dir string, recipe domain.TestRe
 	return f.result("command " + dir + " " + strings.Join(recipe.Command, " "))
 }
 
+// fakeForeign is what the Go sources of each directory lend the files
+// beside them, and records the directories asked.
+type fakeForeign struct {
+	lent  map[string][]domain.ForeignCoverage
+	errs  map[string]error
+	asked []string
+}
+
+func (f *fakeForeign) GoForeignCoverage(dir string) ([]domain.ForeignCoverage, error) {
+	f.asked = append(f.asked, dir)
+	return f.lent[dir], f.errs[dir]
+}
+
 // testedPacks has a clean-architecture pack that marks domain as tested,
 // infrastructure as not.
 func testedPacks(t *testing.T) domain.Catalog {
@@ -63,6 +76,9 @@ func testsConfig(t *testing.T) domain.Config {
 		{Paths: []string{"web"}, Languages: []string{"typescript"}, Conventions: []string{"clean-architecture"}},
 		{Paths: []string{"api"}, Languages: []string{"typescript"}, Conventions: []string{"clean-architecture"},
 			Test: &domain.TestRecipe{Command: []string{"npm", "test"}, LCOV: "coverage/lcov.info"}},
+		// A Go component may run its tests with its own recipe.
+		{Paths: []string{"gor"}, Languages: []string{"go"}, Conventions: []string{"clean-architecture"},
+			Test: &domain.TestRecipe{Command: []string{"make", "cover"}, LCOV: "lcov.info"}},
 	}})
 	if err != nil {
 		t.Fatalf("NewConfig: %v", err)
@@ -80,7 +96,7 @@ func runTests(t *testing.T, runner *fakeRunner, source *fakeSource, tier domain.
 		domain.LanguagePython:     fakeAnalyzer{facts: map[string]domain.FileFacts{"logic": logic}},
 		domain.LanguageTypeScript: fakeAnalyzer{facts: map[string]domain.FileFacts{"logic": logic}},
 	}
-	g := NewTests(analyzers, source, runner, fakeFinder{"svc": "go.mod"})
+	g := NewTests(analyzers, source, runner, fakeFinder{"svc": "go.mod"}, &fakeForeign{})
 	findings, err := g.Run(t.Context(), port.GateInput{Config: testsConfig(t), Changes: domain.ChangeSet{Base: base, Files: files}, Tier: tier})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

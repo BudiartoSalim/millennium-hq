@@ -68,6 +68,11 @@ type markerFinder struct{}
 
 func (markerFinder) NearestUp(_, marker, _ string) (string, bool) { return "svc", marker == "go.mod" }
 
+// markerSources hold no line directives.
+type markerSources struct{}
+
+func (markerSources) GoForeignCoverage(string) ([]domain.ForeignCoverage, error) { return nil, nil }
+
 // TestGeneratedCodeInTestedLayersIsDeclaredWithExclude: whether a
 // tested-layer file is exempt depends on the config's exclude, never on a
 // marker in the file (SR-17, AC-11, AC-12).
@@ -124,7 +129,7 @@ func runMarkerChange(t *testing.T, exclude []string) domain.Report {
 	cfg.Packs = domain.Catalog{"clean-architecture": pack}
 	analyzers := map[domain.Language]port.Analyzer{domain.LanguageGo: markerAnalyzer{}}
 	gates := []port.Gate{
-		gate.NewTests(analyzers, markerSource{}, markerRunner{}, markerFinder{}),
+		gate.NewTests(analyzers, markerSource{}, markerRunner{}, markerFinder{}, markerSources{}),
 		gate.NewStructure(analyzers, markerSource{}),
 	}
 	repo := &fakeRepo{changes: []domain.ChangedFile{{Path: generatedFile, Kind: domain.ChangeModified}}}

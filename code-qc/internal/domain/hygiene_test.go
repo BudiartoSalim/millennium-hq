@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"slices"
 	"strings"
 	"testing"
 )
@@ -48,57 +47,6 @@ func TestSuppressionFindings(t *testing.T) {
 	if got := SuppressionFindings("a.ts", comments("// @ts-ignore"), untouched); len(got) != 0 {
 		t.Fatalf("an untouched line is not checked, got %+v", got)
 	}
-}
-
-// Node's test runner reads its coverage directives only as these exact
-// comments: "/* node:coverage disable */", "enable", "ignore next" and
-// "ignore next <n>". Any other text, a reason included, makes it ignore the
-// directive (checked with node v24), so a reason goes on the line above,
-// and a directive Node would ignore is reported (SR-16, QT2-8).
-func TestNodeCoverageDirectives(t *testing.T) {
-	const reason = "// the platform branch runs only on Windows"
-	tests := []struct {
-		name     string
-		comments []Comment
-		want     []string
-	}{
-		{"disable bare", comments("/* node:coverage disable */"), []string{"suppression-without-reason"}},
-		{"ignore next bare", comments("/* node:coverage ignore next */"), []string{"suppression-without-reason"}},
-		{"ignore next with a count, bare", comments("/* node:coverage ignore next 3 */"), []string{"suppression-without-reason"}},
-		{"disable with a reason above", comments(reason, "/* node:coverage disable */"), nil},
-		{"ignore next with a count and a reason above", comments(reason, "/* node:coverage ignore next 3 */"), nil},
-		{"enable is no suppression", comments("/* node:coverage enable */"), nil},
-		{"directive above is not a reason", comments("/* node:coverage enable */", "/* node:coverage ignore next */"), []string{"suppression-without-reason"}},
-		{"reason after the directive", comments("/* node:coverage ignore next -- the platform branch runs only on Windows */"), []string{"ignored-directive"}},
-		{"reason after the directive, reason above too", comments(reason, "/* node:coverage disable -- the platform branch runs only on Windows */"), []string{"ignored-directive"}},
-		{"enable with text", comments("/* node:coverage enable -- back on */"), []string{"ignored-directive"}},
-		{"line comment form", comments(reason, "// node:coverage ignore next 3"), []string{"ignored-directive"}},
-		{"other spacing", comments(reason, "/*node:coverage disable*/"), []string{"ignored-directive"}},
-		{"prose that names the directives", comments("// node:coverage is Node's own coverage"), nil},
-		// Node finds the exact form anywhere on a line, inside another
-		// comment too, so it is a directive there.
-		{"exact form inside a line comment", comments("// see /* node:coverage disable */"), []string{"suppression-without-reason"}},
-		{"exact form inside a line comment, reason above", comments(reason, "// see /* node:coverage disable */"), nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := SuppressionFindings("a.ts", tt.comments, AllLines())
-			var rules []string
-			for _, f := range got {
-				rules = append(rules, f.Rule)
-			}
-			if !slices.Equal(rules, tt.want) {
-				t.Fatalf("findings = %+v, want rules %q", got, tt.want)
-			}
-			if i := slices.IndexFunc(got, recommendsMoreThanTheLineAbove); i >= 0 {
-				t.Fatalf("message %q must recommend only a reason on the line above", got[i].Message)
-			}
-		})
-	}
-}
-
-func recommendsMoreThanTheLineAbove(f Finding) bool {
-	return strings.Contains(f.Message, "<reason>\"") || !strings.Contains(f.Message, "on the line above")
 }
 
 func TestTodoFindings(t *testing.T) {

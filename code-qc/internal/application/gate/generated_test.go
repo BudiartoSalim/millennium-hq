@@ -49,7 +49,7 @@ func runMarkerGates(t *testing.T, path, base, now string) []domain.Finding {
 	}}
 	in := port.GateInput{Config: testsConfig(t), Changes: domain.ChangeSet{Base: "tree", Files: []domain.ChangedFile{modified(path)}}, Tier: domain.TierFull}
 	var all []domain.Finding
-	for _, g := range []port.Gate{NewTests(analyzers, source, runner, fakeFinder{"svc": "go.mod"}), NewStructure(analyzers, source)} {
+	for _, g := range []port.Gate{NewTests(analyzers, source, runner, fakeFinder{"svc": "go.mod"}, &fakeForeign{}), NewStructure(analyzers, source)} {
 		findings, err := g.Run(t.Context(), in)
 		if err != nil {
 			t.Fatalf("%s: %v", g.Name(), err)

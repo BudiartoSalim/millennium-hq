@@ -72,10 +72,6 @@ func (r *Runner) GoTest(ctx context.Context, dir string) (port.TestResult, error
 	if err != nil {
 		return port.TestResult{}, err
 	}
-	result.Foreign, err = r.foreignCoverage(result.Coverage)
-	if err != nil {
-		return port.TestResult{}, err
-	}
 	return result, nil
 }
 
