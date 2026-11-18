@@ -27,7 +27,7 @@ def main():
     for line in sys.stdin:
         try:
             request = json.loads(line)
-            response = {"facts": analyze(request["path"], request["content"])}
+            response = {"facts": analyze(request["path"], request["content"], request.get("runtime") is True)}
         except SyntaxError as err:
             response = {"error": "parse %s:%s: %s" % (err.filename, err.lineno, err.msg)}
         except Exception as err:  # every failure must reach the engine, which blocks on it
@@ -42,7 +42,9 @@ def fail_all(message):
         sys.stdout.flush()
 
 
-def analyze(rel_path, content):
+def analyze(rel_path, content, with_runtime):
+    """The facts of one file; the runtime code only when the request asks,
+    as only the tests gate reads it."""
     tree = ast.parse(content, filename=rel_path)
     parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     name = os.path.basename(rel_path)
@@ -53,7 +55,7 @@ def analyze(rel_path, content):
         "functions": collect_functions(tree, parents),
         "comments": collect_comments(content),
         "constructs": collect_constructs(tree),
-        "runtime": runtime_code(content),
+        "runtime": runtime_code(content) if with_runtime else None,
     }
 
 
@@ -269,6 +271,12 @@ COOKIE = re.compile(r"^[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)", re.ASCII)
 DROPPED = (tokenize.COMMENT, tokenize.NL)
 # LAYOUT tokens stay in the digest but mark no line of their own.
 LAYOUT = (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER)
+LAYOUT_NAMES = {tokenize.tok_name[kind] for kind in LAYOUT}
+# TEMPLATE_STARTS and TEMPLATE_ENDS bound an f-string (3.12+) or a t-string
+# (3.14+), which tokenize splits into parts. Whitespace inside a replacement
+# field is no token, yet f"{x = }" prints "x = 1" where f"{x=}" prints "x=1".
+TEMPLATE_STARTS = tuple(getattr(tokenize, name) for name in ("FSTRING_START", "TSTRING_START") if hasattr(tokenize, name))
+TEMPLATE_ENDS = tuple(getattr(tokenize, name) for name in ("FSTRING_END", "TSTRING_END") if hasattr(tokenize, name))
 
 
 def runtime_code(content):
@@ -281,15 +289,43 @@ def runtime_code(content):
         return None
     digest = hashlib.sha256()
     lines = set()
-    for token in tokenize.generate_tokens(io.StringIO(content).readline):
-        if token.type in DROPPED and not is_cookie(token):
-            continue
-        for field in (tokenize.tok_name[token.type], token.string):
+    for kind, text, start, end in runtime_tokens(content):
+        for field in (kind, text):
             data = field.encode("utf-8")
             digest.update(len(data).to_bytes(8, "big") + data)
-        if token.type not in LAYOUT:
-            lines.update(range(token.start[0], token.end[0] + 1))
+        if kind not in LAYOUT_NAMES:
+            lines.update(range(start, end + 1))
     return {"lines": sorted(lines), "digest": digest.hexdigest()}
+
+
+def runtime_tokens(content):
+    """The runtime tokens of content as (kind, text, first line, last line):
+    every token but comments and the line breaks inside a statement, except
+    the comments Python or the OS reads. An f-string or t-string is one
+    token holding its exact source text, nested ones included."""
+    source_lines = io.StringIO(content).readlines()
+    depth, opened = 0, None
+    for token in tokenize.generate_tokens(io.StringIO(content).readline):
+        if token.type in TEMPLATE_STARTS:
+            depth += 1
+            opened = opened or token.start
+        elif token.type in TEMPLATE_ENDS:
+            depth -= 1
+            if depth == 0:
+                yield "TEMPLATE", source_text(source_lines, opened, token.end), opened[0], token.end[0]
+                opened = None
+        elif depth == 0 and (token.type not in DROPPED or is_read_comment(token)):
+            yield tokenize.tok_name[token.type], token.string, token.start[0], token.end[0]
+
+
+def source_text(source_lines, start, end):
+    """The exact text from start to end, tokenize positions: (line, column)
+    with one-based lines and columns counted in characters."""
+    (first, first_col), (last, last_col) = start, end
+    if first == last:
+        return source_lines[first - 1][first_col:last_col]
+    middle = source_lines[first:last - 1]
+    return "".join([source_lines[first - 1][first_col:]] + middle + [source_lines[last - 1][:last_col]])
 
 
 def declares_utf8(content):
@@ -300,10 +336,14 @@ def declares_utf8(content):
     return codecs.lookup(encoding).name in ("utf-8", "utf-8-sig")
 
 
-def is_cookie(token):
+def is_read_comment(token):
     """An encoding declaration is read by the interpreter, so it counts as
-    runtime; one on line 2 that Python would not honour counts too."""
-    return token.type == tokenize.COMMENT and token.start[0] <= 2 and bool(COOKIE.match(token.line))
+    runtime; one on line 2 that Python would not honour counts too. So does
+    a hashbang, which picks the program that runs the file."""
+    if token.type != tokenize.COMMENT:
+        return False
+    is_hashbang = token.start == (1, 0) and token.string.startswith("#!")
+    return is_hashbang or (token.start[0] <= 2 and bool(COOKIE.match(token.line)))
 
 
 # --- constructs ---

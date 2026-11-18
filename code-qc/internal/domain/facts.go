@@ -63,6 +63,11 @@ const (
 	// ConstructExplicitAny is a TypeScript `any`, which switches the type
 	// checker off for that value.
 	ConstructExplicitAny ConstructKind = "explicit-any"
+	// ConstructLineDirective is a Go //line or /*line directive, which moves
+	// the positions the compiler and the coverage tool report. It is not
+	// risky in itself: the tests gate blocks it in tested layers, where it
+	// could move coverage off untested lines (see LineDirectiveFindings).
+	ConstructLineDirective ConstructKind = "line-directive"
 )
 
 // ConstructKinds lists every construct kind in a stable order.
@@ -70,6 +75,7 @@ func ConstructKinds() []ConstructKind {
 	return []ConstructKind{
 		ConstructDynamicCode, ConstructShellCommand, ConstructTLSVerifyOff,
 		ConstructUnsafeDeserialization, ConstructHTMLInjection, ConstructExplicitAny,
+		ConstructLineDirective,
 	}
 }
 

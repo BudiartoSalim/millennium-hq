@@ -29,8 +29,8 @@ func TestDecodeRuntimeFacts(t *testing.T) {
 		// replaced bytes: whatever it says, the facts are unknown.
 		{"lone CR", "a\rb\n", `,"runtime":{"lines":[2],"digest":"` + validDigest + `"}`, false, nil},
 		{"lone CR at the end", "a\r", `,"runtime":{"lines":[1],"digest":"` + validDigest + `"}`, false, nil},
-		{"line separator", "a b\n", `,"runtime":{"lines":[1],"digest":"` + validDigest + `"}`, false, nil},
-		{"paragraph separator", "a b\n", `,"runtime":{"lines":[1],"digest":"` + validDigest + `"}`, false, nil},
+		{"line separator", "a\u2028b\n", `,"runtime":{"lines":[1],"digest":"` + validDigest + `"}`, false, nil},
+		{"paragraph separator", "a\u2029b\n", `,"runtime":{"lines":[1],"digest":"` + validDigest + `"}`, false, nil},
 		{"not UTF-8", "a\xff\n", `,"runtime":{"lines":[1],"digest":"` + validDigest + `"}`, false, nil},
 	}
 	for _, tt := range tests {

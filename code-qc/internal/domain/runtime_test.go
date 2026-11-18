@@ -69,6 +69,32 @@ func TestRuntimeCodeHolds(t *testing.T) {
 	}
 }
 
+func TestRuntimeHoldsAny(t *testing.T) {
+	known := mustRuntime(t, []int{4, 5}, digestA, 9)
+	lines := func(first, last int) LineSet { return LineSet{Ranges: []LineRange{{First: first, Last: last}}} }
+	tests := []struct {
+		name    string
+		runtime RuntimeCode
+		touched LineSet
+		want    bool
+	}{
+		{"touched runtime line", known, lines(5, 7), true},
+		{"touched only comments", known, lines(1, 3), false},
+		{"nothing touched", known, LineSet{}, false},
+		{"every line", known, AllLines(), true},
+		{"known file without runtime lines", mustRuntime(t, nil, digestA, 9), AllLines(), false},
+		{"unknown facts", RuntimeCode{}, lines(1, 1), true},
+		{"unknown facts, nothing touched", RuntimeCode{}, LineSet{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.runtime.HoldsAny(tt.touched); got != tt.want {
+				t.Fatalf("HoldsAny = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSameRuntime(t *testing.T) {
 	a := mustRuntime(t, []int{1}, digestA, 1)
 	sameDigest := mustRuntime(t, []int{2}, digestA, 2)

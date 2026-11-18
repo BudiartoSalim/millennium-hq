@@ -129,7 +129,7 @@ func (f factsDTO) runtimeCode(path string, content []byte) (domain.RuntimeCode, 
 // U+2029), so their line numbers would drift from git's, and a comment
 // could end where git's reading of the line does not.
 func numberedLikeGit(content []byte) bool {
-	if !utf8.Valid(content) || bytes.ContainsRune(content, ' ') || bytes.ContainsRune(content, ' ') {
+	if !utf8.Valid(content) || bytes.ContainsRune(content, '\u2028') || bytes.ContainsRune(content, '\u2029') {
 		return false
 	}
 	for i, b := range content {

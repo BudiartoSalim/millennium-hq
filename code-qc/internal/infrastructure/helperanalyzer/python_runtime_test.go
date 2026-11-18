@@ -20,7 +20,7 @@ func heldLines(src string, r domain.RuntimeCode) []int {
 
 func knownRuntime(t *testing.T, a *Analyzer, path, src string) domain.RuntimeCode {
 	t.Helper()
-	r := run(t, a, path, src).Runtime
+	r := runRuntime(t, a, path, src).Runtime
 	if !r.Known() {
 		t.Fatalf("runtime facts of %q are unknown", src)
 	}
@@ -86,8 +86,8 @@ func TestPythonEncodingDeclaration(t *testing.T) {
 		t.Fatal("changing only the declaration must change the digest")
 	}
 	second := knownRuntime(t, a, "m.py", "#!/usr/bin/env python3\n# coding: utf-8\nx = 1\n")
-	if second.Holds(1) || !second.Holds(2) {
-		t.Fatal("a declaration on line 2 is runtime, the shebang comment before it is not")
+	if !second.Holds(2) {
+		t.Fatal("a declaration on line 2 is runtime")
 	}
 	// Python decodes these with another codec than the text the engine
 	// sent; utf-7 turns the second line into print(1).
@@ -96,7 +96,7 @@ func TestPythonEncodingDeclaration(t *testing.T) {
 		"# coding: latin-1\nx = 1\n",
 		"# coding: no-such-codec\nx = 1\n",
 	} {
-		r := run(t, a, "m.py", src).Runtime
+		r := runRuntime(t, a, "m.py", src).Runtime
 		if r.Known() || !r.Holds(2) || domain.SameRuntime(r, r) {
 			t.Fatalf("%q: runtime facts must be unknown", src)
 		}
@@ -106,11 +106,70 @@ func TestPythonEncodingDeclaration(t *testing.T) {
 func TestPythonRuntimeUnknownWhereGitNumbersOtherwise(t *testing.T) {
 	a := pythonAnalyzer(t, nil)
 	for _, src := range []string{"x = 1  # c\rimport os\n", "x = 'caf\xe9'\n"} {
-		if r := run(t, a, "m.py", src).Runtime; r.Known() {
+		if r := runRuntime(t, a, "m.py", src).Runtime; r.Known() {
 			t.Fatalf("%q: runtime facts must be unknown", src)
 		}
 	}
-	if r := run(t, a, "m.py", "x = 1  # c\r\ny = 2\r\n").Runtime; !r.Known() || !r.Holds(2) {
+	if r := runRuntime(t, a, "m.py", "x = 1  # c\r\ny = 2\r\n").Runtime; !r.Known() || !r.Holds(2) {
 		t.Fatal("CRLF line endings number like git")
+	}
+}
+
+// A hashbang picks the program that runs the file, so it is runtime
+// (QT-2); a "#!" comment anywhere else is a comment.
+func TestPythonHashbangIsRuntime(t *testing.T) {
+	a := pythonAnalyzer(t, nil)
+	const body = "x = 1\n"
+	python, pypy := knownRuntime(t, a, "m.py", "#!/usr/bin/env python3\n"+body), knownRuntime(t, a, "m.py", "#!/usr/bin/env pypy3\n"+body)
+	if domain.SameRuntime(python, pypy) || !pypy.Holds(1) {
+		t.Fatal("changing the hashbang must change the digest, and its line must be runtime")
+	}
+	later := knownRuntime(t, a, "m.py", body+"#!/not/a/hashbang\n")
+	if later.Holds(2) || !domain.SameRuntime(later, knownRuntime(t, a, "m.py", body+"#!/other\n")) {
+		t.Fatal("a #! comment after line 1 is an ordinary comment")
+	}
+}
+
+// From Python 3.12 tokenize splits an f-string into parts and drops the
+// whitespace of a replacement field, which an = specifier prints (SEC-6).
+// The digest takes an f-string's exact source text.
+func TestPythonFStringsAreHashedAsWritten(t *testing.T) {
+	a := pythonAnalyzer(t, nil)
+	tests := []struct {
+		name, before, after string
+		same                bool
+	}{
+		{"spacing around a debug =", "x = 1\nprint(f\"{x=}\")\n", "x = 1\nprint(f\"{x = }\")\n", false},
+		{"spacing in a nested f-string", "x = 1\nprint(f\"{f'{x=}'}\")\n", "x = 1\nprint(f\"{f'{x =}'}\")\n", false},
+		{"text of an f-string", "x = 1\nprint(f\"a{x}\")\n", "x = 1\nprint(f\"b{x}\")\n", false},
+		{"spacing outside the f-string", "x = 1\nprint(f\"{x=}\")\n", "x = 1\nprint( f\"{x=}\" )\n", true},
+		{"comment after an f-string", "x = 1\nprint(f\"{x}\")\n", "x = 1\nprint(f\"{x}\")  # shown\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := domain.SameRuntime(knownRuntime(t, a, "m.py", tt.before), knownRuntime(t, a, "m.py", tt.after)); got != tt.same {
+				t.Fatalf("same runtime = %v, want %v", got, tt.same)
+			}
+		})
+	}
+	// t-strings (3.14+) are tokenized the same way; an older interpreter
+	// cannot parse them at all, which the analysis reports.
+	if _, err := a.AnalyzeRuntime(t.Context(), "m.py", []byte("x = 1\nt\"{x}\"\n")); err == nil {
+		if domain.SameRuntime(knownRuntime(t, a, "m.py", "x = 1\nt\"{x=}\"\n"), knownRuntime(t, a, "m.py", "x = 1\nt\"{x = }\"\n")) {
+			t.Fatal("a t-string's spacing around a debug = must change the digest")
+		}
+	}
+	src := "x = 1\ns = f\"\"\"a\n{x}\nb\"\"\"\n"
+	if got := heldLines(src, knownRuntime(t, a, "m.py", src)); !slices.Equal(got, []int{1, 2, 3, 4}) {
+		t.Fatalf("runtime lines = %v; a multi-line f-string holds every line it spans", got)
+	}
+}
+
+// A plain analysis leaves the runtime code out; only a request for it
+// establishes it (PERF-1).
+func TestPythonPlainAnalysisLeavesRuntimeUnknown(t *testing.T) {
+	a := pythonAnalyzer(t, nil)
+	if r := run(t, a, "m.py", "x = 1\n").Runtime; r.Known() {
+		t.Fatal("a plain analysis established runtime code")
 	}
 }

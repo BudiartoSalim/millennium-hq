@@ -411,8 +411,16 @@ additions, not rewrites:
   as value imports and `const enum`), and Python's `tokenize`. Runtime facts
   are known or unknown; unknown (an analysis failure, a helper answer
   without them, content a helper cannot number as git does) counts every
-  line as runtime and every file as changed. Lines are physical, as git
-  numbers them: Go's `//line` directives move none. Go is analysed in
+  line as runtime and every file as changed. Runtime facts are computed
+  only on request (`port.RuntimeAnalyzer`), which only the tests gate makes,
+  for its candidates and their base: the TypeScript transpile costs several
+  times a plain analysis, and every other gate reads every changed file on
+  every Stop hook. The analysis cache keys a result by what was asked, so a
+  plain result never answers a request for runtime facts. Lines are
+  physical, as git numbers them: Go's `//line` directives move none. They
+  do move cover-profile positions, so the tests gate blocks them in tested
+  layers (`line-directive`) and the Go runner rejects a profile that names
+  a line or file the module does not have. Go is analysed in
   the engine (`go/ast`); TypeScript and Python by two small helpers of ours (a
   JS file using the project's own `typescript`, a stdlib Python script using
   `ast`), run with the project's runtime, because a correct TS or Python parser

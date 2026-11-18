@@ -7,15 +7,19 @@ package testrunner
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,7 +73,10 @@ func (r *Runner) GoTest(ctx context.Context, dir string) (port.TestResult, error
 		return port.TestResult{}, fmt.Errorf("read the coverage profile: %w", err)
 	}
 	result.Coverage, err = parseGoProfile(data, modulePath, dir)
-	return result, err
+	if err != nil {
+		return port.TestResult{}, err
+	}
+	return result, checkProfileFiles(result.Coverage, r.root)
 }
 
 // PythonTest runs the embedded unittest helper for the project in dir.
@@ -160,7 +167,9 @@ func tempFile(pattern string) (string, func(), error) {
 
 // parseGoProfile reads "import/path/file.go:10.2,12.3 2 1" lines: a block
 // from line 10 to 12 with 2 statements that ran once. A line is covered
-// when any block on it ran.
+// when any block on it ran. go test was asked to cover the module's own
+// packages only, so a file outside the module is an error, not noise: a
+// //line directive names files as it likes.
 func parseGoProfile(data []byte, modulePath, moduleDir string) (domain.Coverage, error) {
 	coverage := domain.Coverage{}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -174,10 +183,10 @@ func parseGoProfile(data []byte, modulePath, moduleDir string) (domain.Coverage,
 			return nil, err
 		}
 		rel, ok := strings.CutPrefix(file, modulePath+"/")
-		if !ok {
-			continue
-		}
 		repoPath := path.Join(moduleDir, rel)
+		if !ok || !domain.IsRepoRelative(repoPath) {
+			return nil, fmt.Errorf("the coverage profile names %s, which is not a file of module %s; %s", file, modulePath, movedCoverage)
+		}
 		if coverage[repoPath] == nil {
 			coverage[repoPath] = domain.FileCoverage{}
 		}
@@ -186,6 +195,62 @@ func parseGoProfile(data []byte, modulePath, moduleDir string) (domain.Coverage,
 		}
 	}
 	return coverage, scanner.Err()
+}
+
+// movedCoverage is the likely cause of a profile that names lines or files
+// the module does not have, and what to do about it.
+const movedCoverage = "a //line directive moves the positions the coverage tool reports; remove it, or declare the generated file with \"exclude\" in the config"
+
+// checkProfileFiles fails unless every file of the coverage is a regular
+// file under root and every line it names is within the file, as git
+// counts lines: coverage of lines that do not exist would leave the real
+// ones unreported. Files and lines are checked in order, so the message
+// names the first one.
+func checkProfileFiles(coverage domain.Coverage, root string) error {
+	for _, file := range slices.Sorted(maps.Keys(coverage)) {
+		count, err := countLines(filepath.Join(root, filepath.FromSlash(file)))
+		if err != nil {
+			return fmt.Errorf("the coverage profile names %s, which cannot be read as a file of the module (%w); %s", file, err, movedCoverage)
+		}
+		lines := slices.Sorted(maps.Keys(coverage[file]))
+		if i := slices.IndexFunc(lines, func(line int) bool { return line < 1 || line > count }); i >= 0 {
+			return fmt.Errorf("the coverage profile names line %d of %s, which has %d lines; %s", lines[i], file, count, movedCoverage)
+		}
+	}
+	return nil
+}
+
+// countLines counts the lines of a regular file as git does, reading it in
+// bounded chunks.
+func countLines(name string) (int, error) {
+	// A FIFO would block the open, so the type is checked first.
+	if info, err := os.Stat(name); err != nil || !info.Mode().IsRegular() {
+		return 0, cmp.Or(err, errors.New("not a regular file"))
+	}
+	f, err := os.Open(name)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+	count, last := 0, byte('\n')
+	buf := make([]byte, 64<<10)
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			count += bytes.Count(buf[:n], []byte("\n"))
+			last = buf[n-1]
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+	if last != '\n' {
+		count++
+	}
+	return count, nil
 }
 
 func parseProfileLine(line string) (file string, first, last, hits int, err error) {

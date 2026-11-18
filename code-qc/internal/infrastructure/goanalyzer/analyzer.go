@@ -27,6 +27,12 @@ func New(root string) *Analyzer {
 	return &Analyzer{modules: newModuleFinder(root)}
 }
 
+// AnalyzeRuntime is Analyze: a Go analysis always establishes the runtime
+// code, which costs little next to the parse.
+func (a *Analyzer) AnalyzeRuntime(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
+	return a.Analyze(ctx, path, content)
+}
+
 // Analyze parses content as the Go file at the repository-relative path.
 func (a *Analyzer) Analyze(_ context.Context, path string, content []byte) (domain.FileFacts, error) {
 	fset := token.NewFileSet()

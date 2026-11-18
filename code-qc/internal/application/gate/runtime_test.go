@@ -19,15 +19,23 @@ import (
 const userFile = "svc/internal/domain/user.go"
 
 // countingAnalyzer maps content to facts like fakeAnalyzer, and counts the
-// analyses it was asked for. Content it does not know fails; content named
-// "partly <known content>" fails too, but returns that content's facts
-// alongside the error.
+// runtime analyses it was asked for. Content it does not know fails;
+// content named "partly <known content>" fails too, but returns that
+// content's facts alongside the error. Like the TypeScript analyzer, it
+// establishes runtime code only when asked: Analyze leaves it unknown.
 type countingAnalyzer struct {
 	facts map[string]domain.FileFacts
 	calls int
 }
 
-func (a *countingAnalyzer) Analyze(_ context.Context, path string, content []byte) (domain.FileFacts, error) {
+func (a *countingAnalyzer) Analyze(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
+	facts, err := a.AnalyzeRuntime(ctx, path, content)
+	a.calls--
+	facts.Runtime = domain.RuntimeCode{}
+	return facts, err
+}
+
+func (a *countingAnalyzer) AnalyzeRuntime(_ context.Context, path string, content []byte) (domain.FileFacts, error) {
 	a.calls++
 	failure := errors.New("parse " + path + ": syntax error")
 	if partial, ok := strings.CutPrefix(string(content), "partly "); ok {
@@ -98,9 +106,10 @@ func TestTestsMissingComparesRuntimeWithBase(t *testing.T) {
 	}{
 		{"comment-only change", map[string]string{userFile: "v1"}, nil, "v1, new doc", false, 2, []string{"base-rev"}},
 		{"runtime change", map[string]string{userFile: "v1"}, nil, "v2", true, 2, []string{"base-rev"}},
-		{"unknown working facts", map[string]string{userFile: "unknown"}, nil, "also unknown", true, 2, []string{"base-rev"}},
+		// Unknown working facts never compare equal, so the base is not read.
+		{"unknown working facts", map[string]string{userFile: "unknown"}, nil, "also unknown", true, 1, nil},
 		{"unknown base facts", map[string]string{userFile: "unknown"}, nil, "v1", true, 2, []string{"base-rev"}},
-		{"identical unknown content", map[string]string{userFile: "unknown"}, nil, "unknown", true, 2, []string{"base-rev"}},
+		{"identical unknown content", map[string]string{userFile: "unknown"}, nil, "unknown", true, 1, nil},
 		{"base not found", nil, nil, "v1", true, 1, []string{"base-rev"}},
 		{"base read fails", map[string]string{userFile: "v1"}, errInjected, "v1", true, 1, []string{"base-rev"}},
 		{"base analysis fails", map[string]string{userFile: "does not parse"}, nil, "v1", true, 2, []string{"base-rev"}},
@@ -216,5 +225,61 @@ func TestUncoveredChangeCountsOnlyRuntimeLines(t *testing.T) {
 				t.Fatalf("findings = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A comment-only edit of a file that no test executes touches no runtime
+// line, so uncovered-change has nothing to report (AC-4, CR-1): the change
+// holds no code that could run. With unknown runtime code the file still
+// counts as unexecuted.
+func TestUncoveredChangeIgnoresACommentOnlyEditOfAnUnexecutedFile(t *testing.T) {
+	commentLine := map[string]domain.LineSet{userFile: {Ranges: []domain.LineRange{{First: 1, Last: 1}}}}
+	tests := []struct {
+		name, base, working string
+		changed             map[string]domain.LineSet
+		want                []string
+	}{
+		// "v1, new doc" holds runtime code on lines 4-6 and the digest of
+		// "v1"; the change touched only line 1, a comment.
+		{"comment-only change", "v1", "v1, new doc", commentLine, nil},
+		{"unknown runtime code", "v1", "unknown", commentLine, []string{"uncovered-change: no test executed this file"}},
+		{"runtime line touched", "v1", "v2", map[string]domain.LineSet{userFile: {Ranges: []domain.LineRange{{First: 3, Last: 3}}}},
+			[]string{"uncovered-change: no test executed this file"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &fakeRunner{results: map[string]port.TestResult{"go svc": {Coverage: domain.Coverage{}}}}
+			source := &recordingSource{fakeSource: &fakeSource{
+				working: map[string]string{userFile: tt.working}, base: map[string]string{userFile: tt.base}, changed: tt.changed,
+			}}
+			findings := runRuntimeGate(t, source, &countingAnalyzer{facts: runtimeFacts(t)}, runner, domain.TierFull, "base-rev", modified(userFile))
+			if got := coverageFindings(findings); !slices.Equal(got, tt.want) {
+				t.Fatalf("findings = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// plainAnalyzer cannot establish runtime code on request: it has no
+// AnalyzeRuntime, though its plain analysis reports runtime code.
+type plainAnalyzer struct{ inner *countingAnalyzer }
+
+func (a plainAnalyzer) Analyze(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
+	return a.inner.AnalyzeRuntime(ctx, path, content)
+}
+
+// Runtime code comes only from AnalyzeRuntime: an analyzer without it gives
+// unknown facts, which fail closed (SR-5).
+func TestTestsTrustsOnlyRequestedRuntimeCode(t *testing.T) {
+	source := &recordingSource{fakeSource: &fakeSource{working: map[string]string{userFile: "v1, new doc"}, base: map[string]string{userFile: "v1"}}}
+	analyzer := plainAnalyzer{inner: &countingAnalyzer{facts: runtimeFacts(t)}}
+	g := NewTests(map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer}, source, &fakeRunner{}, fakeFinder{"svc": "go.mod"})
+	in := port.GateInput{Config: testsConfig(t), Changes: domain.ChangeSet{Base: "base-rev", Files: []domain.ChangedFile{modified(userFile)}}, Tier: domain.TierFast}
+	findings, err := g.Run(t.Context(), in)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !slices.Equal(rules(findings), []string{"tests/tests-missing"}) || len(source.revs) != 0 {
+		t.Fatalf("findings = %+v, base reads %q; want tests-missing without a base read", findings, source.revs)
 	}
 }

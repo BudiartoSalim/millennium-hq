@@ -15,6 +15,10 @@ var (
 	// suppression matches the directives that switch a checker off for a
 	// line, a block or a file, across the supported languages.
 	suppression = regexp.MustCompile(`eslint-disable(-next-line|-line)?|@ts-(ignore|expect-error|nocheck)|//\s*nolint|\bNOLINT\b|lint:ignore|#\s*nosec|//\s*#nosec|#\s*noqa|#\s*type:\s*ignore|#\s*pragma:\s*no\s*cover|shellcheck\s+disable=|(istanbul|c8|v8)\s+ignore|node:coverage\s+(disable|ignore\s+next)`)
+	// coverageDirective matches every node:coverage comment, the ones that
+	// switch coverage back on included. Like a suppression, it steers a tool,
+	// so it never explains the suppression below it.
+	coverageDirective = regexp.MustCompile(`node:coverage\b`)
 	// todo matches a work-left-to-do marker word at the start of a comment,
 	// or anywhere when a colon or an opening parenthesis follows it. The same
 	// word inside prose, or hyphenated, is not a marker.
@@ -29,7 +33,7 @@ var (
 // SuppressionFindings reports suppression directives that carry no reason.
 // A reason is text after the directive, separated by " -- " or a further
 // comment marker ("//nolint:gosec // reason"), or a comment on the line
-// directly above that is not itself a directive. Only comments on touched
+// directly above that is not itself a suppression or coverage directive. Only comments on touched
 // lines are checked.
 func SuppressionFindings(file string, comments []Comment, touched LineSet) []Finding {
 	byLine := commentsByLine(comments)
@@ -75,7 +79,7 @@ func hasReason(rest string) bool {
 
 func explainedAbove(byLine map[int]Comment, line int) bool {
 	above, ok := byLine[line-1]
-	return ok && suppression.FindStringIndex(above.Text) == nil && letters(above.Text) >= minReasonLetters
+	return ok && !suppression.MatchString(above.Text) && !coverageDirective.MatchString(above.Text) && letters(above.Text) >= minReasonLetters
 }
 
 func commentsByLine(comments []Comment) map[int]Comment {
@@ -128,11 +132,12 @@ func (w Waivers) Covers(rule string, line int) bool {
 }
 
 // ConstructFindings reports risky constructs on touched lines, except where
-// a waiver for "banned-construct" explains them.
+// a waiver for "banned-construct" explains them. A line directive is not
+// banned everywhere: LineDirectiveFindings reports it where it matters.
 func ConstructFindings(file string, constructs []Construct, touched LineSet, waivers Waivers) []Finding {
 	var findings []Finding
 	for _, c := range constructs {
-		if !touched.Contains(c.Line) || waivers.Covers("banned-construct", c.Line) {
+		if c.Kind == ConstructLineDirective || !touched.Contains(c.Line) || waivers.Covers("banned-construct", c.Line) {
 			continue
 		}
 		findings = append(findings, Finding{Rule: "banned-construct", File: file, Line: c.Line, Message: fmt.Sprintf(
@@ -155,6 +160,8 @@ func constructAdvice(kind ConstructKind) string {
 		return "raw HTML from data is a cross-site scripting hole; render text or sanitise first"
 	case ConstructExplicitAny:
 		return "`any` switches type checking off; use `unknown` and narrow it"
+	case ConstructLineDirective:
+		return "it moves the line numbers that coverage reports, so untested code could pass as tested"
 	}
 	return "risky construct"
 }

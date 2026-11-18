@@ -33,6 +33,16 @@ func run(t *testing.T, a *Analyzer, path, src string) domain.FileFacts {
 	return facts
 }
 
+// runRuntime analyses src with its runtime code.
+func runRuntime(t *testing.T, a *Analyzer, path, src string) domain.FileFacts {
+	t.Helper()
+	facts, err := a.AnalyzeRuntime(t.Context(), path, []byte(src))
+	if err != nil {
+		t.Fatalf("AnalyzeRuntime(%s): %v", path, err)
+	}
+	return facts
+}
+
 func functionByKey(t *testing.T, facts domain.FileFacts, key string) domain.FunctionFacts {
 	t.Helper()
 	for _, fn := range facts.Functions {
