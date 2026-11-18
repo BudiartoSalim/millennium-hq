@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -61,12 +62,40 @@ func TestCoverageBoundsFinding(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			finding, found := CoverageBoundsFinding("a.go", tt.coverage, LineCount(content))
+			finding, found := CoverageBoundsFinding("a.go", LanguageGo, tt.coverage, LineCount(content))
 			if found != (tt.want != "") {
 				t.Fatalf("found = %v (%+v), want %v", found, finding, tt.want != "")
 			}
 			if found && (finding.Rule != "tool-failed" || finding.File != "a.go" || !strings.Contains(finding.Message, tt.want)) {
 				t.Fatalf("finding = %+v, want tool-failed on a.go saying %q", finding, tt.want)
+			}
+		})
+	}
+}
+
+// The message names only the causes that fit the file's language (QT3-4):
+// a TypeScript user has no //line directive to remove, and Python's
+// coverage reads no source map.
+func TestCoverageBoundsFindingNamesTheLanguagesCauses(t *testing.T) {
+	tests := []struct {
+		lang          Language
+		names, misses []string
+	}{
+		{LanguageGo, []string{"//line directive", "stale build", "rebuild"}, []string{"source map"}},
+		{LanguageTypeScript, []string{"another version of the file", "source map"}, []string{"//line", "directive"}},
+		{LanguagePython, []string{"another version of the file"}, []string{"//line", "directive", "source map"}},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.lang), func(t *testing.T) {
+			finding, found := CoverageBoundsFinding("f", tt.lang, FileCoverage{2: 0}, 1)
+			if !found {
+				t.Fatal("line 2 of a 1-line file must be reported")
+			}
+			if i := slices.IndexFunc(tt.names, func(s string) bool { return !strings.Contains(finding.Message, s) }); i >= 0 {
+				t.Errorf("message %q does not name %q", finding.Message, tt.names[i])
+			}
+			if i := slices.IndexFunc(tt.misses, func(s string) bool { return strings.Contains(finding.Message, s) }); i >= 0 {
+				t.Errorf("message %q names %q, which does not fit %s", finding.Message, tt.misses[i], tt.lang)
 			}
 		})
 	}

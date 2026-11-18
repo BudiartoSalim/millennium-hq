@@ -51,7 +51,7 @@ func checkDirectives(t *testing.T, analyzer port.Analyzer, working map[string]st
 	t.Helper()
 	for _, tier := range domain.Tiers() {
 		source := &fakeSource{working: working, changed: map[string]domain.LineSet{}}
-		g := NewTests(map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer}, source, &fakeRunner{}, fakeFinder{"svc": "go.mod"})
+		g := NewTests(map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer}, source, &fakeRunner{}, fakeFinder{"svc": "go.mod"}, &fakeForeign{})
 		files := []domain.ChangedFile{modified(path), modified("svc/internal/domain/other_test.go")}
 		findings, err := g.Run(t.Context(), port.GateInput{Config: testsConfig(t), Changes: domain.ChangeSet{Base: "base-rev", Files: files}, Tier: tier})
 		if err != nil {

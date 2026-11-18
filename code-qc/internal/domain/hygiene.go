@@ -13,20 +13,15 @@ const minReasonLetters = 10
 
 var (
 	// suppression matches the directives that switch a checker off for a
-	// line, a block or a file, across the supported languages.
-	suppression = regexp.MustCompile(`eslint-disable(-next-line|-line)?|@ts-(ignore|expect-error|nocheck)|//\s*nolint|\bNOLINT\b|lint:ignore|#\s*nosec|//\s*#nosec|#\s*noqa|#\s*type:\s*ignore|#\s*pragma:\s*no\s*cover|shellcheck\s+disable=|(istanbul|c8|v8)\s+ignore|node:coverage\s+(disable|ignore\s+next)`)
-	// coverageDirective matches every node:coverage comment, the ones that
-	// switch coverage back on included. Like a suppression, it steers a tool,
-	// so it never explains the suppression below it.
+	// line, a block or a file, across the supported languages, in comments.
+	// Node's coverage directives are matched on raw lines instead (see
+	// NodeCoverageFindings).
+	suppression = regexp.MustCompile(`eslint-disable(-next-line|-line)?|@ts-(ignore|expect-error|nocheck)|//\s*nolint|\bNOLINT\b|lint:ignore|#\s*nosec|//\s*#nosec|#\s*noqa|#\s*type:\s*ignore|#\s*pragma:\s*no\s*cover|shellcheck\s+disable=|(istanbul|c8|v8)\s+ignore`)
+	// coverageDirective matches every mention of node:coverage, the
+	// directive that switches coverage back on included. Like a
+	// suppression, it steers a tool, so it never explains the suppression
+	// below it.
 	coverageDirective = regexp.MustCompile(`node:coverage\b`)
-	// nodeCoverage matches a comment that reads like one of Node's coverage
-	// directives, including the one that switches coverage back on.
-	nodeCoverage = regexp.MustCompile(`node:coverage\s+(enable|disable|ignore\s+next)`)
-	// nodeCoverageExact is a coverage directive as Node's test runner reads
-	// it: the runner looks for these exact comments anywhere on a line, so
-	// it ignores one with other spacing, with text added inside, or written
-	// with //.
-	nodeCoverageExact = regexp.MustCompile(`/\* node:coverage (enable|disable|ignore next( \d+)?) \*/`)
 	// todo matches a work-left-to-do marker word at the start of a comment,
 	// or anywhere when a colon or an opening parenthesis follows it. The same
 	// word inside prose, or hyphenated, is not a marker.
@@ -38,12 +33,11 @@ var (
 	waiver = regexp.MustCompile(`millennium:allow\s+([a-z-]+)\s*--\s*(.*)`)
 )
 
-// SuppressionFindings reports suppression directives that carry no reason,
-// and Node coverage directives that Node does not read. A reason is text
-// after the directive, separated by " -- " or a further comment marker
-// ("//nolint:gosec // reason"), or a comment on the line directly above
-// that is not itself a suppression or coverage directive. Only comments on
-// touched lines are checked.
+// SuppressionFindings reports suppression directives in comments that
+// carry no reason. A reason is text after the directive, separated by
+// " -- " or a further comment marker ("//nolint:gosec // reason"), or a
+// comment on the line directly above that is not itself a suppression or
+// coverage directive. Only comments on touched lines are checked.
 func SuppressionFindings(file string, comments []Comment, touched LineSet) []Finding {
 	byLine := commentsByLine(comments)
 	var findings []Finding
@@ -51,33 +45,15 @@ func SuppressionFindings(file string, comments []Comment, touched LineSet) []Fin
 		if !touched.Contains(c.Line) {
 			continue
 		}
-		if finding, ok := suppressionFinding(file, c, byLine); ok {
-			findings = append(findings, finding)
+		text := strings.TrimSpace(c.Text)
+		loc := suppression.FindStringIndex(text)
+		if loc == nil || hasReason(text[loc[1]:]) || explainedAbove(byLine, c.Line) {
+			continue
 		}
+		findings = append(findings, Finding{Rule: "suppression-without-reason", File: file, Line: c.Line, Message: fmt.Sprintf(
+			"%q switches a check off without saying why; add \" -- <reason>\" or a comment on the line above", text)})
 	}
 	return findings
-}
-
-// suppressionFinding checks one comment. Node reads its coverage
-// directives only as written, so text after one, a reason included, makes
-// Node ignore it (ignored-directive); its reason goes on the line above.
-func suppressionFinding(file string, c Comment, byLine map[int]Comment) (Finding, bool) {
-	text := strings.TrimSpace(c.Text)
-	node := nodeCoverage.MatchString(text)
-	if node && !nodeCoverageExact.MatchString(text) {
-		return Finding{Rule: "ignored-directive", File: file, Line: c.Line, Message: fmt.Sprintf(
-			"Node does not read %q, so it switches nothing: Node reads only \"/* node:coverage disable */\", \"/* node:coverage enable */\" and \"/* node:coverage ignore next */\" (with an optional count), written exactly; write it so, and put the reason in a comment on the line above", text)}, true
-	}
-	loc := suppression.FindStringIndex(text)
-	if loc == nil || hasReason(text[loc[1]:]) || explainedAbove(byLine, c.Line) {
-		return Finding{}, false
-	}
-	advice := `add " -- <reason>" or a comment on the line above`
-	if node {
-		advice = "Node reads the directive only as written, so add the reason as a comment on the line above"
-	}
-	return Finding{Rule: "suppression-without-reason", File: file, Line: c.Line, Message: fmt.Sprintf(
-		"%q switches a check off without saying why; %s", text, advice)}, true
 }
 
 // TodoFindings reports TODO-style markers without an issue reference on

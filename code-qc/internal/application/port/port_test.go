@@ -35,6 +35,16 @@ func (w withRuntime) AnalyzeRuntime(_ context.Context, path string, _ []byte) (d
 	return domain.FileFacts{Path: path + " (runtime)", Runtime: w.runtime}, w.err
 }
 
+// The shape of ForeignCoverageSource, as the tests gate's fakes and
+// goanalyzer.Sources implement it: the code a directory's Go sources lend,
+// or why that is unknown, per directory. The port has no logic of its own
+// to run; this fails to compile when its shape changes.
+var _ ForeignCoverageSource = lenderFunc(nil)
+
+type lenderFunc func(dir string) ([]domain.ForeignCoverage, error)
+
+func (f lenderFunc) GoForeignCoverage(dir string) ([]domain.ForeignCoverage, error) { return f(dir) }
+
 func TestAnalyzeRuntime(t *testing.T) {
 	failure := errors.New("syntax error")
 	tests := []struct {

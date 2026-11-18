@@ -54,16 +54,30 @@ func (f FileCoverage) Outside(lineCount int) (int, bool) {
 	return 0, false
 }
 
-// CoverageBoundsFinding reports coverage of file that gives a line the file
-// does not have. The report then describes other positions than the
-// file's, and the lines it should have given go unreported, so it cannot be
-// used: a tool failure.
-func CoverageBoundsFinding(file string, coverage FileCoverage, lineCount int) (Finding, bool) {
+// CoverageBoundsFinding reports coverage of file, a file of lang, that
+// gives a line the file does not have. The report then describes other
+// positions than the file's, and the lines it should have given go
+// unreported, so it cannot be used: a tool failure.
+func CoverageBoundsFinding(file string, lang Language, coverage FileCoverage, lineCount int) (Finding, bool) {
 	line, outside := coverage.Outside(lineCount)
 	if !outside {
 		return Finding{}, false
 	}
 	return Finding{Rule: "tool-failed", File: file, Message: fmt.Sprintf(
-		"the coverage report gives line %d of this file, which has %d lines, so it does not describe the file as it is: a Go //line directive moves the positions the report gives, and a report built from another version of the file has other positions; remove the directive, or rebuild what the test command runs",
-		line, lineCount)}, true
+		"the coverage report gives line %d of this file, which has %d lines, so it does not describe the file as it is: %s",
+		line, lineCount, outOfRangeCauses(lang))}, true
+}
+
+// outOfRangeCauses names what makes the coverage report of a file of lang
+// give lines the file does not have, and what to do. It names only what
+// that language's tools do: TypeScript has no //line directive to remove,
+// and Python's coverage reads no source map.
+func outOfRangeCauses(lang Language) string {
+	switch lang {
+	case LanguageGo:
+		return "a //line directive moves the positions cover reports, and a stale build of another version of the file has other positions; remove the directive, or rebuild what the test command runs"
+	case LanguageTypeScript:
+		return "a report from another version of the file, or a source map that does not match the file, has other positions; rebuild what the test command runs, so that its output and source maps come from the file as it is"
+	}
+	return "a report from another version of the file has other positions; make the test command run the file as it is"
 }

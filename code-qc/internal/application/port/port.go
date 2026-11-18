@@ -144,10 +144,21 @@ type TestResult struct {
 	// not exist, and the lines it gives need not be in the file: the tests
 	// gate checks that for the files it judges.
 	Coverage domain.Coverage
-	// Foreign is code of the suite's sources that the coverage tool counts
-	// as another file's (Go's //line directives); nil for tools without
-	// such a thing.
-	Foreign []domain.ForeignCoverage
+}
+
+// ForeignCoverageSource reads which code Go's cover counts as another
+// file's. Whatever ran a Go suite (go test, or a component's own recipe
+// around it), cover credits the code after a //line directive to the file
+// the directive names, so the tests gate asks for the directories of the
+// files it judges.
+type ForeignCoverageSource interface {
+	// GoForeignCoverage lists the code in the Go sources of the
+	// repository-relative directory dir that cover credits to another
+	// file. Test files and files a build constraint leaves out count; what
+	// go build never reads (a name starting with _ or ., a directory) does
+	// not. An error means a source could not be read, so what it lends is
+	// unknown.
+	GoForeignCoverage(dir string) ([]domain.ForeignCoverage, error)
 }
 
 // TestRunner runs test suites with line coverage. Directories are

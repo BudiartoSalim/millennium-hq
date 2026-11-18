@@ -86,7 +86,7 @@ func runtimeFacts(t *testing.T) map[string]domain.FileFacts {
 
 func runRuntimeGate(t *testing.T, source port.SourceReader, analyzer *countingAnalyzer, runner *fakeRunner, tier domain.Tier, base string, files ...domain.ChangedFile) []domain.Finding {
 	t.Helper()
-	g := NewTests(map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer}, source, runner, fakeFinder{"svc": "go.mod"})
+	g := NewTests(map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer}, source, runner, fakeFinder{"svc": "go.mod"}, &fakeForeign{})
 	findings, err := g.Run(t.Context(), port.GateInput{Config: testsConfig(t), Changes: domain.ChangeSet{Base: base, Files: files}, Tier: tier})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -273,7 +273,7 @@ func (a plainAnalyzer) Analyze(ctx context.Context, path string, content []byte)
 func TestTestsTrustsOnlyRequestedRuntimeCode(t *testing.T) {
 	source := &recordingSource{fakeSource: &fakeSource{working: map[string]string{userFile: "v1, new doc"}, base: map[string]string{userFile: "v1"}}}
 	analyzer := plainAnalyzer{inner: &countingAnalyzer{facts: runtimeFacts(t)}}
-	g := NewTests(map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer}, source, &fakeRunner{}, fakeFinder{"svc": "go.mod"})
+	g := NewTests(map[domain.Language]port.Analyzer{domain.LanguageGo: analyzer}, source, &fakeRunner{}, fakeFinder{"svc": "go.mod"}, &fakeForeign{})
 	in := port.GateInput{Config: testsConfig(t), Changes: domain.ChangeSet{Base: "base-rev", Files: []domain.ChangedFile{modified(userFile)}}, Tier: domain.TierFast}
 	findings, err := g.Run(t.Context(), in)
 	if err != nil {

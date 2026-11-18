@@ -246,7 +246,11 @@ Additional rules:
   rather than trusting them.
 - **Suppressions need a reason.** New `eslint-disable`, `@ts-ignore`, `nosec`,
   `# type: ignore`, `//nolint` and similar comments are blocked unless they carry
-  a written justification, and every one is listed in the summary.
+  a written justification, and every one is listed in the summary. A
+  suppression is matched where its tool reads it: most tools read comments,
+  but Node's test runner reads `node:coverage` directives from the raw lines
+  of a TypeScript file, strings and template literals included, so those
+  are matched on raw lines (`domain.NodeCoverageFindings`).
 
 ## Changing the rules: proposals and `config apply`
 
@@ -425,10 +429,16 @@ additions, not rewrites:
   and cover credits the code after one to the base name it gives, in the
   directive's own directory. So the test runners report coverage as the
   tool wrote it (a Go profile naming a file outside the module is still an
-  error), the Go runner also reports which code its directives credit to
-  another file (`TestResult.Foreign`), and the tests gate checks the
-  coverage of the files it judges only: no line past the end of the file
-  (`tool-failed`, for every coverage source, by `domain.LineCount`), no
+  error), and the tests gate checks the coverage of the files it judges
+  only. For a Go file whose suite passed, whatever ran it (`go test` or a
+  recipe around cover), it asks `port.ForeignCoverageSource` which code the
+  Go sources of that file's directory credit to another file, once per
+  directory; names `go build` never reads (a leading `_` or `.`, a
+  directory) lend nothing, and a source it cannot read blocks the judged
+  files of its directory only (`tool-failed`). The checks are: no line
+  past the end of the file (`tool-failed`, for every coverage source, by
+  `domain.LineCount`, with a message naming the causes of the file's
+  language), no
   directive in a tested-layer file (`line-directive`), and no other file's
   code credited to it, an excluded file's included (`foreign-coverage`).
   Generated code elsewhere, goyacc's `//line yaccpar:1` for one, blocks

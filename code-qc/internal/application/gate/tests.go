@@ -21,11 +21,12 @@ type Tests struct {
 	source    port.SourceReader
 	runner    port.TestRunner
 	finder    port.FileFinder
+	foreign   port.ForeignCoverageSource
 }
 
 // NewTests returns the tests gate.
-func NewTests(analyzers map[domain.Language]port.Analyzer, source port.SourceReader, runner port.TestRunner, finder port.FileFinder) *Tests {
-	return &Tests{analyzers: analyzers, source: source, runner: runner, finder: finder}
+func NewTests(analyzers map[domain.Language]port.Analyzer, source port.SourceReader, runner port.TestRunner, finder port.FileFinder, foreign port.ForeignCoverageSource) *Tests {
+	return &Tests{analyzers: analyzers, source: source, runner: runner, finder: finder, foreign: foreign}
 }
 
 // Rules lists the rules the gate reports.
