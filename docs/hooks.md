@@ -34,7 +34,9 @@ as any directory outside a repository does.
 
 The engine moves up only past directories that do not exist at all, at most
 32 levels, and only from an absolute path in clean form (no `.` or `..`
-parts, no trailing separator). A working directory that exists
+parts, no trailing separator); any other missing working directory blocks
+every event, with a message asking you to change to a directory that
+exists. A working directory that exists
 but cannot be used, such as a file, a dangling symlink, or a directory git
 cannot enter or refuses, blocks every event with git's message, as before.
 
@@ -73,6 +75,26 @@ never from the engine's own. A path outside the repository both ways is
 left alone. A path the engine cannot map for any other reason, such as a
 dangling symlink, a path below a file, or a directory it may not search,
 blocks the call with the reason, because it might lead to a protected path.
+So does a path with a `..` part: the OS follows a symlink before it takes
+`..`, so such a path can lead elsewhere than it reads. Name the path
+without `..`, such as by its absolute path.
+
+The write rules (protected paths, and acceptance tests for the
+software-engineer) apply in every worktree of the repository, not only the
+one the agent is in: each path is also checked against the main checkout
+and every linked worktree that `git worktree list` names, so an agent in
+one worktree cannot change the rules of another, nor of the main checkout.
+What qa-tester may read is decided in the worktree it works in.
+
+Protected paths and the acceptance tests match without regard to case, on
+every OS: on a case-insensitive file system (macOS, Windows, WSL on a
+Windows drive) `.MILLENNIUM/config.json` is the config. On a
+case-sensitive one this denies a few extra paths.
+
+The local configs, which lie outside the repository, are matched the same
+way: as written and with symlinks resolved, without regard to case, so a
+symlink in the repository does not reach them. A path that cannot be
+resolved there blocks the call.
 
 If the config cannot be read, every file change is denied until a human fixes
 it, because the protected paths are unknown; reads stay allowed.

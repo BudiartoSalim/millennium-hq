@@ -198,15 +198,37 @@ func (r *Repository) relativeTo(cwd, arg string) (string, error) {
 		}
 		target = filepath.Join(base, target)
 	}
+	return mapResolved(r.root, target, arg)
+}
+
+// MapPath maps abs, an absolute path, into the tree at root, which need not
+// be a repository: the result is relative to root, slash-separated, and ""
+// for root itself. Symlinks are resolved on both sides, in the longest part
+// of each that exists, so a path through a symlink maps to what it reaches,
+// and a root or path that does not exist yet still maps. Case is ignored
+// in the part that names root, as a case-insensitive file system would.
+// abs is cleaned as text, so a caller that cannot trust its ".." parts
+// refuses them first. A path outside root is ErrOutsideRepository; any
+// other failure is an error of its own.
+func MapPath(root, abs string) (string, error) {
+	if !filepath.IsAbs(abs) {
+		return "", fmt.Errorf("cannot map %s: it is not an absolute path", abs)
+	}
+	return mapResolved(root, filepath.Clean(abs), abs)
+}
+
+// mapResolved maps target, absolute and clean, into root, both with their
+// symlinks resolved; arg names the path in errors.
+func mapResolved(root, target, arg string) (string, error) {
 	resolved, err := resolveExisting(target)
 	if err != nil {
 		return "", err
 	}
-	root, err := filepath.EvalSymlinks(r.root)
+	resolvedRoot, err := resolveExisting(filepath.Clean(root))
 	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", r.root, err)
+		return "", err
 	}
-	return insideRoot(root, resolved, arg)
+	return insideRoot(resolvedRoot, resolved, arg)
 }
 
 // resolveExisting resolves the symlinks of target, an absolute clean path,
@@ -233,18 +255,12 @@ func resolveExisting(target string) (string, error) {
 	return filepath.Join(resolved, rest), nil
 }
 
-// insideRoot makes target relative to root, both resolved, or reports arg
-// as ErrOutsideRepository.
+// insideRoot makes target relative to root, both resolved and clean,
+// matching root's part without regard to case, or reports arg as
+// ErrOutsideRepository.
 func insideRoot(root, target, arg string) (string, error) {
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return "", fmt.Errorf("%s is %w: %v", arg, ErrOutsideRepository, err)
-	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." {
-		return "", nil
-	}
-	if !domain.IsRepoRelative(rel) {
+	rel, ok := domain.RelativeFold(filepath.ToSlash(root), filepath.ToSlash(target))
+	if !ok || rel != "" && !domain.IsRepoRelative(rel) {
 		return "", fmt.Errorf("%s is %w", arg, ErrOutsideRepository)
 	}
 	return rel, nil

@@ -68,6 +68,18 @@ func repoPath(arg string) (string, error) {
 	return "sub/" + arg, nil
 }
 
+// mapPath stands in for the real MapPath: lexical, and for the harness's
+// unnamed root "" the same as repoPath.
+func mapPath(root, abs string) (string, error) {
+	if root == "" {
+		return repoPath(abs)
+	}
+	if rel, ok := domain.RelativeFold(root, abs); ok {
+		return rel, nil
+	}
+	return "", fmt.Errorf("%s: %w", abs, ErrOutsideRepository)
+}
+
 type harness struct {
 	gates          *fakeGates
 	audit          *fakeAudit
@@ -80,6 +92,7 @@ type harness struct {
 	conventions    *fakeConventions
 	root           string
 	localDir       string
+	worktrees      []string
 	terminal       bool
 	config         fakeConfig
 	depsErr        error
@@ -120,7 +133,8 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	deps := func(_ context.Context, dir string) (Deps, error) {
 		h.gotDir = dir
 		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
-			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath, ReadProposal: readProposalFile}, h.depsErr
+			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath, ReadProposal: readProposalFile,
+			OtherWorktrees: func(context.Context) ([]string, error) { return h.worktrees, nil }, MapPath: mapPath}, h.depsErr
 	}
 	app := New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps)
 	app.terminal = func() bool { return h.terminal }

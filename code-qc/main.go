@@ -83,6 +83,8 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 		Root:           repo.Root(),
 		LocalConfigDir: localDir,
 		RepoPath:       repoPath(repo),
+		OtherWorktrees: repo.OtherWorktrees,
+		MapPath:        mapPath,
 		ReadProposal:   configfile.ReadProposal,
 		Close:          closeAnalyzers,
 		EngineCommand:  engineCommand(),
@@ -137,9 +139,9 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 	repo, err := gitrepo.Open(ctx, dir)
 	switch {
 	case errors.Is(err, gitrepo.ErrNotRepository):
-		return nil, fmt.Errorf("%w: %v", cli.ErrNoRepository, err)
+		return nil, fmt.Errorf("%s: %w", dir, cli.ErrNoRepository)
 	case errors.Is(err, gitrepo.ErrNoDirectory):
-		return nil, fmt.Errorf("%w: %v", cli.ErrNoDirectory, err)
+		return nil, fmt.Errorf("%s: %w", dir, cli.ErrNoDirectory)
 	}
 	return repo, err
 }
@@ -149,11 +151,24 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 func repoPath(repo *gitrepo.Repository) func(string) (string, error) {
 	return func(arg string) (string, error) {
 		p, err := repo.RepoPath(arg)
-		if errors.Is(err, gitrepo.ErrOutsideRepository) {
-			return "", fmt.Errorf("%w: %v", cli.ErrOutsideRepository, err)
-		}
-		return p, err
+		return p, outsideError(err)
 	}
+}
+
+// mapPath is gitrepo.MapPath, reporting a path outside root as
+// cli.ErrOutsideRepository.
+func mapPath(root, abs string) (string, error) {
+	p, err := gitrepo.MapPath(root, abs)
+	return p, outsideError(err)
+}
+
+// outsideError reports gitrepo.ErrOutsideRepository as
+// cli.ErrOutsideRepository, with its message, and passes any other error on.
+func outsideError(err error) error {
+	if errors.Is(err, gitrepo.ErrOutsideRepository) {
+		return fmt.Errorf("%w: %v", cli.ErrOutsideRepository, err)
+	}
+	return err
 }
 
 // gates lists every gate in the order reports show them.

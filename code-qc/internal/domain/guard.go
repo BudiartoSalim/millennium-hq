@@ -20,9 +20,15 @@ type ToolCall struct {
 	Tool string
 	// Role is the calling agent's role, "" for the main session.
 	Role string
-	// Paths are the repository-relative paths the call names; paths outside
-	// the repository are left out.
+	// Paths are the paths the call names, relative to the working tree the
+	// agent is in; paths outside it are left out.
 	Paths []string
+	// OtherWorktreePaths are the paths the call names, relative to each
+	// other working tree of the repository (the main checkout and every
+	// linked worktree) they lie inside. Only the write rules apply to them:
+	// an agent may change the rules of no checkout, but what it may read is
+	// decided where it works.
+	OtherWorktreePaths []string
 	// Command is the shell command of a Bash call.
 	Command string
 }
@@ -81,12 +87,14 @@ func Guard(cfg Config, call ToolCall) GuardDecision {
 	return GuardDecision{}
 }
 
+// guardWrite matches paths without regard to case (see WithinFold), in the
+// agent's working tree and in every other one.
 func guardWrite(cfg Config, call ToolCall) GuardDecision {
-	for _, p := range call.Paths {
+	for _, p := range slices.Concat(call.Paths, call.OtherWorktreePaths) {
 		if protected, ok := protectedPath(p); ok {
 			return deny("%s is protected: agents never change the rules they are checked against; the user changes them with `millennium-code-qc config apply`", protected)
 		}
-		if call.Role == RoleSoftwareEngineer && Within(p, cfg.AcceptanceTests) {
+		if call.Role == RoleSoftwareEngineer && WithinFold(p, cfg.AcceptanceTests) {
 			return deny("%s is an acceptance test; the software-engineer agent cannot change the tests that judge its work (qa-tester owns them)", p)
 		}
 	}
@@ -95,7 +103,7 @@ func guardWrite(cfg Config, call ToolCall) GuardDecision {
 
 func protectedPath(p string) (string, bool) {
 	for _, protected := range ProtectedPaths() {
-		if Within(p, protected) {
+		if WithinFold(p, protected) {
 			return protected, true
 		}
 	}
@@ -106,6 +114,8 @@ func protectedPath(p string) (string, bool) {
 // acceptance tests, anything outside the components, and documents inside
 // them (a spec, a README, an API description), but not code, and it may not
 // search inside components, since a search reads every file it passes.
+// The acceptance tests match as spelled here: they are an exception that
+// allows, and folding case would only allow more.
 func guardBlackBox(cfg Config, call ToolCall) GuardDecision {
 	for _, p := range call.Paths {
 		if Within(p, cfg.AcceptanceTests) || (call.Tool == "Read" && IsDocument(p)) {
@@ -145,7 +155,7 @@ func guardShell(command string) GuardDecision {
 		return deny("only the user runs `millennium-code-qc config apply`; write a proposal instead and ask them to apply it")
 	}
 	for _, protected := range ProtectedPaths() {
-		if strings.Contains(command, protected) && shellWrite.MatchString(command) {
+		if ContainsFold(command, protected) && shellWrite.MatchString(command) {
 			return deny("this command looks like it changes %s, which no agent may change", protected)
 		}
 	}
