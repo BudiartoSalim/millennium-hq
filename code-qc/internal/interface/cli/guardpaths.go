@@ -93,8 +93,10 @@ type tree struct {
 
 // resolveTrees resolves each root once. A root that cannot be resolved,
 // its parent replaced by a dangling symlink or a file, reaches no file
-// through its resolved form, so it is compared as named: one broken
-// worktree must not block the calls in every other.
+// through its resolved form, so it is compared as named: a worktree whose
+// root is gone must not block the calls in every other. (A protected
+// location whose lead is unknown below a root that resolves does block;
+// see protectedSpellings.)
 func resolveTrees(deps Deps, roots ...string) []tree {
 	trees := make([]tree, 0, len(roots))
 	for _, root := range roots {
@@ -120,30 +122,21 @@ func treeForms(trees []tree) []string {
 	return forms
 }
 
-// holds reports whether one of targets lies in the tree, as named or as
-// resolved.
-func (t tree) holds(targets []string) bool {
-	return slices.ContainsFunc(targets, func(target string) bool {
-		return domain.WithinFold(target, t.named) || t.resolved != "" && domain.WithinFold(target, t.resolved)
-	})
-}
-
 // protectedSpellings are the targets, and for each one that lies where a
 // protected location of one of trees leads, also that location's spelling
 // of it: with `.pi` a symlink to `conf`, a write of `conf/extensions/x.ts`
 // is a write of `.pi/extensions/x.ts`, which pi loads. The guard matches
 // the protected paths in what the call names, so without this the real
-// path of a protected location would be writable. A location whose lead
-// is unknown, as one that may not be looked at, blocks the call when it
-// belongs to the acting checkout, trees[0], or to one a target lies in,
-// since it might lead to the target; another checkout's is compared as
-// named, so it cannot block the calls in every other.
+// path of a protected location would be writable. A location of any
+// checkout whose lead is unknown, as one that may not be looked at, blocks
+// the call, whichever checkout the target lies in: a link from any
+// worktree may lead anywhere, the main checkout's `conf` included.
 func protectedSpellings(deps Deps, trees []tree, targets []string) ([]string, error) {
 	spellings := slices.Clone(targets)
-	for i, t := range trees {
-		found, unknown := t.locationSpellings(deps, targets)
-		if unknown != nil && (i == 0 || t.holds(targets)) {
-			return nil, unknown
+	for _, t := range trees {
+		found, err := t.locationSpellings(deps, targets)
+		if err != nil {
+			return nil, err
 		}
 		spellings = appendNew(spellings, found...)
 	}
@@ -154,7 +147,7 @@ func protectedSpellings(deps Deps, trees []tree, targets []string) ([]string, er
 // protected locations lead (see respelled), each location resolved once,
 // and an error naming each location whose lead is unknown. A tree whose
 // root cannot be resolved is not looked at (see resolveTrees), and a
-// location below a file reaches nothing.
+// location below a file or through a link loop reaches nothing.
 func (t tree) locationSpellings(deps Deps, targets []string) ([]string, error) {
 	if t.resolved == "" {
 		return nil, nil
@@ -165,7 +158,7 @@ func (t tree) locationSpellings(deps Deps, targets []string) ([]string, error) {
 		location := t.named + "/" + protected
 		lead, err := deps.ResolveLocation(filepath.FromSlash(t.resolved), protected)
 		if err != nil {
-			unknown = append(unknown, fmt.Errorf("cannot resolve the protected location %s, so the call is blocked: %w; fix or remove what it leads through", location, err))
+			unknown = append(unknown, fmt.Errorf("cannot resolve the protected location %s, so every write is blocked until it can be: %w; restore access to it (such as with chmod), fix or remove the link it leads through, or, if %s is a linked worktree you no longer need, remove it (`git worktree remove --force %s`)", location, err, t.named, t.named))
 		}
 		if lead != "" {
 			spellings = append(spellings, respelled(targets, filepath.ToSlash(lead), location)...)

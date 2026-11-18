@@ -356,6 +356,130 @@ func TestHookToleratesProtectedLocationsThatLeadNowhere(t *testing.T) {
 	})
 }
 
+// A protected location that is a link loop reaches nothing, since the OS
+// opens nothing through it, so it blocks no write: before, one in the
+// main checkout blocked every write there and in every agent worktree. A
+// tool's path through the loop still blocks.
+func TestHookToleratesALinkLoopAsAProtectedLocation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows needs a privilege tests do not have")
+	}
+	root, other, _ := optedInRepo(t)
+	if err := errors.Join(os.Symlink(".pi", filepath.Join(root, ".pi")), os.Symlink("x", filepath.Join(other, ".claude")), os.Symlink(".claude", filepath.Join(other, "x"))); err != nil {
+		t.Fatal(err)
+	}
+	engineer := "millennium:software-engineer"
+	assertHookCases(t, []hookCase{
+		{name: "a write in the checkout with the loop", event: toolEvent(root, "Write", "", filepath.Join(root, "main.go"))},
+		{name: "an engineer's write in an agent worktree", event: toolEvent(other, "Write", engineer, filepath.Join(other, "main.go"))},
+		{name: "a write in the main checkout from the worktree with the loop", event: toolEvent(other, "Edit", "", filepath.Join(root, "docs", "a.md"))},
+		{name: "a path through the loop", event: toolEvent(root, "Write", "", filepath.Join(root, ".pi", "x.ts")), wantCode: 2, want: "cannot check the tool's path, so the call is blocked"},
+	})
+}
+
+// A link into /proc/self, /dev/fd and the like leads somewhere else for
+// each process, so the engine cannot know where it leads for pi: the
+// location is unknown, and every write blocks until it is removed. Before,
+// `other/.pi` a link to /proc/self/cwd/conf was resolved in the engine's
+// own working directory, and a write of other/conf/extensions/evil.ts
+// passed.
+func TestHookBlocksWritesWhileALocationLeadsThroughAPerProcessPath(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("/proc/self is Linux's")
+	}
+	root, other, _ := optedInRepo(t)
+	if err := os.Symlink("/proc/self/cwd/conf", filepath.Join(other, ".pi")); err != nil {
+		t.Fatal(err)
+	}
+	unknown := "cannot resolve the protected location " + filepath.ToSlash(filepath.Join(other, ".pi", "settings.json")) + ", so every write is blocked until it can be: resolve /proc/self"
+	assertHookCases(t, []hookCase{
+		{name: "an extension where the link leads", event: toolEvent(root, "Write", "", filepath.Join(other, "conf", "extensions", "evil.ts")), wantCode: 2, want: unknown},
+		{name: "any other write", event: toolEvent(root, "Write", "", filepath.Join(root, "main.go")), wantCode: 2, want: unknown},
+		{name: "a read", event: toolEvent(root, "Read", "", filepath.Join(root, "main.go"))},
+	})
+}
+
+// lock makes dir unreadable and unsearchable, and unlocks it again so
+// that t.TempDir can remove it.
+func lock(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(dir, 0o755); err != nil {
+			t.Errorf("unlock %s: %v", dir, err)
+		}
+	})
+}
+
+// While a protected location of any listed checkout cannot be resolved,
+// such as one in a worktree the engine may not search, every write blocks
+// with a message naming the location and how to fix it: the location may
+// lead anywhere, the main checkout's files included. Before, another
+// checkout's unknown location was skipped, so `chmod 000` on a worktree
+// whose `.pi` leads to the main checkout's `conf` let a write of
+// `conf/extensions/evil.ts` through.
+func TestHookBlocksWritesWhileAWorktreesLocationIsUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows needs a privilege tests do not have")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the permissions these cases rely on")
+	}
+	root, other, _ := optedInRepo(t)
+	via := filepath.Join(other, "d")
+	if err := os.Mkdir(via, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlink(t, filepath.Join(root, "conf"), filepath.Join(via, "link"))
+	if err := os.Symlink(filepath.Join("d", "link"), filepath.Join(other, ".pi")); err != nil {
+		t.Fatal(err)
+	}
+	evil := filepath.Join(root, "conf", "extensions", "evil.ts")
+	assertHookCases(t, []hookCase{{name: "while it can be resolved", event: toolEvent(root, "Write", "", evil), want: denied}})
+	fix := "restore access to it (such as with chmod), fix or remove the link it leads through, or, if " + filepath.ToSlash(other) + " is a linked worktree you no longer need, remove it"
+	for _, locked := range []string{via, other} {
+		t.Run(filepath.Base(locked)+" locked", func(t *testing.T) {
+			lock(t, locked)
+			assertHookCases(t, []hookCase{
+				{name: "an extension where it led", event: toolEvent(root, "Write", "", evil), wantCode: 2, want: "cannot resolve the protected location " + filepath.ToSlash(filepath.Join(other, ".pi"))},
+				{name: "a write in the main checkout", event: toolEvent(root, "Write", "", filepath.Join(root, "main.go")), wantCode: 2, want: fix},
+				{name: "an engineer's write in the main checkout", event: toolEvent(root, "Edit", "millennium:software-engineer", filepath.Join(root, "main.go")), wantCode: 2, want: fix},
+				{name: "a read", event: toolEvent(root, "Read", "", filepath.Join(root, "main.go"))},
+			})
+		})
+	}
+}
+
+// On Windows a directory junction, which `mklink /J` makes without any
+// privilege, is followed like a symlink, end to end: with `.pi` a junction
+// to `conf`, pi loads `conf/extensions`, so a write there is denied, by
+// the main session and by an engineer, from the checkout and from a
+// linked worktree.
+func TestHookFollowsJunctionsOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("directory junctions are Windows'")
+	}
+	root, other, _ := optedInRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, "conf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// millennium:allow banned-construct -- mklink is a cmd built-in with no program of its own; every argument is a constant
+	mklink := exec.Command("cmd", "/c", "mklink", "/J", ".pi", "conf")
+	mklink.Dir = root
+	if out, err := mklink.CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J: %v\n%s", err, out)
+	}
+	engineer := "millennium:software-engineer"
+	assertHookCases(t, []hookCase{
+		{name: "an extension by its real path", event: toolEvent(root, "Write", "", filepath.Join(root, "conf", "extensions", "x.ts")), want: denied},
+		{name: "an engineer's extension by its real path, from a linked worktree", event: toolEvent(other, "Write", engineer, filepath.Join(root, "conf", "extensions", "x.ts")), want: denied},
+		{name: "pi's settings by their real path", event: toolEvent(root, "Edit", "", filepath.Join(root, "conf", "settings.json")), want: denied},
+		{name: "a file beside them", event: toolEvent(root, "Write", "", filepath.Join(root, "conf", "notes.md"))},
+	})
+}
+
 // The hooks compare absolute paths, so a relative local config directory
 // is refused rather than compared with nothing.
 func TestLocalConfigNeedsAnAbsoluteDirectory(t *testing.T) {

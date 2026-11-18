@@ -316,10 +316,11 @@ type symlinkCase struct {
 // its extensions, so a write there is a write of `.pi/extensions`. This
 // holds for every write, whoever makes it, in the acting checkout and in
 // every other worktree; it needs an opted-in repository, as every guard
-// rule. A location whose lead is unknown blocks when it belongs to the
-// acting checkout or to the one the target lies in, and is compared as
-// named otherwise; one that reaches nothing, and one in a worktree whose
-// root cannot be resolved, protect no other spelling.
+// rule. A location whose lead is unknown, in any checkout, blocks every
+// write, wherever it lands, with a message naming the location and how to
+// fix it: a link from any worktree may lead anywhere. One that reaches
+// nothing, and one in a worktree whose root cannot be resolved, protect
+// no other spelling and block nothing.
 func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 	main := filepath.Join(t.TempDir(), "repo")
 	other := filepath.Join(main, ".claude", "worktrees", "other")
@@ -334,9 +335,16 @@ func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 			resolved: otherPiThroughConf, want: ".pi/extensions is protected"},
 		{name: "another worktree's extension by the real path, for qa-tester", config: roleConfig(t), role: "qa-tester", path: filepath.Join(other, "conf", "extensions", "evil.ts"),
 			resolved: otherPiThroughConf, want: ".pi/extensions is protected"},
-		{name: "another worktree's unknown location, writing elsewhere", config: roleConfig(t), path: filepath.Join(main, "a.go"), errs: otherPiUnknown},
+		{name: "another worktree's unknown location, writing in the acting checkout", config: roleConfig(t), path: filepath.Join(main, "a.go"), errs: otherPiUnknown, wantCode: 2,
+			want: "cannot resolve the protected location " + filepath.ToSlash(in(other, ".pi/extensions")) + ", so every write is blocked until it can be: inspect"},
 		{name: "another worktree's unknown location, writing there", config: roleConfig(t), path: filepath.Join(other, "a.go"), errs: otherPiUnknown, wantCode: 2,
-			want: "cannot resolve the protected location " + filepath.ToSlash(in(other, ".pi/extensions")) + ", so the call is blocked: inspect"},
+			want: "cannot resolve the protected location " + filepath.ToSlash(in(other, ".pi/extensions")) + ", so every write is blocked until it can be: inspect"},
+		{name: "another worktree's unknown location, writing outside every checkout, for qa-tester", config: roleConfig(t), role: "qa-tester", path: filepath.Join(elsewhere, "a.go"),
+			errs: otherPiUnknown, wantCode: 2, want: "restore access to it (such as with chmod), fix or remove the link it leads through, or, if " + filepath.ToSlash(other) +
+				" is a linked worktree you no longer need, remove it (`git worktree remove --force " + filepath.ToSlash(other) + "`)"},
+		{name: "the acting checkout's unknown location, writing outside it", config: roleConfig(t), path: filepath.Join(elsewhere, "a.go"),
+			errs: map[string]error{in(main, ".claude/settings.json"): errors.New("inspect " + in(main, ".claude") + ": permission denied")}, wantCode: 2,
+			want: "cannot resolve the protected location " + filepath.ToSlash(in(main, ".claude/settings.json")) + ", so every write is blocked until it can be: inspect"},
 		{name: "a location that reaches nothing", config: roleConfig(t), path: filepath.Join(main, "a.go"), resolved: map[string]string{in(main, ".claude/settings.json"): ""}},
 		{name: "an extension by the real path", config: roleConfig(t), path: filepath.Join(conf, "extensions", "evil.ts"), resolved: piThroughConf, want: ".pi/extensions is protected"},
 		{name: "pi's settings by the real path, in another case", config: roleConfig(t), path: filepath.Join(main, "CONF", "Settings.json"), resolved: piThroughConf, want: ".pi/settings.json is protected"},
@@ -350,7 +358,7 @@ func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 		{name: "not opted in", config: fakeConfig{}, path: filepath.Join(conf, "extensions", "evil.ts"), resolved: piThroughConf},
 		{name: "a location that cannot be resolved", config: roleConfig(t), path: filepath.Join(main, "a.go"),
 			errs: map[string]error{in(main, ".pi/extensions"): errors.New("resolve " + in(main, ".pi") + ": no such file or directory")}, wantCode: 2,
-			want: "cannot resolve the protected location " + filepath.ToSlash(in(main, ".pi/extensions")) + ", so the call is blocked: resolve"},
+			want: "cannot resolve the protected location " + filepath.ToSlash(in(main, ".pi/extensions")) + ", so every write is blocked until it can be: resolve"},
 		{name: "a worktree whose root cannot be resolved", config: roleConfig(t), role: "software-engineer", path: filepath.Join(main, "a.go"),
 			errs: map[string]error{other: errors.New("resolve " + other + ": not a directory"), in(other, ".millennium"): errors.New("never asked")}},
 	}

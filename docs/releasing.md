@@ -23,6 +23,8 @@ so a published binary can only be one built from reviewed source.
   third-party actions: git clones the tag, and Go comes from the official
   tarball checked against a pinned SHA-256. The publishing job alone may
   write; the rest read.
+- `.github/workflows/test-code-qc-windows.yml` runs the engine's
+  Windows-specific tests on Windows (see below).
 
 ## Steps
 
@@ -78,9 +80,34 @@ tag of a published release: users' locks already name its hashes.
 - Keep the default workflow permissions read-only; the workflow asks for
   `contents: write` in its publishing job only.
 
+## The Windows tests
+
+`.github/workflows/test-code-qc-windows.yml` runs on every pull request and
+every push to `main`, on a pinned `windows-2025` runner. The engine has
+Windows-only code that no Linux run reaches: the path walk that follows
+directory junctions and volume mount points, the respelling of 8.3 short
+names, and the call that lists where Windows mounts a volume. The job runs
+`go vet ./...`, the tests of `gitrepo`, `domain` and `interface/cli`, and
+the end-to-end hook test through a junction
+(`TestHookFollowsJunctionsOnWindows`), and fails unless the junction tests
+ran and passed rather than matched nothing. Like the release workflow it
+uses no third-party actions: git fetches the commit with the job's
+read-only token, and Go comes from the official
+`<version>.windows-amd64.zip`, checked against `GO_SHA256_WINDOWS`. The job
+reads only (`contents: read`; the workflow's default is no permissions).
+
+A junction to a volume by its GUID is made with `mountvol` and
+`mklink /J`; if the runner cannot make one, that test reports a skip in
+the log, and the rest still runs. A folder-mounted second volume cannot be
+made on a hosted runner, so that case is covered by the Linux tests with a
+fake file system (`TestWalkFollowsVolumesWhereWindowsMountsThem`).
+
 ## When the Go version changes
 
 Update `go_version` in `scripts/release-build.sh`, and `GO_VERSION` and
-`GO_SHA256` in the workflow, from `https://go.dev/dl/?mode=json&include=all`
-(the `sha256` of `<version>.linux-amd64.tar.gz`). Check the hash against
+`GO_SHA256` in the release workflow, from
+`https://go.dev/dl/?mode=json&include=all` (the `sha256` of
+`<version>.linux-amd64.tar.gz`). Check the hash against
 `https://dl.google.com/go/<version>.linux-amd64.tar.gz.sha256` as well.
+Update `GO_VERSION` and `GO_SHA256_WINDOWS` in the Windows test workflow the
+same way, from the `sha256` of `<version>.windows-amd64.zip`.

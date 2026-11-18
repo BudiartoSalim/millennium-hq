@@ -2,9 +2,12 @@ package gitrepo
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"testing"
+	"unicode/utf16"
 )
 
 // Go reports a Windows directory junction as neither a directory nor a
@@ -48,11 +51,18 @@ type fakeEntry struct {
 
 // fakeFiles is a file system of the entries it holds, by path, below
 // root, which is a directory, as its parents are; any other path is
-// missing, and a path in errs cannot be looked at.
+// missing, and a path in errs cannot be looked at. Windows mounts each
+// volume in volumes at the paths listed, and none when volumeErr is set.
 type fakeFiles struct {
-	root    string
-	entries map[string]fakeEntry
-	errs    map[string]error
+	root      string
+	entries   map[string]fakeEntry
+	errs      map[string]error
+	volumes   map[string][]string
+	volumeErr error
+}
+
+func (f fakeFiles) volumePaths(volume string) ([]string, error) {
+	return f.volumes[volume], f.volumeErr
 }
 
 func (f fakeFiles) kind(p string) (entryKind, error) {
@@ -75,16 +85,59 @@ type walkCase struct {
 	name       string
 	entries    map[string]fakeEntry
 	errs       map[string]error
+	volumes    map[string][]string
+	volumeErr  error
 	rel        string // slash-separated, below root
 	want       string // below root, slash-separated; "" for nothing
 	wantErr    string
 	resolveErr string // Resolve's, which allows no dangling link nor a part below a file; "" when it agrees
 }
 
+// runWalkCases walks each case's rel below root, as a protected location
+// and as a tool's path.
+func runWalkCases(t *testing.T, root string, tests []walkCase) {
+	t.Helper()
+	at := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := fakeFiles{root: root, entries: tt.entries, errs: tt.errs, volumes: tt.volumes, volumeErr: tt.volumeErr}
+			want := ""
+			if tt.want != "" {
+				want = at(tt.want)
+			}
+			got, err := location(files, root, tt.rel)
+			if got != want || !errorMatches(err, tt.wantErr) {
+				t.Fatalf("location(%q) = %q, %v; want %q, error %q", tt.rel, got, err, want, tt.wantErr)
+			}
+			resolveWant, resolveErr := want, tt.wantErr
+			if tt.resolveErr != "" {
+				resolveWant, resolveErr = "", tt.resolveErr
+			}
+			if got, err := resolvePath(files, at(tt.rel)); got != resolveWant || !errorMatches(err, resolveErr) {
+				t.Fatalf("resolvePath(%q) = %q, %v; want %q, error %q", tt.rel, got, err, resolveWant, resolveErr)
+			}
+		})
+	}
+}
+
+// chain is n links one after another, from c0 to the directory end.
+func chain(at func(string) string, n int) map[string]fakeEntry {
+	entries := map[string]fakeEntry{at("end"): {kind: entryDir}}
+	for i := range n {
+		target := fmt.Sprintf("c%d", i+1)
+		if i == n-1 {
+			target = "end"
+		}
+		entries[at(fmt.Sprintf("c%d", i))] = fakeEntry{kind: entryLink, target: target}
+	}
+	return entries
+}
+
 // The walk follows every link itself, a Windows junction included, and
 // blocks on a link it cannot read. A protected location (Location) follows
-// a link that leads nowhere as it reads and reaches nothing below a file;
-// a tool's path (Resolve) is unknown there.
+// a link that leads nowhere as it reads, and reaches nothing below a file
+// or through more links than the OS follows (a loop), since the OS opens
+// nothing there; a tool's path (Resolve) is unknown there.
 func TestWalkFollowsEveryLink(t *testing.T) {
 	root := t.TempDir()
 	at := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
@@ -106,30 +159,79 @@ func TestWalkFollowsEveryLink(t *testing.T) {
 		{name: "a part that cannot be looked at", errs: map[string]error{at(".pi"): errors.New("permission denied")}, rel: ".pi/extensions", wantErr: "inspect " + at(".pi") + ": permission denied"},
 		{name: "a link that cannot be read, such as an unknown reparse point", entries: map[string]fakeEntry{at(".pi"): {kind: entryLink, readErr: errors.New("The system cannot find the file specified.")}},
 			rel: ".pi/extensions", wantErr: "whose target cannot be read, so where a path through it leads is unknown: The system cannot find"},
-		{name: "a loop", entries: map[string]fakeEntry{at(".pi"): link(".pi")}, rel: ".pi/extensions", wantErr: "more than 40 links one after another"},
-		{name: "a link to a device path", entries: map[string]fakeEntry{at(".pi"): link(`\\?\Volume{1}\conf`)}, rel: ".pi/extensions", wantErr: "is a device path"},
+		{name: "a loop reaches nothing", entries: map[string]fakeEntry{at(".pi"): link(".pi")}, rel: ".pi/extensions", resolveErr: tooManyLinks},
+		{name: "a loop through another link", entries: map[string]fakeEntry{at(".claude"): link("x"), at("x"): link(".claude")}, rel: ".claude/settings.json", resolveErr: tooManyLinks},
+		{name: "as many links as the OS follows", entries: chain(at, maxLinks), rel: "c0/extensions", want: "end/extensions"},
+		{name: "one more than the OS follows", entries: chain(at, maxLinks+1), rel: "c0/extensions", resolveErr: tooManyLinks},
 		{name: "a link to an NT path", entries: map[string]fakeEntry{at(".pi"): link(`\??\C:\conf`)}, rel: ".pi/extensions", wantErr: "is a device path"},
+		{name: "a link to a device path that is no volume", entries: map[string]fakeEntry{at(".pi"): link(`\\?\C:\conf`)}, rel: ".pi/extensions", wantErr: "is a device path"},
 		{name: "a link with an empty target", entries: map[string]fakeEntry{at(".pi"): link("")}, rel: ".pi/extensions", wantErr: "its target is empty"},
 	}
+	runWalkCases(t, root, tests)
+}
+
+// tooManyLinks is the error of a walk through more links than the OS
+// follows.
+var tooManyLinks = fmt.Sprintf("more than %d links one after another", maxLinks)
+
+// Since Go 1.23, os.Readlink on Windows gives a volume mount point's
+// target, and a junction's to a volume, as the volume's GUID path
+// (`\\?\Volume{GUID}\`). The walk goes on from where Windows mounts the
+// volume: the mount point itself when it is one of the volume's paths, so
+// a repository below C:\dev keeps its spelling, and otherwise the first
+// path listed. A volume Windows lists no path for, or whose paths cannot
+// be listed, is unknown.
+func TestWalkFollowsVolumesWhereWindowsMountsThem(t *testing.T) {
+	root := t.TempDir()
+	at := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
+	sep := string(filepath.Separator)
+	dir := fakeEntry{kind: entryDir}
+	link := func(target string) fakeEntry { return fakeEntry{kind: entryLink, target: target} }
+	const volume = `\\?\Volume{0a1b}\`
+	mountedAtDev := map[string][]string{volume: {at("e") + sep, at("dev") + sep}}
+	tests := []walkCase{
+		{name: "a folder the volume is mounted at", entries: map[string]fakeEntry{at("dev"): link(volume), at("dev/repo"): dir}, volumes: mountedAtDev,
+			rel: "dev/repo/.pi/extensions", want: "dev/repo/.pi/extensions"},
+		{name: "a mount point named in another case", entries: map[string]fakeEntry{at("Dev"): link(volume)}, volumes: map[string][]string{volume: {at("dev") + sep}},
+			rel: "Dev/.pi", want: "Dev/.pi"},
+		{name: "a junction into a volume", entries: map[string]fakeEntry{at(".pi"): link(volume + "conf"), at("e"): dir, at("e/conf"): dir}, volumes: mountedAtDev,
+			rel: ".pi/extensions", want: "e/conf/extensions"},
+		{name: "a junction to a volume's root", entries: map[string]fakeEntry{at(".pi"): link(`\\?\volume{0a1b}`), at("e"): dir}, volumes: map[string][]string{`\\?\volume{0a1b}\`: {at("e") + sep}},
+			rel: ".pi/extensions", want: "e/extensions"},
+		{name: "a volume mounted nowhere", entries: map[string]fakeEntry{at(".pi"): link(volume + "conf")}, rel: ".pi/extensions",
+			wantErr: "is a volume with no drive letter or mounted folder"},
+		{name: "a volume whose paths cannot be listed", entries: map[string]fakeEntry{at("dev"): link(volume)}, volumeErr: errors.New("access is denied"), rel: "dev/x",
+			wantErr: "resolve " + at("dev") + ": its target " + volume + " is a volume whose mount paths cannot be read, so no other spelling of its files is known: access is denied"},
+		{name: "a volume mounted at a relative path", entries: map[string]fakeEntry{at(".pi"): link(volume)}, volumes: map[string][]string{volume: {"e" + sep}}, rel: ".pi/extensions",
+			wantErr: "which is not an absolute path"},
+		{name: "a GUID path with more after the brace", entries: map[string]fakeEntry{at(".pi"): link(`\\?\Volume{0a1b}x`)}, volumes: mountedAtDev, rel: ".pi/extensions",
+			wantErr: "is a device path"},
+		{name: "a GUID path without a closing brace", entries: map[string]fakeEntry{at(".pi"): link(`\\?\Volume{0a1b`)}, volumes: mountedAtDev, rel: ".pi/extensions",
+			wantErr: "is a device path"},
+	}
+	runWalkCases(t, root, tests)
+}
+
+// A Windows multi-string is a list of NUL-ended strings ended by an empty
+// one, as GetVolumePathNamesForVolumeNameW gives a volume's paths.
+func TestMultiString(t *testing.T) {
+	encode := func(s string) []uint16 { return utf16.Encode([]rune(s)) }
+	tests := []struct {
+		name string
+		buf  []uint16
+		want []string
+	}{
+		{"none", encode("\x00\x00"), nil},
+		{"one", encode("E:\\\x00\x00"), []string{`E:\`}},
+		{"several, after the end too", encode("E:\\\x00C:\\dev\\\x00\x00junk\x00"), []string{`E:\`, `C:\dev\`}},
+		{"beyond the basic plane", encode("C:\\𝄞\x00\x00"), []string{`C:\𝄞`}},
+		{"cut off", encode("E:\\\x00C:\\de"), []string{`E:\`, `C:\de`}},
+		{"empty", nil, nil},
+	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			files := fakeFiles{root: root, entries: tt.entries, errs: tt.errs}
-			want := ""
-			if tt.want != "" {
-				want = at(tt.want)
-			}
-			got, err := location(files, root, tt.rel)
-			if got != want || !errorMatches(err, tt.wantErr) {
-				t.Fatalf("location(%q) = %q, %v; want %q, error %q", tt.rel, got, err, want, tt.wantErr)
-			}
-			resolveWant, resolveErr := want, tt.wantErr
-			if tt.resolveErr != "" {
-				resolveWant, resolveErr = "", tt.resolveErr
-			}
-			if got, err := resolvePath(files, at(tt.rel)); got != resolveWant || !errorMatches(err, resolveErr) {
-				t.Fatalf("resolvePath(%q) = %q, %v; want %q, error %q", tt.rel, got, err, resolveWant, resolveErr)
-			}
-		})
+		if got := multiString(tt.buf); !slices.Equal(got, tt.want) {
+			t.Errorf("%s: multiString = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }
 

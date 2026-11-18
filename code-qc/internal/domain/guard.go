@@ -3,10 +3,8 @@ package domain
 import (
 	"fmt"
 	"path"
-	"regexp"
 	"slices"
 	"strings"
-	"unicode"
 )
 
 // Agent roles the guard knows. A plugin agent's type arrives scoped, such as
@@ -169,13 +167,6 @@ func ProtectedPaths() []string {
 	return []string{".millennium", ".claude/settings.json", ".claude/settings.local.json", ".pi/settings.json", ".pi/extensions"}
 }
 
-var (
-	// shellWrite matches shell commands that can change a file.
-	shellWrite = regexp.MustCompile(`>|\btee\b|\bsed\s+(-\S*\s+)*-i|\b(mv|cp|rm|ln|chmod|truncate|install|dd)\b|\bgit\s+(checkout|restore|rm|mv|apply)\b`)
-	// applyCommand matches the human-only command that changes the rules.
-	applyCommand = regexp.MustCompile(`\bmillennium-code-qc(\.exe)?["']?\s+config\s+apply\b`)
-)
-
 // Guard decides a tool call: no agent may write protected paths or apply a
 // config; the software engineer may not change the acceptance tests it is checked
 // against; qa-tester may not read the implementation it tests black-box.
@@ -302,46 +293,6 @@ func IsDocument(p string) bool {
 		return true
 	}
 	return false
-}
-
-// guardShell matches a Bash call's command; it reads no paths.
-func guardShell(_ Config, call ToolCall) GuardDecision {
-	command := call.Command
-	if applyCommand.MatchString(command) {
-		return deny("only the user runs `millennium-code-qc config apply`; write a proposal instead and ask them to apply it")
-	}
-	if !shellWrite.MatchString(command) {
-		return GuardDecision{}
-	}
-	if protected, ok := protectedInCommand(command); ok {
-		return deny("this command looks like it changes %s, which no agent may change", protected)
-	}
-	return GuardDecision{}
-}
-
-// protectedInCommand is the protected path a shell command names, without
-// regard to case: anywhere in it, or as a word that ends with a leading
-// part of one (see ProtectedLeadIn), as `ln -s conf .pi` and `mv conf
-// .claude` do, which put what holds other protected paths in its place.
-func protectedInCommand(command string) (string, bool) {
-	for _, protected := range ProtectedPaths() {
-		if ContainsFold(command, protected) {
-			return protected, true
-		}
-	}
-	for _, word := range shellWords(command) {
-		if lead, ok := ProtectedLeadIn(path.Clean(word)); ok {
-			return lead, true
-		}
-	}
-	return "", false
-}
-
-// shellWords are the words of a shell command, split at white space,
-// quotes, operators and `=` (`--target-directory=.pi`), as far as matching
-// them needs.
-func shellWords(command string) []string {
-	return strings.FieldsFunc(command, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune("'\"`;&|()<>=", r) })
 }
 
 func deny(format string, args ...any) GuardDecision {
