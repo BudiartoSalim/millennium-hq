@@ -73,6 +73,28 @@ func TestHasSegmentsFold(t *testing.T) {
 	}
 }
 
+func TestEndsWithSegmentsFold(t *testing.T) {
+	for _, tt := range []struct {
+		p, seq string
+		want   bool
+	}{
+		{".pi", ".pi", true},
+		{"sub/.PI", ".pi", true},
+		{"/repo/.Claude. ", ".claude", true},
+		{"C:/repo/.pi::$DATA", ".pi", true},
+		{"a/.claude/settings.json", ".claude/settings.json", true},
+		{"sub/.pi/x", ".pi", false},
+		{"sub/x.pi", ".pi", false},
+		{".pid", ".pi", false},
+		{"", ".pi", false},
+		{"settings.json", ".claude/settings.json", false},
+	} {
+		if got := endsWithSegmentsFold(tt.p, tt.seq); got != tt.want {
+			t.Errorf("endsWithSegmentsFold(%q, %q) = %v, want %v", tt.p, tt.seq, got, tt.want)
+		}
+	}
+}
+
 // A target below where a symlink leads is named below the symlink, in any
 // spelling that reaches it.
 func TestRebaseFold(t *testing.T) {

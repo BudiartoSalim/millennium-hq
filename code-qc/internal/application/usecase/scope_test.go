@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"strings"
 	"testing"
 
 	"millennium-code-qc/internal/domain"
@@ -25,6 +26,11 @@ func TestCheckScopeMatchesProtectedPathsAsTheGuardDoes(t *testing.T) {
 		{"pkg/.millenniumx/config.json", ""},
 		{"pkg/.claude/settings.json.bak", ""},
 		{"pkg/.pi/worktrees/a.ts", ""},
+		{"pkg/.pi", "protected-path"},
+		{"pkg/.Claude", "protected-path"},
+		{"pkg/sub/.pi.", "protected-path"},
+		{"pkg/.pid", ""},
+		{"pkg/x.claude", ""},
 		{"other/a.go", "out-of-scope"},
 	}
 	for _, tt := range tests {
@@ -43,5 +49,21 @@ func TestCheckScopeMatchesProtectedPathsAsTheGuardDoes(t *testing.T) {
 				t.Fatalf("finding %q, want %q (%+v)", got, tt.want, report.Findings())
 			}
 		})
+	}
+}
+
+// A branch that commits `.pi` as a symlink to `conf`, with
+// `conf/extensions/evil.ts`, adds an extension pi loads: `.pi` is flagged,
+// even when the package may change every path.
+func TestCheckScopeFlagsALinkInPlaceOfAProtectedDirectory(t *testing.T) {
+	repo := &fakeRepo{changes: []domain.ChangedFile{{Path: ".pi", Kind: domain.ChangeAdded}, {Path: "conf/extensions/evil.ts", Kind: domain.ChangeAdded}}}
+	uc := NewCheckScope(NewLoadConfig(enabledSourceWithDefaults(t), repo), repo)
+	report, err := uc.Execute(t.Context(), ScopeInput{Base: "main", Allow: []string{"**"}})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	findings := report.Findings()
+	if len(findings) != 1 || findings[0].File != ".pi" || findings[0].Rule != "protected-path" || !strings.Contains(findings[0].Message, "a file or a symlink at .pi") {
+		t.Fatalf("findings %+v, want one protected-path finding for .pi", findings)
 	}
 }

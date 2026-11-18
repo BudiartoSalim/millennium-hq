@@ -73,6 +73,21 @@ func hasSegmentsFold(p, seq string) bool {
 	return false
 }
 
+// endsWithSegmentsFold reports whether p, slash-separated, ends with the
+// segments of seq, compared as hasSegmentsFold compares them:
+// "sub/.PI" ends with ".pi", "sub/.pi/x" does not.
+func endsWithSegmentsFold(p, seq string) bool {
+	segments, want := strings.Split(p, "/"), strings.Split(seq, "/")
+	if len(segments) < len(want) {
+		return false
+	}
+	tail := segments[len(segments)-len(want):]
+	for i, segment := range tail {
+		tail[i] = win32Name(segment)
+	}
+	return equalSegmentsFold(tail, want)
+}
+
 // win32Name is the name Win32 opens for a path segment: it cuts the
 // segment at its first ':', which starts an alternate data stream
 // (`settings.json::$DATA` is the file itself, `.pi::$INDEX_ALLOCATION` the

@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 // costs no file system or git work: its targets, each path as named and
 // resolved; for a role rule the paths in every worktree; for the protected
 // paths, in an opted-in repository, also the protected spelling of a
-// target that a protected location resolves to.
+// target that a protected location of any worktree leads to.
 func locate(ctx context.Context, deps Deps, call domain.ToolCall, named []string) (domain.ToolCall, error) {
 	need := domain.PathNeedOf(call.Tool, call.Role)
 	if !need.Any() || len(named) == 0 {
@@ -31,7 +32,7 @@ func locate(ctx context.Context, deps Deps, call domain.ToolCall, named []string
 	if !optedIn(ctx, deps) {
 		return call, nil
 	}
-	trees, err := checkouts(ctx, deps, need)
+	trees, err := checkouts(ctx, deps)
 	if err != nil {
 		return call, err
 	}
@@ -71,13 +72,12 @@ func resolveTargets(deps Deps, named []string) ([]string, error) {
 	return targets, nil
 }
 
-// checkouts are the checkouts whose paths the call is placed in: for a
-// role rule, which applies in every worktree, the repository's worktrees,
-// the acting one first; otherwise only the acting one.
-func checkouts(ctx context.Context, deps Deps, need domain.PathNeed) ([]tree, error) {
-	if !need.Paths {
-		return resolveTrees(deps, deps.Root), nil
-	}
+// checkouts are the repository's worktrees, the acting one first: the role
+// rules apply in each, and a protected location of each may lead where a
+// write lands (`wt/.pi` a symlink to `wt/conf`), whichever checkout the
+// session acts in. The listing costs nothing in a repository without
+// linked worktrees (see Deps.OtherWorktrees).
+func checkouts(ctx context.Context, deps Deps) ([]tree, error) {
 	others, err := deps.OtherWorktrees(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot check the tool's path in every worktree of the repository, so the call is blocked: %w", err)
@@ -120,31 +120,58 @@ func treeForms(trees []tree) []string {
 	return forms
 }
 
+// holds reports whether one of targets lies in the tree, as named or as
+// resolved.
+func (t tree) holds(targets []string) bool {
+	return slices.ContainsFunc(targets, func(target string) bool {
+		return domain.WithinFold(target, t.named) || t.resolved != "" && domain.WithinFold(target, t.resolved)
+	})
+}
+
 // protectedSpellings are the targets, and for each one that lies where a
-// protected location of one of trees resolves to, also that location's
-// spelling of it: with `.pi` a symlink to `conf`, a write of
-// `conf/extensions/x.ts` is a write of `.pi/extensions/x.ts`, which pi
-// loads. The guard matches the protected paths in what the call names, so
-// without this the real path of a protected location would be writable. A
-// location of a tree whose root cannot be resolved is not looked at (see
-// resolveTrees); one that cannot be resolved itself, such as `.pi` a
-// dangling symlink, blocks the call, since it might lead anywhere.
+// protected location of one of trees leads, also that location's spelling
+// of it: with `.pi` a symlink to `conf`, a write of `conf/extensions/x.ts`
+// is a write of `.pi/extensions/x.ts`, which pi loads. The guard matches
+// the protected paths in what the call names, so without this the real
+// path of a protected location would be writable. A location whose lead
+// is unknown, as one that may not be looked at, blocks the call when it
+// belongs to the acting checkout, trees[0], or to one a target lies in,
+// since it might lead to the target; another checkout's is compared as
+// named, so it cannot block the calls in every other.
 func protectedSpellings(deps Deps, trees []tree, targets []string) ([]string, error) {
 	spellings := slices.Clone(targets)
-	for _, t := range trees {
-		if t.resolved == "" {
-			continue
+	for i, t := range trees {
+		found, unknown := t.locationSpellings(deps, targets)
+		if unknown != nil && (i == 0 || t.holds(targets)) {
+			return nil, unknown
 		}
-		for _, protected := range domain.ProtectedPaths() {
-			location := t.named + "/" + protected
-			resolved, err := deps.ResolvePath(filepath.FromSlash(location))
-			if err != nil {
-				return nil, fmt.Errorf("cannot resolve the protected location %s, so the call is blocked: %w; fix or remove what it leads through", location, err)
-			}
-			spellings = appendNew(spellings, respelled(targets, filepath.ToSlash(resolved), location)...)
-		}
+		spellings = appendNew(spellings, found...)
 	}
 	return spellings, nil
+}
+
+// locationSpellings are the spellings of targets below where the tree's
+// protected locations lead (see respelled), each location resolved once,
+// and an error naming each location whose lead is unknown. A tree whose
+// root cannot be resolved is not looked at (see resolveTrees), and a
+// location below a file reaches nothing.
+func (t tree) locationSpellings(deps Deps, targets []string) ([]string, error) {
+	if t.resolved == "" {
+		return nil, nil
+	}
+	var spellings []string
+	var unknown []error
+	for _, protected := range domain.ProtectedPaths() {
+		location := t.named + "/" + protected
+		lead, err := deps.ResolveLocation(filepath.FromSlash(t.resolved), protected)
+		if err != nil {
+			unknown = append(unknown, fmt.Errorf("cannot resolve the protected location %s, so the call is blocked: %w; fix or remove what it leads through", location, err))
+		}
+		if lead != "" {
+			spellings = append(spellings, respelled(targets, filepath.ToSlash(lead), location)...)
+		}
+	}
+	return spellings, errors.Join(unknown...)
 }
 
 // respelled is each target that lies at or below resolved, spelled below

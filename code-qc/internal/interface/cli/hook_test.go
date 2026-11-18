@@ -312,7 +312,7 @@ func (v *vanishedTree) deps(_ context.Context, dir string) (Deps, error) {
 	if err := v.failing[dir]; err != nil {
 		return Deps{Close: release}, err
 	}
-	return Deps{Guard: v.guard, Stop: &fakeStop{}, Config: fakeConfig{}, RepoPath: repoPath, ResolvePath: resolveAsNamed, OtherWorktrees: noWorktrees, Close: release}, nil
+	return Deps{Guard: v.guard, Stop: &fakeStop{}, Config: fakeConfig{}, RepoPath: repoPath, ResolvePath: resolveAsNamed, ResolveLocation: locateAsNamed, OtherWorktrees: noWorktrees, Close: release}, nil
 }
 
 func noWorktrees(context.Context) ([]string, error) { return nil, nil }

@@ -152,6 +152,18 @@ func TestOtherWorktreesCountsOnlyRecordsGitLists(t *testing.T) {
 		},
 		"a gitdir directory": func(t *testing.T, dir string) { mkdir(t, filepath.Join(dir, "gitdir")) },
 		"a file":             func(t *testing.T, dir string) { writeFile(t, dir, "x") },
+		"a gitdir file that cannot be read": func(t *testing.T, dir string) {
+			if os.Geteuid() == 0 {
+				t.Skip("root reads a file whatever its mode")
+			}
+			mkdir(t, dir)
+			gitdir := filepath.Join(dir, "gitdir")
+			writeFile(t, gitdir, filepath.Join(dir, "nowhere", ".git")+"\n")
+			if err := os.Chmod(gitdir, 0); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(gitdir, 0o644) })
+		},
 	}
 	for name, pad := range pads {
 		t.Run(name, func(t *testing.T) {

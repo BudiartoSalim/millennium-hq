@@ -131,6 +131,55 @@ func TestGuardMatchesProtectedPathsAnywhere(t *testing.T) {
 	}
 }
 
+// A path that ends with a leading part of a protected path stands where
+// the directory holding protected paths lies; in git it can only be a file
+// or a symlink there.
+func TestProtectedLeadIn(t *testing.T) {
+	tests := []struct{ p, want string }{
+		{".pi", ".pi"},
+		{".claude", ".claude"},
+		{"sub/.Pi", ".pi"},
+		{"pkg/.CLAUDE.", ".claude"},
+		{"C:/repo/.pi::$DATA", ".pi"},
+		{".millennium", ""},
+		{".pi/extensions", ""},
+		{".claude/worktrees", ""},
+		{"sub/x.pi", ""},
+		{".pid", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got, ok := ProtectedLeadIn(tt.p)
+		if got != tt.want || ok != (tt.want != "") {
+			t.Errorf("ProtectedLeadIn(%q) = %q, %v; want %q", tt.p, got, ok, tt.want)
+		}
+	}
+}
+
+// A shell command that puts a link, a file or a directory where protected
+// paths lie (`.pi`, `.claude`), as a word of its own, changes them; one
+// that only names such a word, or a longer name, does not.
+func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct{ command, want string }{
+		{"ln -s conf .pi", "changes .pi"},
+		{"ln -sfn ../conf sub/.Pi/", "changes .pi"},
+		{"mv conf .claude", "changes .claude"},
+		{"git mv conf '.pi'", "changes .pi"},
+		{"cp -r conf --target-directory=.pi.", "changes .pi"},
+		{"rm -rf .claude && echo done", "changes .claude"},
+		{"ls .pi", ""},
+		{"cp a.pi b.pi", ""},
+		{"mv notes.md .pid", ""},
+		{"rm -rf .claude/worktrees/agent", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			assertGuard(t, cfg, ToolCall{Tool: "Bash", Command: tt.command}, tt.want)
+		})
+	}
+}
+
 // Win32 strips a name's trailing dots and spaces and opens `name:stream`
 // as a stream of name, so on Windows these spellings create or change the
 // protected files themselves. The guard reads every segment that way on

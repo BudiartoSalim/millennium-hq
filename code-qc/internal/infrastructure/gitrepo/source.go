@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -201,55 +200,19 @@ func (r *Repository) relativeTo(cwd, arg string) (string, error) {
 	return mapResolved(r.root, target, arg)
 }
 
-// Resolve is abs, an absolute path, cleaned and with its symlinks resolved
-// in the longest part of it that exists, so a path through a symlink names
-// what it reaches, and one that does not exist yet (a write may create the
-// rest) still resolves. abs is cleaned as text, so a caller that cannot
-// trust its ".." parts refuses them first. A part that exists but cannot
-// be resolved or looked at is an error: what the path reaches is unknown.
-func Resolve(abs string) (string, error) {
-	if !filepath.IsAbs(abs) {
-		return "", fmt.Errorf("cannot resolve %s: it is not an absolute path", abs)
-	}
-	return resolveExisting(filepath.Clean(abs))
-}
-
 // mapResolved maps target, absolute and clean, into root, both with their
-// symlinks resolved; arg names the path in errors.
+// links followed (see Resolver.Resolve); arg names the path in errors.
 func mapResolved(root, target, arg string) (string, error) {
-	resolved, err := resolveExisting(target)
+	resolver := NewResolver()
+	resolved, err := resolver.Resolve(target)
 	if err != nil {
 		return "", err
 	}
-	resolvedRoot, err := resolveExisting(filepath.Clean(root))
+	resolvedRoot, err := resolver.Resolve(filepath.Clean(root))
 	if err != nil {
 		return "", err
 	}
 	return insideRoot(resolvedRoot, resolved, arg)
-}
-
-// resolveExisting resolves the symlinks of target, an absolute clean path,
-// in its longest part that exists, and appends the rest as given. A part
-// that exists but cannot be resolved, such as a dangling symlink, or that
-// cannot be looked at is an error: what the path reaches is then unknown.
-func resolveExisting(target string) (string, error) {
-	existing, rest := target, ""
-	for existing != filepath.Dir(existing) {
-		_, err := os.Lstat(existing)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return "", fmt.Errorf("inspect %s: %w", existing, err)
-		}
-		rest = filepath.Join(filepath.Base(existing), rest)
-		existing = filepath.Dir(existing)
-	}
-	resolved, err := filepath.EvalSymlinks(existing)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", existing, err)
-	}
-	return filepath.Join(resolved, rest), nil
 }
 
 // insideRoot makes target relative to root, both resolved and clean,

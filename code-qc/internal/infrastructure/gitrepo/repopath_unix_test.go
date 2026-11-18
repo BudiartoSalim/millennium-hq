@@ -134,7 +134,7 @@ func TestResolve(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Resolve(tt.abs)
+			got, err := NewResolver().Resolve(tt.abs)
 			if got != tt.want || !errorMatches(err, tt.wantErr) {
 				t.Fatalf("Resolve(%q) = %q, %v; want %q, error %q", tt.abs, got, err, tt.want, tt.wantErr)
 			}

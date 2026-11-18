@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // Agent roles the guard knows. A plugin agent's type arrives scoped, such as
@@ -232,6 +233,35 @@ func ProtectedPathIn(p string) (string, bool) {
 	return "", false
 }
 
+// ProtectedLeadIn reports the leading part of a protected path that p,
+// slash-separated, ends with, a proper part such as `.pi` of
+// `.pi/extensions`, anywhere and matched as ProtectedPathIn matches
+// (`sub/.Pi`, `.claude.`). Whatever stands there holds protected paths:
+// a symlink or another directory put there brings its own (`.pi` a link
+// to `conf`, whose `extensions/x.ts` pi then loads), and in git such a
+// path can only be a file or a symlink.
+func ProtectedLeadIn(p string) (string, bool) {
+	for _, protected := range ProtectedPaths() {
+		for _, lead := range properLeads(protected) {
+			if endsWithSegmentsFold(p, lead) {
+				return lead, true
+			}
+		}
+	}
+	return "", false
+}
+
+// properLeads are the leading parts of protected, a slash-separated path,
+// shorter than it: `.claude` of `.claude/settings.json`.
+func properLeads(protected string) []string {
+	segments := strings.Split(protected, "/")
+	leads := make([]string, 0, len(segments)-1)
+	for n := 1; n < len(segments); n++ {
+		leads = append(leads, strings.Join(segments[:n], "/"))
+	}
+	return leads
+}
+
 // guardBlackBox keeps qa-tester out of component code: it may read the
 // acceptance tests, anything outside the components, and documents inside
 // them (a spec, a README, an API description), but not code, and it may not
@@ -280,12 +310,38 @@ func guardShell(_ Config, call ToolCall) GuardDecision {
 	if applyCommand.MatchString(command) {
 		return deny("only the user runs `millennium-code-qc config apply`; write a proposal instead and ask them to apply it")
 	}
-	for _, protected := range ProtectedPaths() {
-		if ContainsFold(command, protected) && shellWrite.MatchString(command) {
-			return deny("this command looks like it changes %s, which no agent may change", protected)
-		}
+	if !shellWrite.MatchString(command) {
+		return GuardDecision{}
+	}
+	if protected, ok := protectedInCommand(command); ok {
+		return deny("this command looks like it changes %s, which no agent may change", protected)
 	}
 	return GuardDecision{}
+}
+
+// protectedInCommand is the protected path a shell command names, without
+// regard to case: anywhere in it, or as a word that ends with a leading
+// part of one (see ProtectedLeadIn), as `ln -s conf .pi` and `mv conf
+// .claude` do, which put what holds other protected paths in its place.
+func protectedInCommand(command string) (string, bool) {
+	for _, protected := range ProtectedPaths() {
+		if ContainsFold(command, protected) {
+			return protected, true
+		}
+	}
+	for _, word := range shellWords(command) {
+		if lead, ok := ProtectedLeadIn(path.Clean(word)); ok {
+			return lead, true
+		}
+	}
+	return "", false
+}
+
+// shellWords are the words of a shell command, split at white space,
+// quotes, operators and `=` (`--target-directory=.pi`), as far as matching
+// them needs.
+func shellWords(command string) []string {
+	return strings.FieldsFunc(command, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune("'\"`;&|()<>=", r) })
 }
 
 func deny(format string, args ...any) GuardDecision {
