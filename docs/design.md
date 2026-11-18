@@ -480,7 +480,8 @@ Hooks:
 |---|---|
 | Hook input | JSON on stdin: tool, file, calling agent |
 | Per-agent rules | Engineer cannot edit acceptance tests; qa-tester cannot read source; edit content checked for new suppressions |
-| Protected paths | Edit/Write on protected paths denied for every agent, in every worktree of the repository (main checkout and linked worktrees) whichever the agent is in, matched without regard to case on every OS; a tool path with a `..` part blocks, since the OS follows a symlink before `..` and text cleaning does not |
+| Protected paths | Edit/Write on protected paths denied for every agent, matched as a segment sequence anywhere in the path, as named and with symlinks resolved, without regard to case on every OS, so they are protected in every checkout whether or not git lists it (enumerating checkouts kept leaking: a worktree moved with `mv`, a path with a newline); a tool path with a `..` part blocks, since the OS follows a symlink before `..` and text cleaning does not, and so does a Windows path that is neither absolute nor plainly relative |
+| Role rules in every worktree | The engineer's acceptance-test rule and the qa-tester's black-box rule apply, with the acting session's config, to each path placed in the worktree it lies in (the innermost, as worktrees nest); `git worktree list` is asked only for those roles in an opted-in repository with linked worktrees, and a list it cannot read unambiguously blocks the call |
 | Stop gating | Block "done" while gates fail; escalate after repeated attempts |
 
 Supply chain: see [Supply chain](#supply-chain).

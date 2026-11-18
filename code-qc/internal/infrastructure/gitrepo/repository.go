@@ -27,6 +27,8 @@ const specialFile = fs.ModeDevice | fs.ModeCharDevice | fs.ModeNamedPipe | fs.Mo
 // Repository is a git working tree.
 type Repository struct {
 	root string
+	// commonDir caches gitCommonDir.
+	commonDir string
 }
 
 // ErrNotRepository means the directory is not inside a git working tree.

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"path"
 	"strings"
 	"unicode"
 )
@@ -29,15 +30,42 @@ func WithinFold(p, root string) bool {
 func RelativeFold(base, target string) (string, bool) {
 	baseSegments := strings.Split(strings.TrimSuffix(base, "/"), "/")
 	targetSegments := strings.Split(target, "/")
-	if len(targetSegments) < len(baseSegments) {
+	if len(targetSegments) < len(baseSegments) || !equalSegmentsFold(baseSegments, targetSegments[:len(baseSegments)]) {
 		return "", false
 	}
-	for i, segment := range baseSegments {
-		if !strings.EqualFold(segment, targetSegments[i]) {
-			return "", false
+	return strings.Join(targetSegments[len(baseSegments):], "/"), true
+}
+
+// hasSegmentsFold reports whether p, slash-separated, holds the segments of
+// seq one after another anywhere, comparing whole segments without regard
+// to case: "/x/.Millennium/config.json" holds ".millennium", and
+// "a/.claude/settings.json" holds ".claude/settings.json".
+func hasSegmentsFold(p, seq string) bool {
+	segments, want := strings.Split(p, "/"), strings.Split(seq, "/")
+	for start := 0; start+len(want) <= len(segments); start++ {
+		if equalSegmentsFold(segments[start:start+len(want)], want) {
+			return true
 		}
 	}
-	return strings.Join(targetSegments[len(baseSegments):], "/"), true
+	return false
+}
+
+// equalSegmentsFold reports whether a and b, of equal length, hold the same
+// segments without regard to case.
+func equalSegmentsFold(a, b []string) bool {
+	for i := range a {
+		if !strings.EqualFold(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchSegmentFold is path.Match without regard to case, for a pattern
+// segment the config allows ('*' and '?' wildcards, no '[' or '\').
+func matchSegmentFold(pattern, name string) bool {
+	ok, _ := path.Match(foldKey(pattern), foldKey(name))
+	return ok
 }
 
 // ContainsFold reports whether s contains sub without regard to case.

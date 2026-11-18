@@ -134,11 +134,6 @@ var ErrNoRepository = errors.New("not inside a git repository")
 // exist; a hook then looks in its nearest existing parent.
 var ErrNoDirectory = errors.New("the directory does not exist")
 
-// ErrOutsideRepository is what Deps.RepoPath and Deps.MapPath return for a
-// path outside the repository or tree; the guard then leaves the path out
-// there, since its rules cover only the repository.
-var ErrOutsideRepository = errors.New("not inside the repository")
-
 // Deps are what the commands call.
 type Deps struct {
 	Gates   GateRunner
@@ -159,17 +154,16 @@ type Deps struct {
 	// RepoPath turns a path, relative to the current directory or
 	// absolute, into a repository-relative one, with symlinks resolved; an
 	// absolute path needs no current directory. A path outside the
-	// repository is ErrOutsideRepository.
+	// repository is an error.
 	RepoPath func(arg string) (string, error)
 	// OtherWorktrees lists the absolute roots of the repository's other
 	// working trees, the main checkout and every linked worktree, Root
-	// excepted.
+	// excepted; a listing it cannot read unambiguously is an error.
 	OtherWorktrees func(ctx context.Context) ([]string, error)
-	// MapPath maps an absolute path into the tree at root, a repository's
-	// or any other directory's: relative to it, slash-separated, with
-	// symlinks resolved on both sides and the root matched without regard
-	// to case. A path outside it is ErrOutsideRepository.
-	MapPath func(root, abs string) (string, error)
+	// ResolvePath is an absolute path, cleaned, with its symlinks resolved
+	// in the longest part of it that exists; a part that exists but cannot
+	// be resolved is an error.
+	ResolvePath func(abs string) (string, error)
 	// ReadProposal reads a proposal file named on the command line,
 	// bounded and strictly.
 	ReadProposal func(path string) ([]byte, error)
