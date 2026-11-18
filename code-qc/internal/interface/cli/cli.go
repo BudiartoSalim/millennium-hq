@@ -162,7 +162,10 @@ type Deps struct {
 	OtherWorktrees func(ctx context.Context) ([]string, error)
 	// ResolvePath is an absolute path, cleaned, with its symlinks resolved
 	// in the longest part of it that exists; a part that exists but cannot
-	// be resolved is an error.
+	// be resolved is an error. The error of a path that reaches nothing (a
+	// link that leads to nothing, a part below a file, a link loop) has a
+	// ReachesNothing method that reports true; any other error means that
+	// what the path reaches is unknown, as when a part may not be looked at.
 	ResolvePath func(abs string) (string, error)
 	// ResolveLocation is where a write to protected, a protected location
 	// such as `.pi/extensions` (slash-separated), in the checkout at root,

@@ -37,6 +37,19 @@ func (r *fakeResolver) location(root, protected string) (string, error) {
 	return r.resolve(filepath.Join(root, filepath.FromSlash(protected)))
 }
 
+// nothingThere is an error of a path that reaches nothing, as
+// Deps.ResolvePath marks one; nothing false is one that says it does not.
+type nothingThere struct {
+	reason  string
+	nothing bool
+}
+
+func (e nothingThere) Error() string        { return e.reason }
+func (e nothingThere) ReachesNothing() bool { return e.nothing }
+
+// nothingAt is the error of a path that reaches nothing, for reason.
+func nothingAt(reason string) error { return nothingThere{reason: reason, nothing: true} }
+
 // fakeWorktrees is a fake Deps.OtherWorktrees that counts the listings.
 type fakeWorktrees struct {
 	roots  []string
@@ -174,7 +187,9 @@ type worktreeCase struct {
 // session's config: a path is placed in the worktree it lies in, the
 // innermost one, since Claude Code's worktrees lie inside the main
 // checkout. The protected paths need no listing: they are protected
-// wherever they lie.
+// wherever they lie. A worktree root that reaches nothing is compared as
+// named; one that cannot be resolved otherwise blocks the calls a role
+// rule checks, and no other read.
 func TestPreToolUseAppliesRoleRulesInEveryWorktree(t *testing.T) {
 	main := filepath.Join(t.TempDir(), "repo")
 	linked := filepath.Join(main, ".claude", "worktrees", "agent")
@@ -194,9 +209,14 @@ func TestPreToolUseAppliesRoleRulesInEveryWorktree(t *testing.T) {
 			path: filepath.Join(main, ".claude"), want: "the repository root is implementation code"},
 		{name: "a moved worktree's config, not listed", root: main, worktrees: []string{linked}, tool: "Write",
 			path: filepath.Join(filepath.Dir(main), "moved", ".millennium", "config.json"), want: ".millennium is protected"},
-		{name: "a worktree whose root cannot be resolved is compared as named", root: main, worktrees: []string{other},
-			errs: map[string]error{other: errors.New("resolve " + other + ": no such file or directory")}, tool: "Write", role: "software-engineer",
+		{name: "a worktree whose root reaches nothing is compared as named", root: main, worktrees: []string{other},
+			errs: map[string]error{other: nothingAt("resolve " + other + ": it leads to /gone, which does not exist")}, tool: "Write", role: "software-engineer",
 			path: filepath.Join(other, "tests", "acceptance", "a_test.go"), want: "is an acceptance test"},
+		{name: "a worktree whose root may not be looked at blocks a role call", root: main, worktrees: []string{other},
+			errs: map[string]error{other: errors.New("inspect " + other + ": permission denied")}, tool: "Read", role: "qa-tester",
+			path: filepath.Join(main, "docs", "a.md"), wantCode: 2, want: "cannot resolve the worktree " + filepath.ToSlash(other) + ", so its protected locations cannot be checked"},
+		{name: "a worktree whose root may not be looked at leaves other reads alone", root: main, worktrees: []string{other},
+			errs: map[string]error{other: errors.New("inspect " + other + ": permission denied")}, tool: "Read", path: filepath.Join(main, "docs", "a.md")},
 		{name: "worktrees that cannot be listed block a role call", root: main, listErr: errors.New("cannot read git's list of worktrees unambiguously"),
 			tool: "Read", role: "qa-tester", path: filepath.Join(main, "docs", "a.md"), wantCode: 2,
 			want: "cannot check the tool's path in every worktree of the repository, so the call is blocked: cannot read git's list"},
@@ -318,9 +338,11 @@ type symlinkCase struct {
 // every other worktree; it needs an opted-in repository, as every guard
 // rule. A location whose lead is unknown, in any checkout, blocks every
 // write, wherever it lands, with a message naming the location and how to
-// fix it: a link from any worktree may lead anywhere. One that reaches
-// nothing, and one in a worktree whose root cannot be resolved, protect
-// no other spelling and block nothing.
+// fix it: a link from any worktree may lead anywhere. So does a worktree
+// root that cannot be resolved for any reason but that it reaches nothing,
+// as one that may not be looked at: its locations may lead anywhere too.
+// A location that reaches nothing, and one in a worktree whose root
+// reaches nothing, protect no other spelling and block nothing.
 func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 	main := filepath.Join(t.TempDir(), "repo")
 	other := filepath.Join(main, ".claude", "worktrees", "other")
@@ -359,8 +381,17 @@ func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 		{name: "a location that cannot be resolved", config: roleConfig(t), path: filepath.Join(main, "a.go"),
 			errs: map[string]error{in(main, ".pi/extensions"): errors.New("resolve " + in(main, ".pi") + ": no such file or directory")}, wantCode: 2,
 			want: "cannot resolve the protected location " + filepath.ToSlash(in(main, ".pi/extensions")) + ", so every write is blocked until it can be: resolve"},
-		{name: "a worktree whose root cannot be resolved", config: roleConfig(t), role: "software-engineer", path: filepath.Join(main, "a.go"),
-			errs: map[string]error{other: errors.New("resolve " + other + ": not a directory"), in(other, ".millennium"): errors.New("never asked")}},
+		{name: "a worktree whose root reaches nothing", config: roleConfig(t), role: "software-engineer", path: filepath.Join(main, "a.go"),
+			errs: map[string]error{other: nothingAt("inspect " + other + ": not a directory, so nothing lies below it"), in(other, ".millennium"): errors.New("never asked")}},
+		{name: "a worktree whose root may not be looked at, writing in the acting checkout", config: roleConfig(t), path: filepath.Join(conf, "extensions", "evil.ts"),
+			errs: map[string]error{other: errors.New("inspect " + filepath.Dir(other) + ": permission denied")}, wantCode: 2,
+			want: "cannot resolve the worktree " + filepath.ToSlash(other) + ", so its protected locations cannot be checked and every write is blocked until it can be: inspect " +
+				filepath.Dir(other) + ": permission denied; restore access to it (such as with chmod), or, if it is a linked worktree you no longer need, remove it (`git worktree remove --force " +
+				filepath.ToSlash(other) + "`, or `git worktree prune` once its directory is gone)"},
+		{name: "a worktree root whose error says it reaches something", config: roleConfig(t), path: filepath.Join(main, "a.go"),
+			errs: map[string]error{other: nothingThere{reason: "resolve " + other + ": a device path"}}, wantCode: 2, want: "cannot resolve the worktree " + filepath.ToSlash(other)},
+		{name: "the acting checkout's root may not be looked at", config: roleConfig(t), path: filepath.Join(elsewhere, "a.go"),
+			errs: map[string]error{main: errors.New("inspect " + main + ": permission denied")}, wantCode: 2, want: "cannot resolve the worktree " + filepath.ToSlash(main)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
