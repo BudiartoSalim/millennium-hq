@@ -13,12 +13,14 @@ import (
 )
 
 // locate fills in where the paths a call names lie, as far as the guard's
-// rules need (domain.PathNeedOf), so a call no path rule applies to costs
-// no file system or git work: a write gets its targets, each path as named
-// and resolved; a role rule also the paths in every worktree.
+// rules read them (domain.PathNeedOf), so a call no path rule applies to
+// costs no file system or git work: its targets, each path as named and
+// resolved; for a role rule the paths in every worktree; for the protected
+// paths, in an opted-in repository, also the protected spelling of a
+// target that a protected location resolves to.
 func locate(ctx context.Context, deps Deps, call domain.ToolCall, named []string) (domain.ToolCall, error) {
 	need := domain.PathNeedOf(call.Tool, call.Role)
-	if need == domain.NeedNoPaths || len(named) == 0 {
+	if !need.Any() || len(named) == 0 {
 		return call, nil
 	}
 	targets, err := resolveTargets(deps, named)
@@ -26,10 +28,30 @@ func locate(ctx context.Context, deps Deps, call domain.ToolCall, named []string
 		return call, err
 	}
 	call.Targets = targets
-	if need == domain.NeedWorktreePaths {
-		call.Paths, err = worktreePaths(ctx, deps, targets)
+	if !optedIn(ctx, deps) {
+		return call, nil
+	}
+	trees, err := checkouts(ctx, deps, need)
+	if err != nil {
+		return call, err
+	}
+	if need.Paths {
+		call.Paths = domain.WorktreePaths(targets, treeForms(trees))
+	}
+	if need.Targets {
+		call.Targets, err = protectedSpellings(deps, trees, targets)
 	}
 	return call, err
+}
+
+// optedIn reports whether the repository has rules for the guard to apply.
+// Elsewhere the guard allows everything, so the worktrees are neither
+// listed nor resolved, and a broken one cannot block calls there. A config
+// that cannot be read needs no paths either: the guard then denies every
+// write and allows reads.
+func optedIn(ctx context.Context, deps Deps) bool {
+	_, enabled, err := deps.Config.Execute(ctx)
+	return err == nil && enabled
 }
 
 // resolveTargets are the named paths, absolute and clean, slash-separated,
@@ -49,37 +71,92 @@ func resolveTargets(deps Deps, named []string) ([]string, error) {
 	return targets, nil
 }
 
-// worktreePaths places the targets in the repository's worktrees for the
-// role rules, which apply in every worktree. Only an opted-in repository
-// has rules, so elsewhere the worktrees are neither listed nor resolved,
-// and a broken one cannot block calls there. A config that cannot be read
-// needs no paths either: the guard then denies every write and allows
-// reads.
-func worktreePaths(ctx context.Context, deps Deps, targets []string) ([]string, error) {
-	if _, enabled, err := deps.Config.Execute(ctx); err != nil || !enabled {
-		return nil, nil
+// checkouts are the checkouts whose paths the call is placed in: for a
+// role rule, which applies in every worktree, the repository's worktrees,
+// the acting one first; otherwise only the acting one.
+func checkouts(ctx context.Context, deps Deps, need domain.PathNeed) ([]tree, error) {
+	if !need.Paths {
+		return resolveTrees(deps, deps.Root), nil
 	}
 	others, err := deps.OtherWorktrees(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("cannot check the tool's path in every worktree of the repository, so the call is blocked: %w", err)
 	}
-	return domain.WorktreePaths(targets, treeForms(deps, append([]string{deps.Root}, others...)...)), nil
+	return resolveTrees(deps, append([]string{deps.Root}, others...)...), nil
 }
 
-// treeForms are the roots of trees, slash-separated, each as named and,
-// where it resolves, with its symlinks resolved, each resolved once. A root
-// that cannot be resolved, its parent replaced by a dangling symlink or a
-// file, reaches no file through its resolved form, so it is compared as
-// named: one broken worktree must not block the calls in every other.
-func treeForms(deps Deps, roots ...string) []string {
-	var forms []string
+// tree is the root of a tree of files, slash-separated, as named and with
+// its symlinks resolved; resolved is "" when the root cannot be resolved.
+type tree struct {
+	named, resolved string
+}
+
+// resolveTrees resolves each root once. A root that cannot be resolved,
+// its parent replaced by a dangling symlink or a file, reaches no file
+// through its resolved form, so it is compared as named: one broken
+// worktree must not block the calls in every other.
+func resolveTrees(deps Deps, roots ...string) []tree {
+	trees := make([]tree, 0, len(roots))
 	for _, root := range roots {
-		forms = appendNew(forms, filepath.ToSlash(filepath.Clean(root)))
+		t := tree{named: filepath.ToSlash(filepath.Clean(root))}
 		if resolved, err := deps.ResolvePath(root); err == nil {
-			forms = appendNew(forms, filepath.ToSlash(resolved))
+			t.resolved = filepath.ToSlash(resolved)
+		}
+		trees = append(trees, t)
+	}
+	return trees
+}
+
+// treeForms are the roots of trees, each as named and, where it resolves,
+// as resolved.
+func treeForms(trees []tree) []string {
+	var forms []string
+	for _, t := range trees {
+		forms = appendNew(forms, t.named)
+		if t.resolved != "" {
+			forms = appendNew(forms, t.resolved)
 		}
 	}
 	return forms
+}
+
+// protectedSpellings are the targets, and for each one that lies where a
+// protected location of one of trees resolves to, also that location's
+// spelling of it: with `.pi` a symlink to `conf`, a write of
+// `conf/extensions/x.ts` is a write of `.pi/extensions/x.ts`, which pi
+// loads. The guard matches the protected paths in what the call names, so
+// without this the real path of a protected location would be writable. A
+// location of a tree whose root cannot be resolved is not looked at (see
+// resolveTrees); one that cannot be resolved itself, such as `.pi` a
+// dangling symlink, blocks the call, since it might lead anywhere.
+func protectedSpellings(deps Deps, trees []tree, targets []string) ([]string, error) {
+	spellings := slices.Clone(targets)
+	for _, t := range trees {
+		if t.resolved == "" {
+			continue
+		}
+		for _, protected := range domain.ProtectedPaths() {
+			location := t.named + "/" + protected
+			resolved, err := deps.ResolvePath(filepath.FromSlash(location))
+			if err != nil {
+				return nil, fmt.Errorf("cannot resolve the protected location %s, so the call is blocked: %w; fix or remove what it leads through", location, err)
+			}
+			spellings = appendNew(spellings, respelled(targets, filepath.ToSlash(resolved), location)...)
+		}
+	}
+	return spellings, nil
+}
+
+// respelled is each target that lies at or below resolved, spelled below
+// location instead (see domain.RebaseFold).
+func respelled(targets []string, resolved, location string) []string {
+	var out []string
+	for _, target := range targets {
+		if spelling, ok := domain.RebaseFold(target, resolved, location); ok {
+			out = append(out, spelling)
+		}
+	}
+	return out
 }
 
 // writesLocalConfig reports whether a file tool writes inside the local
@@ -92,7 +169,7 @@ func writesLocalConfig(deps Deps, call domain.ToolCall) bool {
 	if !domain.IsWriteTool(call.Tool) || deps.LocalConfigDir == "" {
 		return false
 	}
-	local := treeForms(deps, deps.LocalConfigDir)
+	local := treeForms(resolveTrees(deps, deps.LocalConfigDir))
 	return slices.ContainsFunc(call.Targets, func(target string) bool {
 		return slices.ContainsFunc(local, func(dir string) bool { return domain.WithinFold(target, dir) })
 	})

@@ -136,6 +136,50 @@ func TestOtherWorktreesRefusesAPathWithANewline(t *testing.T) {
 	}
 }
 
+// git lists only the worktree records that have a gitdir file to name the
+// worktree, so an entry without one, which an agent can make under
+// .git/worktrees, must not make room in the count for a record forged by a
+// path with a newline.
+func TestOtherWorktreesCountsOnlyRecordsGitLists(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file names cannot hold a newline")
+	}
+	pads := map[string]func(t *testing.T, dir string){
+		"an empty directory": func(t *testing.T, dir string) { mkdir(t, dir) },
+		"an empty gitdir file": func(t *testing.T, dir string) {
+			mkdir(t, dir)
+			writeFile(t, filepath.Join(dir, "gitdir"), "")
+		},
+		"a gitdir directory": func(t *testing.T, dir string) { mkdir(t, filepath.Join(dir, "gitdir")) },
+		"a file":             func(t *testing.T, dir string) { writeFile(t, dir, "x") },
+	}
+	for name, pad := range pads {
+		t.Run(name, func(t *testing.T) {
+			main, _, _ := worktreeRepo(t)
+			gitT(t, main, "worktree", "add", "-q", "-b", "nl", filepath.Join(main, ".claude", "worktrees", "a\nHEAD 0\n\nworktree /elsewhere"))
+			pad(t, filepath.Join(main, ".git", "worktrees", "pad"))
+			got, err := open(t, main).OtherWorktrees(t.Context())
+			if !errorMatches(err, "it names 5 worktrees, and git records 4") {
+				t.Fatalf("OtherWorktrees = %q, %v; want the forged record refused", got, err)
+			}
+		})
+	}
+}
+
+func mkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFile(t *testing.T, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseWorktrees(t *testing.T) {
 	lines := func(s ...string) string { return strings.Join(s, "\n") + "\n" }
 	main := filepath.Join(t.TempDir(), "main")

@@ -71,11 +71,14 @@ func parseAllowed(raw []string) ([]domain.Pattern, error) {
 	return patterns, nil
 }
 
+// scopeFinding is what is wrong with a changed path, if anything. The
+// protected paths match as the guard matches them, anywhere in the path and
+// in any spelling that reaches them (domain.ProtectedPathIn): a branch is
+// checked out on case-insensitive and Windows file systems too, and a
+// nested checkout's or directory's rules are protected like the root's.
 func scopeFinding(cfg domain.Config, allowed []domain.Pattern, p string) (domain.Finding, bool) {
-	for _, protected := range domain.ProtectedPaths() {
-		if domain.Within(p, protected) {
-			return domain.Finding{Gate: "scope", Rule: "protected-path", File: p, Message: "the branch changes " + protected + ", which no agent may change"}, true
-		}
+	if protected, ok := domain.ProtectedPathIn(p); ok {
+		return domain.Finding{Gate: "scope", Rule: "protected-path", File: p, Message: "the branch changes " + protected + ", which no agent may change"}, true
 	}
 	if domain.Within(p, cfg.AcceptanceTests) {
 		return domain.Finding{Gate: "scope", Rule: "acceptance-test-changed", File: p, Message: "the branch changes an acceptance test; only qa-tester changes those"}, true

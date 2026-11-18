@@ -84,11 +84,42 @@ read from the session's directory. Name such a path in full.
 A protected path is protected wherever it lies: `.millennium` as any
 segment of a path, and `.claude/settings.json`, `.claude/settings.local.json`,
 `.pi/settings.json` and `.pi/extensions` as segments one after another
-anywhere in it. So no agent writes the rules of the repository, of any of
-its worktrees (the main checkout, a linked worktree, one moved with plain
-`mv` that git no longer lists, or one whose path git cannot list clearly),
-or of any other checkout on the machine. A directory of yours that merely
-has such a segment in its path is protected too.
+anywhere in it. So an agent in an opted-in checkout writes the rules of no
+checkout: not those of the repository, of any of its worktrees (the main
+checkout, a linked worktree, one moved with plain `mv` that git no longer
+lists, or one whose path git cannot list clearly), nor of any other
+checkout on the machine. A directory of yours that merely has such a
+segment in its path is protected too.
+
+Each segment is read as Windows opens it, on every OS: Windows strips a
+name's trailing dots and spaces, and opens `name:stream` (`::$DATA`
+included) as the file `name`, so `.claude\settings.local.json.`,
+`.pi\extensions.\x.ts` and `settings.json::$DATA` are the protected paths
+themselves. Elsewhere this denies a few more names.
+
+A protected location reached through a symlink is protected by its real
+path too. If `.pi` is a symlink to `conf`, pi loads `conf/extensions` as
+the project's extensions, so a write of `conf/extensions/x.ts` is denied
+like one of `.pi/extensions/x.ts`; the same holds for a symlinked
+`.millennium` or `.claude`, and for a settings file that is itself a
+symlink. The engine resolves each protected location of the acting
+checkout, and for a role rule (the software-engineer's writes) of every
+worktree `git worktree list` names, and denies writes inside where they
+lead. A protected location that exists but cannot be resolved, such as a
+dangling `.pi` symlink, blocks every write in the repository until you fix
+or remove it; one of a worktree whose root cannot be resolved is not
+looked at (see below). Another worktree's symlinked location is resolved
+only for a role rule: the main session's writes, and qa-tester's, check
+the acting checkout's.
+
+The guard acts only for a session whose own checkout is opted in (it has a
+config, in the repository or a local one). A session in a checkout that is
+not is not guarded at all, even when that checkout lies inside or beside
+an opted-in one: a worktree checked out at a commit from before the
+repository opted in, a submodule, or a nested repository. From such a
+session a file tool can write the opted-in checkout's
+`.millennium/config.json`, so the protection above holds for sessions in
+an opted-in checkout only. Start agents in an opted-in checkout.
 
 The role rules (acceptance tests, black box) apply in every worktree of
 the repository: each path is placed in the worktree it lies in, the
@@ -102,9 +133,19 @@ session's config. The worktrees are those `git worktree list` names, asked
 only for a role rule (the software-engineer's writes and the qa-tester's
 reads) in an opted-in repository whose git directory has linked worktrees.
 A list that cannot be read unambiguously, such as one with a worktree whose
-path holds a newline, blocks the call with the reason. A worktree whose
-root cannot be resolved, its parent replaced by a dangling symlink or a
-file, is compared as git names it and blocks nothing.
+path holds a newline, blocks the call with the reason; the list may name
+no more worktrees than git keeps records for (entries under
+`.git/worktrees` with a `gitdir` file, the ones git lists). A worktree
+whose root cannot be resolved, its parent replaced by a dangling symlink
+or a file, is compared as git names it and blocks nothing.
+
+The role rules reach only the worktrees `git worktree list` names. A
+worktree moved with plain `mv` rather than `git worktree move` is listed
+at the path it left (as prunable), so its new path lies outside the role
+rules: the software engineer can write the acceptance tests there, and
+qa-tester can read its code. Its protected paths stay protected all the
+same, since they are matched wherever they lie. Move worktrees with
+`git worktree move`, or run `git worktree repair` after a plain `mv`.
 
 Every path rule matches without regard to case, on every OS: on a
 case-insensitive file system (macOS, Windows, WSL on a Windows drive)
