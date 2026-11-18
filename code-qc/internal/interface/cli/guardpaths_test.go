@@ -12,9 +12,10 @@ import (
 	"millennium-code-qc/internal/domain"
 )
 
-// fakeResolver is a fake Deps.ResolvePath: a path in resolved resolves as
-// given, one in errs fails as given, and any other resolves to itself. It
-// records what it was asked.
+// fakeResolver is a fake Deps.ResolvePath and Deps.ResolveLocation, which
+// it is asked a location below a root as: a path in resolved resolves as
+// given ("" a location that reaches nothing), one in errs fails as given,
+// and any other resolves to itself. It records what it was asked.
 type fakeResolver struct {
 	resolved map[string]string
 	errs     map[string]error
@@ -30,6 +31,10 @@ func (r *fakeResolver) resolve(abs string) (string, error) {
 		return p, nil
 	}
 	return filepath.Clean(abs), nil
+}
+
+func (r *fakeResolver) location(root, protected string) (string, error) {
+	return r.resolve(filepath.Join(root, filepath.FromSlash(protected)))
 }
 
 // fakeWorktrees is a fake Deps.OtherWorktrees that counts the listings.
@@ -138,7 +143,7 @@ func TestPreToolUseResolvesPathsForTheGuard(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &fakeResolver{resolved: tt.resolved, errs: tt.errs}
 			guard := &fakeGuard{}
-			deps := Deps{Guard: guard, Root: root, Config: fakeConfig{enabled: true}, ResolvePath: resolver.resolve, OtherWorktrees: noWorktrees}
+			deps := Deps{Guard: guard, Root: root, Config: fakeConfig{enabled: true}, ResolvePath: resolver.resolve, ResolveLocation: resolver.location, OtherWorktrees: noWorktrees}
 			code, out := preToolUseIn(t, deps, tt.cwd, "Edit", "", filePath(tt.path))
 			if code != tt.wantCode || !strings.Contains(out, tt.wantErr) || !slices.Equal(resolver.asked, tt.asked) {
 				t.Fatalf("exit %d (want %d), asked %q (want %q), output %q (want %q)", code, tt.wantCode, resolver.asked, tt.asked, out, tt.wantErr)
@@ -201,7 +206,7 @@ func TestPreToolUseAppliesRoleRulesInEveryWorktree(t *testing.T) {
 			resolver := &fakeResolver{errs: tt.errs}
 			listing := &fakeWorktrees{roots: tt.worktrees, err: tt.listErr}
 			config := roleConfig(t)
-			deps := Deps{Guard: domainGuard{config}, Config: config, Root: tt.root, ResolvePath: resolver.resolve, OtherWorktrees: listing.list}
+			deps := Deps{Guard: domainGuard{config}, Config: config, Root: tt.root, ResolvePath: resolver.resolve, ResolveLocation: resolver.location, OtherWorktrees: listing.list}
 			input := filePath(tt.path)
 			if tt.tool == "Grep" {
 				input = map[string]any{"pattern": "x", "path": tt.path}
@@ -215,10 +220,12 @@ func TestPreToolUseAppliesRoleRulesInEveryWorktree(t *testing.T) {
 	}
 }
 
-// The worktrees are listed only for a role rule in an opted-in repository:
-// listing costs a tenth of a second on some file systems, and a broken
-// worktree must not block calls where no rule needs it.
-func TestPreToolUseListsWorktreesOnlyForRoleRules(t *testing.T) {
+// The worktrees are listed only for a call a path rule applies to, in an
+// opted-in repository: every write, whose protected locations in every
+// worktree may lead where it lands, and qa-tester's reads. Listing costs a
+// tenth of a second on some file systems, and a broken worktree must not
+// block calls where no rule needs it.
+func TestPreToolUseListsWorktreesOnlyForPathRules(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
 	tests := []struct {
 		name       string
@@ -228,9 +235,10 @@ func TestPreToolUseListsWorktreesOnlyForRoleRules(t *testing.T) {
 	}{
 		{"an engineer's write", roleConfig(t), "Write", "software-engineer", 1},
 		{"qa-tester's read", roleConfig(t), "Glob", "qa-tester", 1},
-		{"the main session's write", roleConfig(t), "Write", "", 0},
+		{"the main session's write", roleConfig(t), "Write", "", 1},
 		{"the main session's read", roleConfig(t), "Read", "", 0},
-		{"qa-tester's write", roleConfig(t), "Edit", "qa-tester", 0},
+		{"qa-tester's write", roleConfig(t), "Edit", "qa-tester", 1},
+		{"a Bash command", roleConfig(t), "Bash", "", 0},
 		{"an engineer's read", roleConfig(t), "Read", "software-engineer", 0},
 		{"a repository that is not opted in", fakeConfig{}, "Write", "software-engineer", 0},
 		{"a config that cannot be read", fakeConfig{err: errors.New("bad json")}, "Read", "qa-tester", 0},
@@ -238,7 +246,7 @@ func TestPreToolUseListsWorktreesOnlyForRoleRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			listing := &fakeWorktrees{err: errors.New("listed")}
-			deps := Deps{Guard: domainGuard{tt.config}, Config: tt.config, Root: root, ResolvePath: resolveAsNamed, OtherWorktrees: listing.list}
+			deps := Deps{Guard: domainGuard{tt.config}, Config: tt.config, Root: root, ResolvePath: resolveAsNamed, ResolveLocation: locateAsNamed, OtherWorktrees: listing.list}
 			code, out := preToolUseIn(t, deps, root, tt.tool, tt.role, filePath(filepath.Join(root, "docs", "a.md")))
 			if listing.listed != tt.listed || code != 2*tt.listed || tt.listed == 0 && out != "" {
 				t.Fatalf("listed %d times (want %d), exit %d, output %q", listing.listed, tt.listed, code, out)
@@ -250,8 +258,8 @@ func TestPreToolUseListsWorktreesOnlyForRoleRules(t *testing.T) {
 // Each path the call names, each root and each protected location of a
 // root is resolved once per call, and then compared in memory: resolving
 // costs milliseconds on some file systems, once per root per path was too
-// slow. A read, which no protected path rule applies to, resolves no
-// protected location.
+// slow. Every write resolves the protected locations of every worktree; a
+// read, which no protected path rule applies to, resolves none.
 func TestPreToolUseResolvesEachPathOnce(t *testing.T) {
 	main := filepath.Join(t.TempDir(), "repo")
 	others := []string{filepath.Join(main, "w", "a"), filepath.Join(main, "w", "b"), filepath.Join(main, "w", "c")}
@@ -263,11 +271,12 @@ func TestPreToolUseResolvesEachPathOnce(t *testing.T) {
 	}{
 		{"Write", "software-engineer", slices.Concat([]string{target}, roots, locationsOf(roots...))},
 		{"Read", "qa-tester", slices.Concat([]string{target}, roots)},
-		{"Edit", "", slices.Concat([]string{target, main}, locationsOf(main))},
+		{"Edit", "", slices.Concat([]string{target}, roots, locationsOf(roots...))},
+		{"Write", "qa-tester", slices.Concat([]string{target}, roots, locationsOf(roots...))},
 	} {
 		resolver := &fakeResolver{}
 		config := roleConfig(t)
-		deps := Deps{Guard: domainGuard{config}, Config: config, Root: main, ResolvePath: resolver.resolve, OtherWorktrees: (&fakeWorktrees{roots: others}).list}
+		deps := Deps{Guard: domainGuard{config}, Config: config, Root: main, ResolvePath: resolver.resolve, ResolveLocation: resolver.location, OtherWorktrees: (&fakeWorktrees{roots: others}).list}
 		if code, out := preToolUseIn(t, deps, main, tt.tool, tt.role, filePath(target)); code != 0 || out != "" {
 			t.Fatalf("%s by %q: exit %d, output %q", tt.tool, tt.role, code, out)
 		}
@@ -305,10 +314,12 @@ type symlinkCase struct {
 // A protected location reached through a symlink is protected by its real
 // path too: with `.pi` a symlink to `conf`, pi loads `conf/extensions` as
 // its extensions, so a write there is a write of `.pi/extensions`. This
-// holds for the acting checkout and, for a role rule that lists them, every
-// other worktree; it needs an opted-in repository, as every guard rule. A
-// location that cannot be resolved blocks; one in a worktree whose root
-// cannot be resolved is not looked at.
+// holds for every write, whoever makes it, in the acting checkout and in
+// every other worktree; it needs an opted-in repository, as every guard
+// rule. A location whose lead is unknown blocks when it belongs to the
+// acting checkout or to the one the target lies in, and is compared as
+// named otherwise; one that reaches nothing, and one in a worktree whose
+// root cannot be resolved, protect no other spelling.
 func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 	main := filepath.Join(t.TempDir(), "repo")
 	other := filepath.Join(main, ".claude", "worktrees", "other")
@@ -316,7 +327,17 @@ func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 	elsewhere := filepath.Join(t.TempDir(), "m")
 	in := func(root, protected string) string { return filepath.Join(root, filepath.FromSlash(protected)) }
 	piThroughConf := map[string]string{in(main, ".pi/extensions"): filepath.Join(conf, "extensions"), in(main, ".pi/settings.json"): filepath.Join(conf, "settings.json")}
+	otherPiThroughConf := map[string]string{in(other, ".pi/extensions"): filepath.Join(other, "conf", "extensions")}
+	otherPiUnknown := map[string]error{in(other, ".pi/extensions"): errors.New("inspect " + in(other, ".pi") + ": permission denied")}
 	tests := []symlinkCase{
+		{name: "another worktree's extension by the real path, for the main session", config: roleConfig(t), path: filepath.Join(other, "conf", "extensions", "evil.ts"),
+			resolved: otherPiThroughConf, want: ".pi/extensions is protected"},
+		{name: "another worktree's extension by the real path, for qa-tester", config: roleConfig(t), role: "qa-tester", path: filepath.Join(other, "conf", "extensions", "evil.ts"),
+			resolved: otherPiThroughConf, want: ".pi/extensions is protected"},
+		{name: "another worktree's unknown location, writing elsewhere", config: roleConfig(t), path: filepath.Join(main, "a.go"), errs: otherPiUnknown},
+		{name: "another worktree's unknown location, writing there", config: roleConfig(t), path: filepath.Join(other, "a.go"), errs: otherPiUnknown, wantCode: 2,
+			want: "cannot resolve the protected location " + filepath.ToSlash(in(other, ".pi/extensions")) + ", so the call is blocked: inspect"},
+		{name: "a location that reaches nothing", config: roleConfig(t), path: filepath.Join(main, "a.go"), resolved: map[string]string{in(main, ".claude/settings.json"): ""}},
 		{name: "an extension by the real path", config: roleConfig(t), path: filepath.Join(conf, "extensions", "evil.ts"), resolved: piThroughConf, want: ".pi/extensions is protected"},
 		{name: "pi's settings by the real path, in another case", config: roleConfig(t), path: filepath.Join(main, "CONF", "Settings.json"), resolved: piThroughConf, want: ".pi/settings.json is protected"},
 		{name: "a settings file that is itself a symlink", config: roleConfig(t), path: filepath.Join(main, "s.json"),
@@ -336,7 +357,7 @@ func TestPreToolUseProtectsLocationsReachedThroughSymlinks(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &fakeResolver{resolved: tt.resolved, errs: tt.errs}
-			deps := Deps{Guard: domainGuard{tt.config}, Config: tt.config, Root: main, ResolvePath: resolver.resolve, OtherWorktrees: (&fakeWorktrees{roots: []string{other}}).list}
+			deps := Deps{Guard: domainGuard{tt.config}, Config: tt.config, Root: main, ResolvePath: resolver.resolve, ResolveLocation: resolver.location, OtherWorktrees: (&fakeWorktrees{roots: []string{other}}).list}
 			code, out := preToolUseIn(t, deps, main, "Write", tt.role, filePath(tt.path))
 			assertHookAnswer(t, code, out, tt.wantCode, tt.want)
 		})
@@ -373,7 +394,7 @@ func TestPreToolUseDeniesWritesToLocalConfigsThroughAnyPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resolver := &fakeResolver{resolved: tt.resolved, errs: tt.errs}
-			deps := Deps{Guard: domainGuard{}, Config: fakeConfig{}, Root: repo, LocalConfigDir: local, ResolvePath: resolver.resolve, OtherWorktrees: noWorktrees}
+			deps := Deps{Guard: domainGuard{}, Config: fakeConfig{}, Root: repo, LocalConfigDir: local, ResolvePath: resolver.resolve, ResolveLocation: resolver.location, OtherWorktrees: noWorktrees}
 			code, out := preToolUseIn(t, deps, repo, "Write", "", filePath(tt.path))
 			assertHookAnswer(t, code, out, tt.wantCode, tt.want)
 		})

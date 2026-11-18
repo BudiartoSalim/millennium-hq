@@ -199,10 +199,12 @@ func assertHookCases(t *testing.T, tests []hookCase) {
 	}
 }
 
-// A worktree moved with plain mv drops out of git's list, and one whose
-// path holds a newline cannot be listed unambiguously: their rules stay
+// A worktree moved with plain mv drops out of git's list: its rules stay
 // protected all the same, since a protected path is matched wherever it
-// lies. A role rule, which needs the list, blocks while it is ambiguous.
+// lies. One whose path holds a newline cannot be listed unambiguously, and
+// every call that needs the list blocks while it is ambiguous: the role
+// rules, and every write, whose protected locations in each worktree may
+// lead where it lands.
 func TestHookProtectsCheckoutsGitDoesNotList(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows file names cannot hold a newline")
@@ -214,17 +216,21 @@ func TestHookProtectsCheckoutsGitDoesNotList(t *testing.T) {
 	if err := errors.Join(os.MkdirAll(filepath.Dir(moved), 0o755), os.Rename(w2, moved)); err != nil {
 		t.Fatal(err)
 	}
-	newline := filepath.Join(root, ".claude", "worktrees", "a\nb")
-	gitIn(t, root, "worktree", "add", "-q", "-b", "nl", newline)
 	movedConfig := filepath.Join(moved, ".millennium", "config.json")
 	assertHookCases(t, []hookCase{
 		{name: "a moved worktree's config from the main checkout", event: toolEvent(root, "Write", "", movedConfig), want: denied},
 		{name: "a moved worktree's config from the path it left", event: toolEvent(w2, "Write", "", movedConfig), want: denied},
 		{name: "a moved worktree's settings, in another case", event: toolEvent(root, "Edit", "", filepath.Join(moved, ".Claude", "settings.json")), want: denied},
-		{name: "the config of a worktree named with a newline", event: toolEvent(root, "Edit", "", filepath.Join(newline, ".millennium", "config.json")), want: denied},
-		{name: "a role call while the list is ambiguous", event: toolEvent(root, "Read", "millennium:qa-tester", filepath.Join(root, "README.md")),
-			wantCode: 2, want: "cannot read git's list of worktrees unambiguously"},
 		{name: "code in the moved worktree", event: toolEvent(root, "Write", "", filepath.Join(moved, "main.go"))},
+	})
+	newline := filepath.Join(root, ".claude", "worktrees", "a\nb")
+	gitIn(t, root, "worktree", "add", "-q", "-b", "nl", newline)
+	ambiguous := "cannot read git's list of worktrees unambiguously"
+	assertHookCases(t, []hookCase{
+		{name: "the config of a worktree named with a newline", event: toolEvent(root, "Edit", "", filepath.Join(newline, ".millennium", "config.json")), wantCode: 2, want: ambiguous},
+		{name: "a role call while the list is ambiguous", event: toolEvent(root, "Read", "millennium:qa-tester", filepath.Join(root, "README.md")), wantCode: 2, want: ambiguous},
+		{name: "a write while the list is ambiguous", event: toolEvent(root, "Write", "", filepath.Join(moved, "main.go")), wantCode: 2, want: ambiguous},
+		{name: "a read, which needs no list", event: toolEvent(root, "Read", "", filepath.Join(root, "README.md"))},
 	})
 }
 
@@ -294,9 +300,9 @@ func symlink(t *testing.T, target, link string) {
 
 // A protected location reached through a symlink is protected by its real
 // path too: with `.pi` a symlink to `conf`, pi loads `conf/extensions` as
-// its extensions. This holds in the acting checkout and, for an engineer's
-// write, in every other worktree; a protected location that cannot be
-// resolved blocks the writes.
+// its extensions. This holds for every write, the main session's and
+// qa-tester's included, in the acting checkout and in every other
+// worktree, whichever checkout the session acts in.
 func TestHookProtectsLocationsReachedThroughASymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks on Windows needs a privilege tests do not have")
@@ -310,19 +316,44 @@ func TestHookProtectsLocationsReachedThroughASymlink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(other, "m2"), filepath.Join(other, ".millennium")); err != nil {
 		t.Fatal(err)
 	}
-	engineer := "millennium:software-engineer"
+	engineer, qa := "millennium:software-engineer", "millennium:qa-tester"
 	assertHookCases(t, []hookCase{
 		{name: "a pi extension by its real path", event: toolEvent(root, "Write", "", filepath.Join(root, "conf", "extensions", "evil.ts")), want: denied},
 		{name: "pi's settings by its real path", event: toolEvent(root, "Edit", "", filepath.Join(root, "conf", "settings.json")), want: denied},
 		{name: "a file beside them", event: toolEvent(root, "Write", "", filepath.Join(root, "conf", "notes.md"))},
 		{name: "Claude settings by their real path, in the acting worktree", event: toolEvent(other, "Write", "", filepath.Join(other, "cl", "settings.json")), want: denied},
 		{name: "another worktree's config by its real path, for an engineer", event: toolEvent(root, "Write", engineer, filepath.Join(other, "m2", "config.json")), want: denied},
+		{name: "another worktree's config by its real path, for the main session", event: toolEvent(root, "Write", "", filepath.Join(other, "m2", "config.json")), want: denied},
+		{name: "another worktree's Claude settings by their real path, for qa-tester", event: toolEvent(root, "Edit", qa, filepath.Join(other, "cl", "settings.local.json")), want: denied},
+		{name: "the main checkout's pi extension by its real path, from a linked worktree's main session", event: toolEvent(other, "Write", "", filepath.Join(root, "conf", "extensions", "evil.ts")), want: denied},
+		{name: "the main checkout's pi extension by its .pi path, from a linked worktree", event: toolEvent(other, "Write", "", filepath.Join(root, ".pi", "extensions", "evil.ts")), want: denied},
 	})
-	if err := os.Symlink(filepath.Join(root, "nowhere"), filepath.Join(other, ".pi")); err != nil {
+}
+
+// A protected location that leads nowhere blocks nothing: a dangling
+// symlink, such as a committed relative link that dangles in a worktree, is
+// followed as it reads, and what it would lead to is protected; a location
+// below a file reaches nothing. Before, either blocked every write in its
+// checkout, and every engineer's write in every worktree.
+func TestHookToleratesProtectedLocationsThatLeadNowhere(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows needs a privilege tests do not have")
+	}
+	root, other, _ := optedInRepo(t)
+	if err := os.Symlink(filepath.Join("..", "conf"), filepath.Join(other, ".pi")); err != nil {
 		t.Fatal(err)
 	}
-	assertHookCases(t, []hookCase{{name: "a dangling protected location", event: toolEvent(other, "Write", "", filepath.Join(other, "main.go")),
-		wantCode: 2, want: "cannot resolve the protected location"}})
+	filed := filepath.Join(root, ".claude", "worktrees", "filed")
+	gitIn(t, root, "worktree", "add", "-q", "-b", "filed", filed)
+	writeFile(t, filed, ".claude", "a file where Claude's directory should be")
+	engineer := "millennium:software-engineer"
+	assertHookCases(t, []hookCase{
+		{name: "a write in the checkout with the dangling link", event: toolEvent(other, "Write", "", filepath.Join(other, "main.go"))},
+		{name: "an engineer's write in another worktree", event: toolEvent(root, "Write", engineer, filepath.Join(root, "main.go"))},
+		{name: "a write in the checkout with the file", event: toolEvent(filed, "Write", "", filepath.Join(filed, "main.go"))},
+		{name: "a pi extension where the dangling link leads", event: toolEvent(root, "Write", "", filepath.Join(filepath.Dir(other), "conf", "extensions", "evil.ts")), want: denied},
+		{name: "beside it", event: toolEvent(root, "Write", "", filepath.Join(filepath.Dir(other), "conf", "notes.md"))},
+	})
 }
 
 // The hooks compare absolute paths, so a relative local config directory

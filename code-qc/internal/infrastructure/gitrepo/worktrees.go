@@ -47,20 +47,38 @@ func (r *Repository) OtherWorktrees(ctx context.Context) ([]string, error) {
 }
 
 // listedRecords counts the worktree records in dir that git lists: those
-// with a gitdir file that is not empty, which names the worktree; git skips
-// every other entry. Counting those too would leave room in the listing for
-// a record forged by a worktree path with a newline. An entry whose gitdir
+// with a gitdir file git reads at least one byte of, which names the
+// worktree; git skips every other entry, one whose gitdir it cannot read
+// included. Counting those too would leave room in the listing for a
+// record forged by a worktree path with a newline. An entry whose gitdir
 // cannot be looked at is not counted: counting too few refuses the listing,
 // which blocks, and never hides a worktree.
 func listedRecords(dir string, entries []fs.DirEntry) int {
 	listed := 0
 	for _, entry := range entries {
-		info, err := os.Stat(filepath.Join(dir, entry.Name(), "gitdir"))
-		if err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+		if hasContent(filepath.Join(dir, entry.Name(), "gitdir")) {
 			listed++
 		}
 	}
 	return listed
+}
+
+// hasContent reports whether p is a regular file that a read of one byte
+// gets a byte from. It is opened only once it is known to be a regular
+// file, so a pipe in its place cannot hold the hook. Any failure is
+// "no": the record is then not counted (see listedRecords).
+func hasContent(p string) bool {
+	info, err := os.Stat(p)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	n, _ := f.Read(make([]byte, 1)) // a failed read gets no byte, which is the answer
+	return n > 0
 }
 
 // gitCommonDir is git's common directory, absolute: the one every worktree

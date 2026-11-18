@@ -164,6 +164,13 @@ type Deps struct {
 	// in the longest part of it that exists; a part that exists but cannot
 	// be resolved is an error.
 	ResolvePath func(abs string) (string, error)
+	// ResolveLocation is where a write to protected, a protected location
+	// such as `.pi/extensions` (slash-separated), in the checkout at root,
+	// as ResolvePath resolves it, lands: with its links followed, one that
+	// leads nowhere as it reads, since a write lands there once its target
+	// exists. It is "" when nothing can be written there (a part of it is
+	// a file), and an error when where it lands is unknown.
+	ResolveLocation func(root, protected string) (string, error)
 	// ReadProposal reads a proposal file named on the command line,
 	// bounded and strictly.
 	ReadProposal func(path string) ([]byte, error)

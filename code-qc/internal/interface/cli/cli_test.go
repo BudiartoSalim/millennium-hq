@@ -73,6 +73,12 @@ func repoPath(arg string) (string, error) {
 // symlink: the path, cleaned.
 func resolveAsNamed(abs string) (string, error) { return filepath.Clean(abs), nil }
 
+// locateAsNamed stands in for Deps.ResolveLocation where no location is a
+// symlink: the location below the root.
+func locateAsNamed(root, protected string) (string, error) {
+	return filepath.Join(root, filepath.FromSlash(protected)), nil
+}
+
 type harness struct {
 	gates          *fakeGates
 	audit          *fakeAudit
@@ -127,7 +133,7 @@ func (h *harness) run(t *testing.T, args ...string) int {
 		h.gotDir = dir
 		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
 			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath, ReadProposal: readProposalFile,
-			OtherWorktrees: func(context.Context) ([]string, error) { return h.worktrees, nil }, ResolvePath: resolveAsNamed}, h.depsErr
+			OtherWorktrees: func(context.Context) ([]string, error) { return h.worktrees, nil }, ResolvePath: resolveAsNamed, ResolveLocation: locateAsNamed}, h.depsErr
 	}
 	app := New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps)
 	app.terminal = func() bool { return h.terminal }

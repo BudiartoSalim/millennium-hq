@@ -63,7 +63,7 @@ conventions.
 | Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off), wherever they lie |
 | Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`), in any worktree of the repository: the engineer cannot change the tests that judge its work |
 | Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one, in any worktree of the repository; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
-| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path |
+| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path, or put something at `.pi` or `.claude` (`ln -s conf .pi`, `mv conf .claude`), which hold protected paths |
 
 The guard checks every path a tool names twice: as written, and with its
 symlinks resolved in the longest part of the path that exists (a write may
@@ -80,6 +80,16 @@ Windows, so does a path that is neither absolute nor plainly relative: a
 rooted one (`\repo\file`, on the current drive) or a drive-relative one
 (`C:file`, from that drive's own working directory), which the OS does not
 read from the session's directory. Name such a path in full.
+
+On Windows a directory junction (`mklink /J`, which needs no privilege)
+is followed like a symlink, though Go's own symlink resolution walks
+through junctions without following them. A reparse point that redirects
+a name but whose target the engine cannot read blocks the call with the
+reason, since where a path through it leads is unknown. The engine also
+spells each resolved path by its long names, so a short 8.3 name
+(`PROGRA~1`) is no other spelling of a protected path. A link whose target
+is a device path (`\\?\Volume{...}\`), which no other spelling of the same
+file matches, blocks too.
 
 A protected path is protected wherever it lies: `.millennium` as any
 segment of a path, and `.claude/settings.json`, `.claude/settings.local.json`,
@@ -102,15 +112,25 @@ path too. If `.pi` is a symlink to `conf`, pi loads `conf/extensions` as
 the project's extensions, so a write of `conf/extensions/x.ts` is denied
 like one of `.pi/extensions/x.ts`; the same holds for a symlinked
 `.millennium` or `.claude`, and for a settings file that is itself a
-symlink. The engine resolves each protected location of the acting
-checkout, and for a role rule (the software-engineer's writes) of every
-worktree `git worktree list` names, and denies writes inside where they
-lead. A protected location that exists but cannot be resolved, such as a
-dangling `.pi` symlink, blocks every write in the repository until you fix
-or remove it; one of a worktree whose root cannot be resolved is not
-looked at (see below). Another worktree's symlinked location is resolved
-only for a role rule: the main session's writes, and qa-tester's, check
-the acting checkout's.
+symlink. For every write, whoever makes it, the engine resolves each
+protected location of the acting checkout and of every worktree
+`git worktree list` names, and denies writes inside where they lead: from
+a linked worktree, the main checkout's `conf/extensions/x.ts` is denied
+as well as the worktree's own.
+
+A protected location that leads nowhere blocks nothing. A dangling
+symlink, such as a committed relative link that dangles in a worktree, is
+followed as it reads, and what it would lead to is protected: with `.pi`
+a dangling link to `conf`, creating `conf/extensions/x.ts` is denied. A
+location below a file (a file named `.claude`) reaches nothing, so
+nothing there needs protecting. Only a location whose lead is unknown,
+such as one through a directory the engine may not search or a link it
+cannot read, blocks, with the reason: every write when it is the acting
+checkout's, and otherwise the writes into the checkout it belongs to
+(which, for the main checkout, holds the worktrees under
+`.claude/worktrees/`). For other writes another checkout's such location
+is compared as named.
+A worktree whose root cannot be resolved is not looked at (see below).
 
 The guard acts only for a session whose own checkout is opted in (it has a
 config, in the repository or a local one). A session in a checkout that is
@@ -130,12 +150,14 @@ session's config, the rules that session is checked against, to every
 worktree: another worktree's acceptance tests are those under the acting
 session's `paths.acceptanceTests`, and its components those of the acting
 session's config. The worktrees are those `git worktree list` names, asked
-only for a role rule (the software-engineer's writes and the qa-tester's
-reads) in an opted-in repository whose git directory has linked worktrees.
-A list that cannot be read unambiguously, such as one with a worktree whose
-path holds a newline, blocks the call with the reason; the list may name
-no more worktrees than git keeps records for (entries under
-`.git/worktrees` with a `gitdir` file, the ones git lists). A worktree
+for every write (whose protected locations in each worktree may lead where
+it lands) and for the qa-tester's reads, in an opted-in repository whose
+git directory has linked worktrees; other reads never list them. A list
+that cannot be read unambiguously, such as one with a worktree whose path
+holds a newline, blocks the call with the reason, every write included,
+until you remove that worktree; the list may name no more worktrees than
+git keeps records for (entries under `.git/worktrees` with a `gitdir`
+file git can read at least one byte of, the ones git lists). A worktree
 whose root cannot be resolved, its parent replaced by a dangling symlink
 or a file, is compared as git names it and blocks nothing.
 
@@ -169,7 +191,11 @@ it, because the protected paths are unknown; reads stay allowed.
   ways no pattern recognises. The OS sandbox is what stops that: `millennium
   config apply` writes sandbox rules that deny writes to the protected paths
   for every command, and Claude Code's sandbox already protects `.git/config`,
-  `.git/hooks` and its own settings.
+  `.git/hooks` and its own settings. The match is also coarse the other
+  way: a command that names a protected path, or has a word ending in
+  `.pi` or `.claude` (`sub/.pi`, `~/.claude/`), anywhere, and a word that
+  can write (`>`, `cp`, `mv`, `ln`, `rm`, ...) anywhere, is denied, even
+  when the write goes elsewhere. Split such a command in two.
 - **A Stop hook that cannot run does not block.** Claude Code cannot send an
   agent back to repair a hook that will not start. If the engine is missing,
   agents can stop with unchecked work, which is why the tech lead's final

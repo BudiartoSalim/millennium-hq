@@ -69,25 +69,27 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 	g := gates(repo, node, analyzers, approvals.New(files.CommittedApprovals, files.LocalApprovals))
 	runGates := usecase.NewRunGates(loadConfig, repo, g)
 	writer := projectfiles.New(repo.Root())
+	resolver := gitrepo.NewResolver()
 	return cli.Deps{
-		Gates:          runGates,
-		Audit:          usecase.NewRunAudit(loadConfig, repo, g),
-		Config:         loadConfig,
-		Explain:        usecase.NewExplainFile(loadConfig),
-		Guard:          usecase.NewGuardToolCall(loadConfig),
-		Stop:           usecase.NewStopCheck(runGates, statestore.New(stateDir())),
-		Scope:          usecase.NewCheckScope(loadConfig, repo),
-		Apply:          usecase.NewApplyConfig(configfile.Codec{}, files, writer),
-		Discover:       usecase.NewDiscover(repo, repo, files.Committed),
-		Conventions:    usecase.NewConventions(files.Committed, files.Local, repo, configfile.Codec{}, writer, repo.Root()),
-		Root:           repo.Root(),
-		LocalConfigDir: localDir,
-		RepoPath:       repo.RepoPath,
-		OtherWorktrees: repo.OtherWorktrees,
-		ResolvePath:    gitrepo.Resolve,
-		ReadProposal:   configfile.ReadProposal,
-		Close:          closeAnalyzers,
-		EngineCommand:  engineCommand(),
+		Gates:           runGates,
+		Audit:           usecase.NewRunAudit(loadConfig, repo, g),
+		Config:          loadConfig,
+		Explain:         usecase.NewExplainFile(loadConfig),
+		Guard:           usecase.NewGuardToolCall(loadConfig),
+		Stop:            usecase.NewStopCheck(runGates, statestore.New(stateDir())),
+		Scope:           usecase.NewCheckScope(loadConfig, repo),
+		Apply:           usecase.NewApplyConfig(configfile.Codec{}, files, writer),
+		Discover:        usecase.NewDiscover(repo, repo, files.Committed),
+		Conventions:     usecase.NewConventions(files.Committed, files.Local, repo, configfile.Codec{}, writer, repo.Root()),
+		Root:            repo.Root(),
+		LocalConfigDir:  localDir,
+		RepoPath:        repo.RepoPath,
+		OtherWorktrees:  repo.OtherWorktrees,
+		ResolvePath:     resolver.Resolve,
+		ResolveLocation: resolver.Location,
+		ReadProposal:    configfile.ReadProposal,
+		Close:           closeAnalyzers,
+		EngineCommand:   engineCommand(),
 	}, nil
 }
 
