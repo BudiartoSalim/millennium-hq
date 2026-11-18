@@ -75,7 +75,8 @@ func (g *Structure) checkFile(ctx context.Context, in port.GateInput, file domai
 	if err != nil {
 		return []domain.Finding{{Rule: "analysis-failed", File: file.Path, Message: err.Error()}}
 	}
-	findings := in.Config.LimitsFor(match.Component).Check(facts, base)
+	testing := in.Config.Packs.TestingOf(lang, match, file.Path)
+	findings := in.Config.LimitsFor(match.Component).Check(facts, base, testing)
 	return append(findings, layerFindings(in.Config.Packs, match, lang, facts, base)...)
 }
 

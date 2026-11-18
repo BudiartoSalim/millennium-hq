@@ -61,10 +61,16 @@ reason (see [Function limits](configuration.md#function-limits)).
 | `nesting-depth` | 3 levels | Each `if`, loop, `switch`, `select` and function literal opens a level; `else if` does not. |
 | `cognitive-complexity` | 15 | See below. |
 
-Generated files are skipped: a `Code generated ... DO NOT EDIT.` header in
-Go, or `@generated` / `DO NOT EDIT` in the first lines of a TypeScript or
-Python file. Test files are `_test.go`; `*.test.ts(x)`, `*.spec.ts(x)` and
-files under `__tests__/`; `test_*.py`, `*_test.py` and files under `tests/`.
+Generated files outside tested layers are skipped: a `Code generated ...
+DO NOT EDIT.` header in Go, or `@generated` / `DO NOT EDIT` in the first
+lines of a TypeScript or Python file. In a **tested layer** (`domain` and
+`application` under clean-architecture) the marker exempts nothing, since
+anyone who edits a file can add one: a marked file there is held to the
+limits like hand-written code, and each finding on it says so. Declare
+generated code in a tested layer with
+[`exclude`](configuration.md#generated-code) in the config instead. Test files are
+`_test.go`; `*.test.ts(x)`, `*.spec.ts(x)` and files under `__tests__/`;
+`test_*.py`, `*_test.py` and files under `tests/`.
 
 Which functions are measured: in Go, every function and method. In TypeScript,
 function declarations, functions and arrow functions assigned to top-level
@@ -187,8 +193,14 @@ or a parent's in a workspace that hoists it; `go vet` runs with
 
 Changed logic in a **tested layer** (`domain` and `application` under
 clean-architecture) is held to its tests. A file is logic when it has at least
-one function and is neither test code nor generated; files that only declare
-types or interfaces are exempt.
+one function and is not test code; files that only declare types or
+interfaces are exempt. A generated-code marker (`Code generated ... DO NOT
+EDIT.`, `@generated`, `DO NOT EDIT`) does not exempt a file here, whether it
+was there before or added in the change: `tests-missing` and
+`uncovered-change` apply to it, and their findings say that the marker does
+not exempt files in a tested layer. Generated code in a tested layer is
+declared with [`exclude`](configuration.md#generated-code), which no check reads
+past.
 
 Only **runtime code** counts: what is left once comments, whitespace and, in
 TypeScript, the syntax the compiler erases are taken away. The erased syntax

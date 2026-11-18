@@ -128,9 +128,11 @@ func moduleStem(p string) string {
 	return name
 }
 
-// NeedsTests reports whether analysed code is production logic: not test
-// code, not generated, and with at least one function. Files that only
-// declare types or interfaces need no tests of their own.
+// NeedsTests reports whether analysed code of a tested layer is production
+// logic: not test code, and with at least one function. Files that only
+// declare types or interfaces need no tests of their own. A generated-code
+// marker does not count: in a tested layer only the config's exclude
+// declares generated code (see LayerTesting).
 func NeedsTests(facts FileFacts) bool {
-	return !facts.Test && !facts.Generated && len(facts.Functions) > 0
+	return !facts.Test && len(facts.Functions) > 0
 }

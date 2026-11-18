@@ -85,7 +85,9 @@ type Construct struct {
 // language produces the same facts, so the rules are written once.
 type FileFacts struct {
 	Path string
-	// Generated marks machine-written code, which the limits skip.
+	// Generated marks a file that carries a generated-code marker. Outside
+	// tested layers the limits skip it; in a tested layer it counts for
+	// nothing (see LayerTesting).
 	Generated bool
 	// Test marks test code, which the function-length limit skips.
 	Test       bool
