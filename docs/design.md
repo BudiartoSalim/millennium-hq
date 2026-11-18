@@ -458,6 +458,14 @@ protected paths: an empty one holds no settings, agents cannot write them
 (the guard and the sandbox both refuse), and excluding them would bring the
 false blocks back for every project that has none.
 
+What exempts a file in a tested layer depends only on what agents cannot
+change: the config's `exclude` and the layer the config and packs assign.
+A generated-code marker is file content, which any agent can write, so in a
+tested layer it exempts the file from neither the tests gate nor the limits;
+a finding on a marked file there says so and points to `exclude`. Outside
+tested layers the marker still exempts a file from the limits, a residual
+risk accepted because only the limits are at stake there.
+
 Hooks:
 
 | Check | How |

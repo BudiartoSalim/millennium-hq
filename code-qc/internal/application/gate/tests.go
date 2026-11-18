@@ -42,12 +42,15 @@ func (*Tests) Rules() []port.Rule {
 // Name identifies the gate in findings.
 func (*Tests) Name() string { return "tests" }
 
-// candidate is changed code that needs tests.
+// candidate is changed code that needs tests. note ends each of its
+// findings: why a generated-code marker in it did not exempt it, if it has
+// one.
 type candidate struct {
 	file    domain.ChangedFile
 	lang    domain.Language
 	match   domain.ComponentMatch
 	runtime domain.RuntimeCode
+	note    string
 }
 
 // Run checks the tests of the change.
@@ -70,11 +73,11 @@ func (g *Tests) candidates(ctx context.Context, in port.GateInput) []candidate {
 	var out []candidate
 	for _, file := range in.Changes.Files {
 		lang, match, ok := ownedCode(in.Config, file)
-		if !ok || domain.IsTestPath(lang, file.Path) || !inTestedLayer(in.Config.Packs, lang, match, file.Path) {
+		if !ok || domain.IsTestPath(lang, file.Path) || in.Config.Packs.TestingOf(lang, match, file.Path) != domain.LayerTested {
 			continue
 		}
 		if facts, ok := g.logic(ctx, lang, file.Path); ok {
-			out = append(out, candidate{file: file, lang: lang, match: match, runtime: facts.Runtime})
+			out = append(out, candidate{file: file, lang: lang, match: match, runtime: facts.Runtime, note: domain.LayerTested.MarkerNote(facts)})
 		}
 	}
 	return out
@@ -89,15 +92,6 @@ func ownedCode(cfg domain.Config, file domain.ChangedFile) (domain.Language, dom
 	}
 	match, owned, err := cfg.ComponentFor(file.Path)
 	return lang, match, err == nil && owned && match.Component.Has(lang)
-}
-
-func inTestedLayer(packs domain.Catalog, lang domain.Language, match domain.ComponentMatch, p string) bool {
-	for _, convention := range match.Component.Conventions {
-		if layering, err := layeringFor(packs, convention, lang, match); err == nil && layering.Tested(p) {
-			return true
-		}
-	}
-	return false
 }
 
 // logic analyses the file and reports whether it is production logic that
@@ -126,7 +120,7 @@ func (g *Tests) missingTests(ctx context.Context, in port.GateInput, candidates 
 		if in.Changes.Base == "" {
 			message = fmt.Sprintf("%s has no tests; %s", c.file.Path, testHint(c))
 		}
-		findings = append(findings, domain.Finding{Rule: "tests-missing", File: c.file.Path, Message: message})
+		findings = append(findings, domain.Finding{Rule: "tests-missing", File: c.file.Path, Message: message + c.note})
 	}
 	return findings
 }
@@ -216,7 +210,7 @@ func (g *Tests) uncovered(ctx context.Context, in port.GateInput, candidates []c
 		}
 		lines, ok := coverage[c.file.Path]
 		if !ok {
-			findings = append(findings, domain.Finding{Rule: "uncovered-change", File: c.file.Path, Message: "no test executed this file"})
+			findings = append(findings, domain.Finding{Rule: "uncovered-change", File: c.file.Path, Message: "no test executed this file" + c.note})
 			continue
 		}
 		touched, err := touchedLines(ctx, g.source, in.Changes.Base, c.file)
@@ -225,7 +219,7 @@ func (g *Tests) uncovered(ctx context.Context, in port.GateInput, candidates []c
 		}
 		if ranges := lines.Uncovered(touched, c.runtime); len(ranges) > 0 {
 			findings = append(findings, domain.Finding{Rule: "uncovered-change", File: c.file.Path, Line: ranges[0].First, Message: fmt.Sprintf(
-				"changed lines %s never run in any test", domain.FormatRanges(ranges))})
+				"changed lines %s never run in any test%s", domain.FormatRanges(ranges), c.note)})
 		}
 	}
 	return findings, nil

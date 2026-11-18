@@ -16,7 +16,7 @@ func TestLimitsNewCodeMustMeetEveryLimit(t *testing.T) {
 		fn("deep", 10, 4, 1),
 		fn("complex", 10, 1, 16),
 	}}
-	findings := DefaultLimits().Check(file, nil)
+	findings := DefaultLimits().Check(file, nil, LayerTested)
 	want := []string{"function-length", "nesting-depth", "cognitive-complexity"}
 	if len(findings) != len(want) {
 		t.Fatalf("findings = %+v", findings)
@@ -49,7 +49,7 @@ func TestLimitsExistingCodeMayNotGetWorse(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			findings := DefaultLimits().Check(FileFacts{Path: "a.go", Functions: []FunctionFacts{tt.changed}}, base)
+			findings := DefaultLimits().Check(FileFacts{Path: "a.go", Functions: []FunctionFacts{tt.changed}}, base, LayerTested)
 			switch {
 			case tt.want == "" && len(findings) > 0:
 				t.Fatalf("want no findings, got %+v", findings)
@@ -62,14 +62,47 @@ func TestLimitsExistingCodeMayNotGetWorse(t *testing.T) {
 
 func TestLimitsExemptions(t *testing.T) {
 	long := fn("TestTable", 200, 2, 3)
-	if f := DefaultLimits().Check(FileFacts{Test: true, Functions: []FunctionFacts{long}}, nil); len(f) != 0 {
+	if f := DefaultLimits().Check(FileFacts{Test: true, Functions: []FunctionFacts{long}}, nil, LayerTested); len(f) != 0 {
 		t.Fatalf("test code is exempt from the length limit, got %+v", f)
 	}
 	deep := fn("TestDeep", 10, 5, 3)
-	if f := DefaultLimits().Check(FileFacts{Test: true, Functions: []FunctionFacts{deep}}, nil); len(f) != 1 || f[0].Rule != "nesting-depth" {
+	if f := DefaultLimits().Check(FileFacts{Test: true, Functions: []FunctionFacts{deep}}, nil, LayerTested); len(f) != 1 || f[0].Rule != "nesting-depth" {
 		t.Fatalf("test code still gets the nesting limit, got %+v", f)
 	}
-	if f := DefaultLimits().Check(FileFacts{Generated: true, Functions: []FunctionFacts{fn("gen", 900, 9, 99)}}, nil); len(f) != 0 {
-		t.Fatalf("generated code is skipped, got %+v", f)
+}
+
+// TestLimitsGeneratedMarker: the marker exempts a file outside tested layers
+// only (AC-11, AC-13), and a finding on a marked file in a tested layer says
+// why it was not exempt (AC-14).
+func TestLimitsGeneratedMarker(t *testing.T) {
+	long := []FunctionFacts{fn("gen", 900, 1, 1)}
+	tests := []struct {
+		name     string
+		file     FileFacts
+		testing  LayerTesting
+		findings int
+		note     bool
+	}{
+		{"marked, outside tested layers: exempt", FileFacts{Generated: true, Functions: long}, LayerUntested, 0, false},
+		{"marked, in a tested layer: checked", FileFacts{Generated: true, Functions: long}, LayerTested, 1, true},
+		{"marked, layer unknown: checked", FileFacts{Generated: true, Functions: long}, "", 1, true},
+		{"unmarked, in a tested layer: no note", FileFacts{Functions: long}, LayerTested, 1, false},
+		{"unmarked, outside tested layers: no note", FileFacts{Functions: long}, LayerUntested, 1, false},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := DefaultLimits().Check(tt.file, nil, tt.testing)
+			if len(f) != tt.findings {
+				t.Fatalf("want %d findings, got %+v", tt.findings, f)
+			}
+			if len(f) > 0 && notesMarker(f[0].Message) != tt.note {
+				t.Fatalf("note in %q: want %v", f[0].Message, tt.note)
+			}
+		})
+	}
+}
+
+func notesMarker(message string) bool {
+	return strings.Contains(message, "the generated-code marker does not exempt files in a tested layer") &&
+		strings.Contains(message, `"exclude"`)
 }

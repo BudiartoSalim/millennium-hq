@@ -125,20 +125,23 @@ func (l Limits) metrics(test bool) []metric {
 	return append([]metric{{"function-length", "length in lines", func(f FunctionFacts) int { return f.Lines }, l.FunctionLines}}, all...)
 }
 
-// Check applies the limits to file. When base, the file before the change,
-// is given, a function that already exceeded a limit may stay over it but
-// must not get worse; everything else must meet the limits.
-func (l Limits) Check(file FileFacts, base *FileFacts) []Finding {
-	if file.Generated {
+// Check applies the limits to file, which sits in a layer that is tested or
+// not. When base, the file before the change, is given, a function that
+// already exceeded a limit may stay over it but must not get worse;
+// everything else must meet the limits. A generated-code marker exempts the
+// file only outside tested layers.
+func (l Limits) Check(file FileFacts, base *FileFacts, testing LayerTesting) []Finding {
+	if testing.MarkerExempts(file) {
 		return nil
 	}
 	before := functionsByKey(base)
+	note := testing.MarkerNote(file)
 	var findings []Finding
 	for _, fn := range file.Functions {
 		previous, existed := before[fn.Key]
 		for _, m := range l.metrics(file.Test) {
 			if msg := m.violation(fn, previous, existed); msg != "" {
-				findings = append(findings, Finding{Rule: m.rule, File: file.Path, Line: fn.Line, Message: msg})
+				findings = append(findings, Finding{Rule: m.rule, File: file.Path, Line: fn.Line, Message: msg + note})
 			}
 		}
 	}

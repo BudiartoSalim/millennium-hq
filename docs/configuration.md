@@ -84,7 +84,7 @@ apply to any file.
 | `conventions` | no | `[]` | Convention packs: the built-in `clean-architecture` and `react-feature-based`, or the project's own (see [Convention packs](#convention-packs)). |
 | `limits` | no | the conventions' | Single-project form: function limits that replace the conventions' own (see [Function limits](#function-limits)). |
 | `components` | monorepo form | | See above. |
-| `exclude` | no | `[]` | Paths no check reads. `**` matches any number of segments; a directory excludes everything inside it. |
+| `exclude` | no | `[]` | Paths no check reads. `**` matches any number of segments; a directory excludes everything inside it. This is how generated code in a tested layer is declared: there a generated-code marker in the file exempts it from nothing (see [Generated code](#generated-code)). |
 | `test` | no | | Single-project form: the test recipe (below). |
 | `disable` | no | `[]` | Rules switched off, each with a reason (below). |
 | `testing` | no | `tests-required` | Changed production code needs tests. |
@@ -105,6 +105,23 @@ Component fields:
 | `reason` | no | Why the component is an exception; shown by `config explain`. |
 | `test` | no | The component's test recipe (below). |
 | `limits` | no | The component's own function limits, with a reason (below). |
+
+### Generated code
+
+A generated-code marker in a file (Go's `// Code generated ... DO NOT
+EDIT.`, `@generated` or `DO NOT EDIT` in the first lines of a TypeScript or
+Python file) exempts the file from the function limits only outside tested
+layers. In a tested layer (`domain` and `application` under
+clean-architecture) the marker counts for nothing: anyone who edits a file
+can add one, so a marked file there gets `tests-missing`, `uncovered-change`
+and the limits like hand-written code, and each of those findings says that
+the marker does not exempt files in a tested layer. To keep generated code
+in a tested layer out of the checks, list it in `exclude`, which only the
+user changes (through `config apply`):
+
+```json
+"exclude": ["services/billing/internal/domain/zz_generated.go"]
+```
 
 ### Convention packs
 
