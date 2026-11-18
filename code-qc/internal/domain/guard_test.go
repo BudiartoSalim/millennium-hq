@@ -2,10 +2,12 @@ package domain
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func guardConfig(t *testing.T) Config {
@@ -158,9 +160,11 @@ func TestProtectedLeadIn(t *testing.T) {
 
 // A shell command that puts a link, a file or a directory where protected
 // paths lie (`.pi`, `.claude`), or removes what is there, changes them:
-// such a word as an operand of ln, mv, cp, rm, install or `git mv`. A
-// command that only reads such a word does not, whatever redirection it
-// has; nor does a longer name.
+// such a word in a simple command where ln, mv, cp, rm, install or a
+// replacing git command stands among the words, even as another
+// command's argument (`grep -rn rm .claude`). A command that only reads
+// such a word does not, whatever redirection it has; nor does a longer
+// name.
 func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 	cfg := guardConfig(t)
 	tests := []struct{ command, want string }{
@@ -196,8 +200,8 @@ func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 		{"grep -rn foo --exclude-dir=.claude . > /tmp/out.txt", ""},
 		{"du -sh ~/.claude 2>&1", ""},
 		{"cat .pi 2>&1 | head", ""},
-		{"grep -rn rm .claude", ""},
-		{"echo mv conf .claude", ""},
+		{"grep -rn rm .claude", "changes .claude"},
+		{"echo mv conf .claude", "changes .claude"},
 		{"git log -- .claude", ""},
 		{"git -c core.x=y status .pi", ""},
 		{"ln -s a b > .pi", ""},
@@ -211,6 +215,212 @@ func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 			assertGuard(t, cfg, ToolCall{Tool: "Bash", Command: tt.command}, tt.want)
 		})
 	}
+}
+
+// A protected path spelled with quotes or a backslash inside it is still
+// that path to the shell, so a command that can write and names it is
+// denied, a redirection's target included (R6-CR-1).
+func TestGuardShellDeniesProtectedPathsSpelledWithQuotes(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct{ command, want string }{
+		{`cp evil.json '.claude'/settings.json`, "changes .claude/settings.json"},
+		{`cp evil.json ".claude"/settings.json`, "changes .claude/settings.json"},
+		{`cp x.ts '.pi'/extensions/x.ts`, "changes .pi/extensions"},
+		{`echo '{}' > '.claude'/settings.json`, "changes .claude/settings.json"},
+		{`echo '{}' >'.Claude'/Settings.json.`, "changes .claude/settings.json"},
+		{`sed -i s/a/b/ ".claude"/settings.json`, "changes .claude/settings.json"},
+		{`tee ".pi"/extensions/x.ts < x`, "changes .pi/extensions"},
+		{`rm -f .claude/"settings.json"`, "changes .claude/settings.json"},
+		{`cp x '.claude\settings.local.json'`, "changes .claude/settings.local.json"},
+		{`cp x.ts --target-directory='.pi'/extensions`, "changes .pi/extensions"},
+		{`chmod 600 '.millennium'/config.json`, "changes .millennium"},
+		{`truncate -s0 ./sub/../.pi/"settings.json"`, "changes .pi/settings.json"},
+		{`m\v x '.claude'/settings.json`, "changes .claude/settings.json"},
+		{`bash -c "cp x '.claude'/settings.json"`, "changes .claude/settings.json"},
+		{`cat '.claude'/settings.json`, ""},
+		{`cat '.pi'/extensions/x.ts`, ""},
+		// Coarse, as for the unquoted spelling: the write goes elsewhere.
+		{`cat '.pi'/extensions/x.ts > /tmp/x.ts`, "changes .pi/extensions"},
+		{`cp '.claude'/settings.json.bak /tmp`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			assertGuard(t, cfg, ToolCall{Tool: "Bash", Command: tt.command}, tt.want)
+		})
+	}
+}
+
+// Commands the round-4 shell guard denied because they put, move, remove
+// or restore something at `.pi` or `.claude`, with the replacing command
+// after a prefix and its option values, run by find or xargs, in an eval
+// string, or as a git command that restores files (R6-CR-2, R6-SEC-5).
+func TestGuardShellStillDeniesReplacingWhatHoldsProtectedPaths(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct{ command, want string }{
+		{"timeout 5 ln -s conf .pi", "changes .pi"},
+		{"nice -n 5 ln -s conf .pi", "changes .pi"},
+		{"nice -n 5 mv conf .pi", "changes .pi"},
+		{"sudo -u root ln -s conf .pi", "changes .pi"},
+		{"env -u X ln -s conf .pi", "changes .pi"},
+		{`find . -maxdepth 0 -exec ln -s conf .pi \;`, "changes .pi"},
+		{`find . -exec ln -s conf .pi \;`, "changes .pi"},
+		{`find . -name conf -exec mv {} .pi \;`, "changes .pi"},
+		{"for d in .pi; do ln -s conf $d; done", "changes .pi"},
+		{"eval 'ln -s conf .pi'", "changes .pi"},
+		{`eval "sudo -u root sh -c 'mv conf .claude'"`, "changes .claude"},
+		{"mv conf $'.pi'", "changes .pi"},
+		{`mv conf $'\x2epi'`, "changes .pi"},
+		{"xargs -I {} mv {} .pi", "changes .pi"},
+		{"git rm -r .claude", "changes .claude"},
+		{"git checkout main -- .claude", "changes .claude"},
+		{"git checkout other -- .pi", "changes .pi"},
+		{"git restore --source=HEAD~3 .claude", "changes .claude"},
+		{"git restore --source=HEAD~3 .pi", "changes .pi"},
+		{"git -C sub --git-dir x/.git rm -r --cached .claude", "changes .claude"},
+		// No write-like token matches `git -C sub checkout`.
+		{"git -C sub checkout main -- '.claude'/settings.json", "changes .claude/settings.json"},
+		{"git checkout -b feature", ""},
+		{"git switch main", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			assertGuard(t, cfg, ToolCall{Tool: "Bash", Command: tt.command}, tt.want)
+		})
+	}
+}
+
+// Where the matcher cannot place what a replacing command changes, the
+// whole command is read coarsely: a command that can write and a word, or
+// a part of one, that is a leading part of a protected path is denied.
+func TestGuardShellReadsWhatItCannotPlaceCoarsely(t *testing.T) {
+	cfg := guardConfig(t)
+	tests := []struct{ command, want string }{
+		{"for d in .pi; do ln -s conf \"$d\"; done", "changes .pi"},
+		{`for d in \.pi; do rm -rf $d; done`, "changes .pi"},
+		{"while read d; do mv conf $d; done <<< .claude", "changes .claude"},
+		{"echo .pi | xargs ln -s conf", "changes .pi"},
+		{`mv conf "$(echo .pi)"`, "changes .pi"},
+		{"mv conf \"`echo .claude`\"", "changes .claude"},
+		{`cp x "$(echo .claude/settings.json)"`, "changes .claude/settings.json"},
+		{"sh -c 'ln -s conf \"$1\"' _ .pi", "changes .pi"},
+		{"RM=rm; $RM -rf .claude", "changes .claude"},
+		{"cd .claude && cp /tmp/evil settings.json", "changes .claude"},
+		{"pushd sub/.pi; ln -s ../conf extensions", "changes .pi"},
+		{"cd .claude && ls", ""},
+		{"cd .claude/worktrees/x && go test ./... > /tmp/out", ""},
+		{"for f in *.go; do rm -f $f.bak; done", ""},
+		{"find . -name '*.tmp' | xargs rm", ""},
+		{"ls $HOME/.claude 2>/dev/null", ""},
+		{"rm -rf \"$TMPDIR/x\"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			assertGuard(t, cfg, ToolCall{Tool: "Bash", Command: tt.command}, tt.want)
+		})
+	}
+}
+
+// round4Denies is the shell guard of round 4 (7f65e61), the reference the
+// current one must not fall behind: a command that can write and names a
+// protected path anywhere, or a word that ends with a leading part of one.
+func round4Denies(command string) bool {
+	if !shellWrite.MatchString(command) {
+		return false
+	}
+	for _, protected := range ProtectedPaths() {
+		if ContainsFold(command, protected) {
+			return true
+		}
+	}
+	for _, word := range strings.FieldsFunc(command, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune("'\"`;&|()<>=", r) }) {
+		if _, ok := ProtectedLeadIn(path.Clean(word)); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// Round 5 narrowed the shell guard so that read-only commands pass
+// (R5-CR-3), and in doing so let through commands that round 4 denied
+// (R6-CR-1, R6-CR-2). Every command round 4 denied in its tests and in the
+// reviewers' lists is still denied, every read-only command passes, and
+// across a sweep of replacing commands, prefixes, spellings and wrappers
+// nothing round 4 denies is allowed.
+func TestGuardShellDeniesWhatRound4DeniedAndPassesReadOnlyCommands(t *testing.T) {
+	cfg := guardConfig(t)
+	denied := []string{
+		// Round 4's tests.
+		"echo '{}' > .millennium/config.json", "sed -i 's/x/y/' .claude/settings.json", "cp /tmp/x.ts .pi/extensions/",
+		"echo '{}' > .MILLENNIUM/config.json", "sed -i 's/x/y/' .Claude/Settings.JSON",
+		"ln -s conf .pi", "ln -sfn ../conf sub/.Pi/", "mv conf .claude", "git mv conf '.pi'",
+		"cp -r conf --target-directory=.pi.", "rm -rf .claude && echo done",
+		// The reviewers' lists.
+		`cp evil.json '.claude'/settings.json`, `echo '{}' > '.claude'/settings.json`, `sed -i s/a/b/ ".claude"/settings.json`,
+		`tee ".pi"/extensions/x.ts < x`, `cp x.ts '.pi'/extensions/x.ts`, `rm -f .claude/"settings.json"`,
+		"timeout 5 ln -s conf .pi", "nice -n 5 ln -s conf .pi", "nice -n 5 mv conf .pi", "sudo -u root ln -s conf .pi",
+		"env -u X ln -s conf .pi", `find . -exec ln -s conf .pi \;`, `find . -name conf -exec mv {} .pi \;`,
+		"for d in .pi; do ln -s conf $d; done", "eval 'ln -s conf .pi'", "mv conf $'.pi'", "xargs -I {} mv {} .pi",
+		"git rm -r .claude", "git checkout main -- .claude", "git checkout other -- .pi", "git restore --source=HEAD~3 .claude",
+		"git restore --source=HEAD~3 .pi",
+	}
+	for _, command := range denied {
+		if !round4Denies(command) {
+			t.Errorf("round 4 allows %q; it does not belong in this list", command)
+		}
+		if got := Guard(cfg, ToolCall{Tool: "Bash", Command: command}); !got.Deny {
+			t.Errorf("%q: allowed, but round 4 denied it", command)
+		}
+	}
+	readOnly := []string{
+		"ls -la .claude 2>/dev/null", "find . -path ./.claude -prune -o -name '*.go' -print 2>/dev/null",
+		"grep -rn foo --exclude-dir=.claude . > /tmp/out.txt", "du -sh ~/.claude 2>&1", "cat .pi/settings.json",
+		"git status -- .claude", "git log -- .pi", "git diff -- .claude",
+	}
+	for _, command := range readOnly {
+		if got := Guard(cfg, ToolCall{Tool: "Bash", Command: command}); got.Deny {
+			t.Errorf("%q: %s; a read-only command must pass", command, got.Reason)
+		}
+	}
+	for _, command := range replacingSweep() {
+		if round4Denies(command) && !Guard(cfg, ToolCall{Tool: "Bash", Command: command}).Deny {
+			t.Errorf("%q: allowed, but round 4 denies it", command)
+		}
+	}
+}
+
+// replacingSweep is every replacing command, with each prefix, target
+// spelling and wrapper.
+func replacingSweep() []string {
+	prefixes := []string{"", "timeout 5 ", "nice -n 5 ", "sudo -u root ", "env -u X ", "X=1 ", "command ", "nohup ", "xargs -I {} ", "time -p ", "/usr/bin/"}
+	commands := []string{"ln -s conf", "mv conf", "cp -r conf", "rm -rf", "install -d", "git rm -r", "git checkout main --", "git restore --source=HEAD~3", "git mv conf"}
+	targets := []string{".pi", ".claude", "'.pi'", `".claude"`, `\.pi`, "sub/.Pi/", "$'.pi'", "~/.claude", "--target-directory=.pi", ".claude/settings.json", "'.pi'/extensions"}
+	wrappers := []func(string) string{
+		func(c string) string { return c },
+		func(c string) string { return "bash -c " + shellQuote(c) },
+		func(c string) string { return "eval " + shellQuote(c) },
+		func(c string) string { return "(" + c + ")" },
+		func(c string) string { return "echo ok; " + c + " 2>/dev/null" },
+		func(c string) string { return "find . -exec " + c + ` \;` },
+		func(c string) string { return "for x in 1; do " + c + "; done" },
+	}
+	var sweep []string
+	for _, command := range joinEach(joinEach(prefixes, commands, ""), targets, " ") {
+		for _, wrap := range wrappers {
+			sweep = append(sweep, wrap(command))
+		}
+	}
+	return sweep
+}
+
+// joinEach is each of heads joined with each of tails by sep.
+func joinEach(heads, tails []string, sep string) []string {
+	var joined []string
+	for _, head := range heads {
+		for _, tail := range tails {
+			joined = append(joined, head+sep+tail)
+		}
+	}
+	return joined
 }
 
 // Win32 strips a name's trailing dots and spaces and opens `name:stream`
