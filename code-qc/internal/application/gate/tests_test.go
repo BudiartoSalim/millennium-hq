@@ -119,7 +119,7 @@ func TestTestsFullTierRunsSuitesAndChecksCoverage(t *testing.T) {
 		"command api npm test": {Coverage: domain.Coverage{}},
 	}}
 	source := &fakeSource{
-		working: map[string]string{"svc/internal/domain/user.go": "logic", "tts/pkg/domain.py": "logic", "api/src/domain/a.ts": "logic", "web/src/domain/b.ts": "logic"},
+		working: map[string]string{"svc/internal/domain/user.go": long("logic"), "tts/pkg/domain.py": "logic", "api/src/domain/a.ts": "logic", "web/src/domain/b.ts": "logic"},
 		changed: map[string]domain.LineSet{"svc/internal/domain/user.go": {Ranges: []domain.LineRange{{First: 3, Last: 5}}}},
 	}
 	findings := runTests(t, runner, source, domain.TierFull, "tree",

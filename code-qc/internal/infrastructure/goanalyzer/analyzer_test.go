@@ -167,10 +167,10 @@ func Run(ctx context.Context, cmd string) {
 	}
 }
 
-// Line directives are reported where they physically are, so the tests gate
-// can block them in tested layers (SEC-4); comments that only start alike
-// are not directives.
-func TestLineDirectivesAreConstructs(t *testing.T) {
+// Line directives are a fact of their own, not risky constructs (R2-MR-2),
+// reported where they physically are, so the tests gate can block them in
+// tested layers (SEC-4); comments that only start alike are not directives.
+func TestLineDirectivesAreReported(t *testing.T) {
 	root := repoWith(t, map[string]string{"go.mod": "module m\n"})
 	src := "package a\n" + // 1
 		"\n" + // 2
@@ -183,10 +183,10 @@ func TestLineDirectivesAreConstructs(t *testing.T) {
 		"\n" + // 9
 		"//linear growth is fine\n" + // 10
 		"// line a.go:1 is prose\n" + // 11
-		"var y = 4\n" // 12
-	want := []domain.Construct{
-		{Kind: domain.ConstructLineDirective, Line: 5, Detail: "//line a.go:5000"},
-		{Kind: domain.ConstructLineDirective, Line: 8, Detail: "/*line hidden.go:900*/"},
+		"var y = \"//line b.go:1\"\n" // 12
+	want := []domain.LineDirective{
+		{Line: 5, Text: "//line a.go:5000", File: "a.go"},
+		{Line: 8, Text: "/*line hidden.go:900*/", File: "hidden.go"},
 	}
 	for _, mode := range []string{"Analyze", "AnalyzeRuntime"} {
 		a := New(root)
@@ -198,8 +198,8 @@ func TestLineDirectivesAreConstructs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", mode, err)
 		}
-		if !slices.Equal(facts.Constructs, want) {
-			t.Fatalf("%s: constructs = %+v\nwant %+v", mode, facts.Constructs, want)
+		if !slices.Equal(facts.LineDirectives, want) || len(facts.Constructs) != 0 {
+			t.Fatalf("%s: line directives = %+v, constructs %+v\nwant directives %+v and no constructs", mode, facts.LineDirectives, facts.Constructs, want)
 		}
 		if !facts.Runtime.Known() {
 			t.Fatalf("%s: a Go analysis always establishes the runtime code", mode)

@@ -133,14 +133,11 @@ func moduleStem(p string) string {
 // coverage of the changed lines below it, to lines that do not exist or to
 // lines that ran, so untested code would pass as tested. Only the config's
 // exclude, which declares generated code, takes a file out of this check.
-func LineDirectiveFindings(file string, constructs []Construct) []Finding {
+func LineDirectiveFindings(file string, directives []LineDirective) []Finding {
 	var findings []Finding
-	for _, c := range constructs {
-		if c.Kind != ConstructLineDirective {
-			continue
-		}
-		findings = append(findings, Finding{Rule: "line-directive", File: file, Line: c.Line, Message: fmt.Sprintf(
-			"%s in a tested layer: %s; remove it, or, if the file is generated, declare it with \"exclude\" in the config", c.Detail, constructAdvice(c.Kind))})
+	for _, d := range directives {
+		findings = append(findings, Finding{Rule: "line-directive", File: file, Line: d.Line, Message: fmt.Sprintf(
+			"%s in a tested layer: it moves the line numbers that coverage reports, so untested code could pass as tested; remove it, or, if the file is generated, declare it with \"exclude\" in the config", d.Text)})
 	}
 	return findings
 }

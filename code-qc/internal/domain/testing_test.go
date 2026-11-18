@@ -55,21 +55,20 @@ func TestRelatedTests(t *testing.T) {
 }
 
 func TestLineDirectiveFindings(t *testing.T) {
-	constructs := []Construct{
-		{Kind: ConstructTLSVerifyOff, Line: 2, Detail: "InsecureSkipVerify: true"},
-		{Kind: ConstructLineDirective, Line: 5, Detail: "//line app.go:5000"},
-		{Kind: ConstructLineDirective, Line: 9, Detail: "/*line hidden.go:900*/"},
+	directives := []LineDirective{
+		{Line: 5, Text: "//line app.go:5000", File: "app.go"},
+		{Line: 9, Text: "/*line hidden.go:900*/", File: "hidden.go"},
 	}
-	findings := LineDirectiveFindings("svc/internal/domain/user.go", constructs)
+	findings := LineDirectiveFindings("svc/internal/domain/user.go", directives)
 	if len(findings) != 2 || findings[0].Line != 5 || findings[1].Line != 9 {
 		t.Fatalf("findings = %+v, want the directives on lines 5 and 9", findings)
 	}
-	for _, f := range findings {
-		if f.Rule != "line-directive" || f.File != "svc/internal/domain/user.go" || !strings.Contains(f.Message, "exclude") {
-			t.Fatalf("finding = %+v, want a line-directive finding that names exclude", f)
+	for i, f := range findings {
+		if f.Rule != "line-directive" || f.File != "svc/internal/domain/user.go" || !strings.Contains(f.Message, "exclude") || !strings.Contains(f.Message, directives[i].Text) {
+			t.Fatalf("finding = %+v, want a line-directive finding that quotes the directive and names exclude", f)
 		}
 	}
-	if got := LineDirectiveFindings("a.go", constructs[:1]); len(got) != 0 {
+	if got := LineDirectiveFindings("a.go", nil); len(got) != 0 {
 		t.Fatalf("a file without directives got %+v", got)
 	}
 }

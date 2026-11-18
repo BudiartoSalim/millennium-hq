@@ -139,8 +139,15 @@ type BuildTools interface {
 type TestResult struct {
 	Failed bool
 	// Summary names the failing tests, or the tail of the output.
-	Summary  string
+	Summary string
+	// Coverage is the coverage as the tool wrote it. A file it names need
+	// not exist, and the lines it gives need not be in the file: the tests
+	// gate checks that for the files it judges.
 	Coverage domain.Coverage
+	// Foreign is code of the suite's sources that the coverage tool counts
+	// as another file's (Go's //line directives); nil for tools without
+	// such a thing.
+	Foreign []domain.ForeignCoverage
 }
 
 // TestRunner runs test suites with line coverage. Directories are
@@ -214,11 +221,24 @@ type Analyzer interface {
 // (TypeScript transpiles the file for it). AnalyzeRuntime returns the facts
 // Analyze returns, with the runtime code established where the analyzer
 // can; a fact it cannot establish stays unknown. Only the tests gate needs
-// runtime code, so only it asks; an analyzer without the method gives it
-// unknown runtime code.
+// runtime code, so only it asks, through AnalyzeRuntime.
 type RuntimeAnalyzer interface {
 	Analyzer
 	AnalyzeRuntime(ctx context.Context, path string, content []byte) (domain.FileFacts, error)
+}
+
+// AnalyzeRuntime asks analyzer for the facts of content with its runtime
+// code. An analyzer that is not a RuntimeAnalyzer cannot establish it, so
+// its facts come with unknown runtime code, whatever its plain analysis
+// reports: the file then counts as changed, and every touched line as
+// runtime.
+func AnalyzeRuntime(ctx context.Context, analyzer Analyzer, path string, content []byte) (domain.FileFacts, error) {
+	if runtime, ok := analyzer.(RuntimeAnalyzer); ok {
+		return runtime.AnalyzeRuntime(ctx, path, content)
+	}
+	facts, err := analyzer.Analyze(ctx, path, content)
+	facts.Runtime = domain.RuntimeCode{}
+	return facts, err
 }
 
 // AttemptStore counts an agent's consecutive blocked stops. It lives where

@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/token"
 	"strconv"
-	"strings"
 
 	"millennium-code-qc/internal/domain"
 )
@@ -25,8 +24,8 @@ func comments(fset *token.FileSet, file *ast.File) []domain.Comment {
 	return out
 }
 
-// constructs finds risky constructs: TLS verification switched off,
-// commands run through a shell, and line directives.
+// constructs finds risky constructs: TLS verification switched off, and
+// commands run through a shell.
 func constructs(fset *token.FileSet, file *ast.File) []domain.Construct {
 	var out []domain.Construct
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -42,22 +41,6 @@ func constructs(fset *token.FileSet, file *ast.File) []domain.Construct {
 		}
 		return true
 	})
-	return append(out, lineDirectives(fset, file)...)
-}
-
-// lineDirectives finds the comments go/scanner reads as line directives,
-// "//line " and "/*line ", which move the positions the compiler and the
-// coverage tool report. Positions anywhere count, erring toward reporting
-// one the compiler would ignore.
-func lineDirectives(fset *token.FileSet, file *ast.File) []domain.Construct {
-	var out []domain.Construct
-	for _, group := range file.Comments {
-		for _, c := range group.List {
-			if strings.HasPrefix(c.Text, "//line ") || strings.HasPrefix(c.Text, "/*line ") {
-				out = append(out, domain.Construct{Kind: domain.ConstructLineDirective, Line: line(fset, c.Pos()), Detail: c.Text})
-			}
-		}
-	}
 	return out
 }
 

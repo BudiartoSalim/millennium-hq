@@ -392,8 +392,10 @@ function commentRanges(ctx) {
 // every semicolon, so its tokens keep the line breaks that end a statement
 // while its layout, which follows the source's, stays out. Syntax the
 // output can drop while it still changes what runs is added from the syntax
-// tree (see keptNodes), and so are the comments the toolchain reads.
-// Without the compiler's pragmas the facts are unknown (null).
+// tree (see keptNodes), and so are the comments the toolchain reads. A
+// hashbang counts in the digest but marks no line: no test can run it, and
+// Node's coverage gives its line zero hits. Without the compiler's pragmas
+// the facts are unknown (null).
 function runtimeCode(ctx, content, emitted) {
   const { ts, source } = ctx;
   if (!(source.pragmas instanceof Map)) return null;
@@ -412,6 +414,7 @@ function runtimeCode(ctx, content, emitted) {
     addField(digest, content.slice(range.pos, range.end));
     addLines(ctx, range.pos, range.end, lines);
   }
+  if (hashbangFillsLine(content)) lines.delete(1);
   const count = gitLineCount(content);
   return { lines: [...lines].filter((line) => line <= count).sort((a, b) => a - b), digest: digest.digest('hex') };
 }
@@ -481,7 +484,11 @@ function tokenWalker(ts, source) {
   const reset = (pos) => (scanner.resetTokenState ? scanner.resetTokenState(pos) : scanner.setTextPos(pos));
   const tokenStart = () => (scanner.getTokenStart ? scanner.getTokenStart() : scanner.getTokenPos());
   const isList = (node) => node.kind === SyntaxKind.NamedImports || node.kind === SyntaxKind.NamedExports;
+  // An empty gap holds no token. Scanning it anyway would scan the token
+  // after it, the leftmost of the child, so each level of a left-nested
+  // chain would scan its leftmost token again: depth times its length.
   const scanGap = (parent, pos, end, visit) => {
+    if (pos >= end) return;
     reset(pos);
     for (;;) {
       const kind = scanner.scan();
@@ -640,7 +647,8 @@ function decoratedAnnotations(ts, node) {
 // directiveComments are the comments the toolchain reads: the compiler's
 // pragmas (triple-slash directives, @jsx and its siblings), the source map
 // comments node reads at run time, and a hashbang, which the emit keeps
-// and which picks the program that runs the file.
+// and which picks the program that runs the file (see runtimeCode for its
+// line).
 function directiveComments(ctx) {
   const ranges = [];
   const shebang = hashbangRange(ctx.source.text);
@@ -661,6 +669,14 @@ function hashbangRange(text) {
   if (!text.startsWith('#!')) return null;
   const match = /[\r\n\u2028\u2029]/.exec(text);
   return { pos: 0, end: match ? match.index : text.length };
+}
+
+// hashbangFillsLine reports whether a hashbang is all of line 1 as git
+// numbers it: it ends at a line feed or at the end of the text. A line
+// break git does not count leaves more code on git's line 1.
+function hashbangFillsLine(text) {
+  const range = hashbangRange(text);
+  return range !== null && (range.end === text.length || text[range.end] === '\n' || text.startsWith('\r\n', range.end));
 }
 
 // --- constructs ---

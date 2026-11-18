@@ -98,7 +98,7 @@ func TestShellGateEdges(t *testing.T) {
 func TestStructureGateEdges(t *testing.T) {
 	analyzers := map[domain.Language]port.Analyzer{
 		domain.LanguageGo:    fakeAnalyzer{facts: map[string]domain.FileFacts{"long": longFile}},
-		domain.LanguageShell: fakeAnalyzer{facts: map[string]domain.FileFacts{"#!/bin/bash\n": {}}},
+		domain.LanguageShell: fakeAnalyzer{facts: map[string]domain.FileFacts{"#!/bin/bash": {}}},
 	}
 	cfg := singleConfig(t, "go", "shell", "python")
 	resolved := cfg

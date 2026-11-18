@@ -49,14 +49,15 @@ func (a *Analyzer) Analyze(_ context.Context, path string, content []byte) (doma
 		return domain.FileFacts{}, fmt.Errorf("runtime code of %s: %w", path, err)
 	}
 	facts := domain.FileFacts{
-		Path:       path,
-		Generated:  ast.IsGenerated(file),
-		Test:       strings.HasSuffix(path, "_test.go"),
-		Imports:    imports(fset, file, mod),
-		Functions:  functions(fset, file),
-		Comments:   comments(fset, file),
-		Constructs: constructs(fset, file),
-		Runtime:    runtime,
+		Path:           path,
+		Generated:      ast.IsGenerated(file),
+		Test:           strings.HasSuffix(path, "_test.go"),
+		Imports:        imports(fset, file, mod),
+		Functions:      functions(fset, file),
+		Comments:       comments(fset, file),
+		Constructs:     constructs(fset, file),
+		LineDirectives: LineDirectives(content),
+		Runtime:        runtime,
 	}
 	return facts, nil
 }

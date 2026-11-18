@@ -93,6 +93,41 @@ func TestCacheKeepsPlainAndRuntimeResultsApart(t *testing.T) {
 	}
 }
 
+// failing fails every analysis and counts each kind of request.
+type failing struct{ layered }
+
+func (f *failing) Analyze(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
+	facts, _ := f.layered.Analyze(ctx, path, content)
+	return facts, errors.New("parse " + path + ": syntax error")
+}
+
+func (f *failing) AnalyzeRuntime(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
+	facts, _ := f.layered.AnalyzeRuntime(ctx, path, content)
+	return facts, errors.New("parse " + path + ": syntax error")
+}
+
+// A file whose plain analysis failed would fail a runtime analysis too, so
+// the cached failure answers, and a TypeScript file that does not parse is
+// not transpiled again for it (R2-PERF-4). A plain success never answers.
+func TestCacheAnswersARuntimeRequestWithAPlainFailure(t *testing.T) {
+	inner := &failing{}
+	a := Wrap(inner)
+	if _, err := a.Analyze(t.Context(), "a.ts", []byte("broken")); err == nil {
+		t.Fatal("the plain analysis must fail")
+	}
+	for range 2 {
+		if _, err := a.AnalyzeRuntime(t.Context(), "a.ts", []byte("broken")); err == nil || !strings.Contains(err.Error(), "syntax error") {
+			t.Fatalf("AnalyzeRuntime error = %v, want the cached parse error", err)
+		}
+	}
+	if _, err := a.AnalyzeRuntime(t.Context(), "a.ts", []byte("other")); err == nil {
+		t.Fatal("other content was not analysed yet and must fail on its own")
+	}
+	if inner.plain != 1 || inner.runtime != 1 {
+		t.Fatalf("inner analyses: %d plain, %d runtime; want 1 and 1 (only the content never analysed)", inner.plain, inner.runtime)
+	}
+}
+
 // plainWithRuntime cannot be asked for runtime code, though its plain
 // analysis reports some.
 type plainWithRuntime struct{}
