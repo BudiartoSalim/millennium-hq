@@ -69,6 +69,13 @@ func (r RuntimeCode) Holds(line int) bool {
 	return found
 }
 
+// HoldsAny reports whether any line of touched may hold runtime code:
+// always, when the facts are unknown. A change that touches none holds no
+// code that could run.
+func (r RuntimeCode) HoldsAny(touched LineSet) bool {
+	return !r.known || slices.ContainsFunc(r.lines, touched.Contains)
+}
+
 // SameRuntime reports whether two versions of a file run the same code,
 // token for token. Unknown facts never compare equal, not even to each
 // other, so a file whose facts are missing on either side counts as changed.

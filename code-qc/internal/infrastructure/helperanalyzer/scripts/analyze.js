@@ -22,7 +22,7 @@ function main() {
     let response;
     try {
       const request = JSON.parse(line);
-      response = { facts: analyze(request.path, request.content) };
+      response = { facts: analyze(request.path, request.content, request.runtime === true) };
     } catch (err) {
       response = { error: err instanceof Error ? err.message : String(err) };
     }
@@ -30,9 +30,16 @@ function main() {
   });
 }
 
-function analyze(relPath, content) {
+// analyze returns the facts of one file. The runtime code costs several
+// times the rest (a transpile, a second tree, a token walk), and only the
+// tests gate reads it, so it is computed only when the request asks. Its
+// first half, the emit, comes before the file's own tree: the transpile's
+// peak memory is then not added to the tree's.
+function analyze(relPath, content, withRuntime) {
   const file = path.join(root, relPath);
   const ts = compilerFor(file, relPath);
+  const options = optionsFor(ts, file);
+  const emitted = withRuntime ? emittedCode(ts, file, options, content) : null;
   // The compiler reads extensions case-insensitively, so Foo.TSX holds JSX.
   const kind = /\.tsx$/i.test(relPath) ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, kind);
@@ -41,7 +48,7 @@ function analyze(relPath, content) {
     const line = source.getLineAndCharacterOfPosition(diag.start || 0).line + 1;
     throw new Error(`parse ${relPath}:${line}: ${ts.flattenDiagnosticMessageText(diag.messageText, ' ')}`);
   }
-  const ctx = { ts, source, file, relPath, options: optionsFor(ts, file) };
+  const ctx = { ts, source, file, relPath, options };
   const imports = collectImports(ctx);
   return {
     generated: /@generated|Code generated .* DO NOT EDIT/.test(content.split('\n').slice(0, 5).join('\n')),
@@ -50,7 +57,7 @@ function analyze(relPath, content) {
     functions: collectFunctions(ctx),
     comments: collectComments(ctx),
     constructs: collectConstructs(ctx, imports),
-    runtime: runtimeCode(ctx, content),
+    runtime: emitted && runtimeCode(ctx, content, emitted),
   };
 }
 
@@ -380,28 +387,24 @@ function commentRanges(ctx) {
 // runtimeCode reports the lines that hold runtime code and a digest of it.
 // The compiler decides what is erased: the digest covers the tokens of the
 // comment-free output of ts.transpileModule with the project's options, and
-// a line is runtime when the output's source map points into it. The output
-// spells out every semicolon, so its tokens keep the line breaks that end a
-// statement while its layout, which follows the source's, stays out. Syntax
-// the output can drop while it still changes what runs is added from the
-// syntax tree (see keptNodes), and so are the comments the toolchain reads.
-// Without the compiler's pragmas, or when the file cannot be transpiled, the
-// facts are unknown (null).
-function runtimeCode(ctx, content) {
+// a line is runtime when the output's source map points into it (see
+// emittedCode, which hashed the output already). The output spells out
+// every semicolon, so its tokens keep the line breaks that end a statement
+// while its layout, which follows the source's, stays out. Syntax the
+// output can drop while it still changes what runs is added from the syntax
+// tree (see keptNodes), and so are the comments the toolchain reads.
+// Without the compiler's pragmas the facts are unknown (null).
+function runtimeCode(ctx, content, emitted) {
   const { ts, source } = ctx;
-  const emit = transpile(ctx, content);
-  if (!emit || !(source.pragmas instanceof Map)) return null;
-  const output = ts.createSourceFile('output.jsx', emit.outputText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JSX);
-  if (output.parseDiagnostics && output.parseDiagnostics.length > 0) return null;
-  const digest = crypto.createHash('sha256');
-  forEachToken(ts, output, output, (token) => addToken(ts, output, token, digest));
-  const lines = mappedLines(JSON.parse(emit.sourceMapText).mappings);
+  if (!(source.pragmas instanceof Map)) return null;
+  const { digest, lines } = emitted;
   multiLineLiterals(ctx, lines);
   addField(digest, 'kept syntax');
+  const walker = tokenWalker(ts, source);
   for (const node of keptNodes(ctx)) {
-    forEachToken(ts, source, node, (token) => {
-      addToken(ts, source, token, digest);
-      addLines(ctx, token.getStart(source), token.getEnd(), lines);
+    walker.walk(node, (kind, start, end) => {
+      addToken(ts, source, kind, start, end, digest);
+      addLines(ctx, start, end, lines);
     });
   }
   for (const range of directiveComments(ctx)) {
@@ -413,9 +416,26 @@ function runtimeCode(ctx, content) {
   return { lines: [...lines].filter((line) => line <= count).sort((a, b) => a - b), digest: digest.digest('hex') };
 }
 
-function transpile(ctx, content) {
+// emittedCode transpiles the file and returns a digest of the output's
+// tokens, still open, and the source lines the source map points at; null
+// when the file cannot be transpiled. The emit and its syntax tree are as
+// large as the file's own; nothing keeps them once it returns, and the
+// emit's text is let go as soon as its tree is built.
+function emittedCode(ts, file, options, content) {
+  let emit = transpile(ts, file, options, content);
+  if (!emit) return null;
+  const lines = mappedLines(JSON.parse(emit.sourceMapText).mappings);
+  const output = ts.createSourceFile('output.jsx', emit.outputText, ts.ScriptTarget.Latest, false, ts.ScriptKind.JSX);
+  emit = null;
+  if (output.parseDiagnostics && output.parseDiagnostics.length > 0) return null;
+  const digest = crypto.createHash('sha256');
+  tokenWalker(ts, output).walk(output, (kind, start, end) => addToken(ts, output, kind, start, end, digest));
+  return { digest, lines };
+}
+
+function transpile(ts, file, options, content) {
   try {
-    return ctx.ts.transpileModule(content, { compilerOptions: emitOptions(ctx.options), fileName: ctx.file, reportDiagnostics: false });
+    return ts.transpileModule(content, { compilerOptions: emitOptions(options), fileName: file, reportDiagnostics: false });
   } catch {
     return null;
   }
@@ -439,21 +459,57 @@ function addField(hash, text) {
   hash.update(data);
 }
 
-function addToken(ts, source, token, hash) {
-  addField(hash, ts.SyntaxKind[token.kind]);
-  addField(hash, token.getText(source));
+function addToken(ts, source, kind, start, end, hash) {
+  addField(hash, ts.SyntaxKind[kind]);
+  addField(hash, source.text.slice(start, end));
 }
 
-// forEachToken calls visit for every token of node, in order. JSDoc is
-// comment, not syntax.
-function forEachToken(ts, source, node, visit) {
-  if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return;
-  const children = node.getChildren(source);
-  if (children.length > 0) {
-    for (const child of children) forEachToken(ts, source, child, visit);
-  } else if (node.kind !== ts.SyntaxKind.EndOfFileToken) {
-    visit(node);
-  }
+// tokenWalker walks the tokens of a syntax tree in order, calling
+// visit(kind, start, end) for each, without node.getChildren: that builds a
+// node for every token and keeps it with the tree, which on a large file
+// takes more memory than the tree itself. Child nodes come from
+// forEachChild; the tokens between them (punctuation and keywords) are
+// rescanned from the text, as getChildren does. A childless node of a token
+// kind is one token; any other childless node (`debugger;`) is rescanned
+// whole. JSDoc is comment, not syntax. Two things of TypeScript are erased
+// here: an inline `type` specifier of an import or export, and the commas
+// between specifiers, so adding `type T` to a list leaves its tokens as
+// they were.
+function tokenWalker(ts, source) {
+  const { SyntaxKind } = ts;
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, source.languageVariant, source.text);
+  const reset = (pos) => (scanner.resetTokenState ? scanner.resetTokenState(pos) : scanner.setTextPos(pos));
+  const tokenStart = () => (scanner.getTokenStart ? scanner.getTokenStart() : scanner.getTokenPos());
+  const isList = (node) => node.kind === SyntaxKind.NamedImports || node.kind === SyntaxKind.NamedExports;
+  const scanGap = (parent, pos, end, visit) => {
+    reset(pos);
+    for (;;) {
+      const kind = scanner.scan();
+      const start = tokenStart();
+      const tokenEnd = scanner.getTextPos();
+      if (kind === SyntaxKind.EndOfFileToken || start >= end || tokenEnd > end) return;
+      if (!(kind === SyntaxKind.CommaToken && isList(parent))) visit(kind, start, tokenEnd);
+    }
+  };
+  const erased = (node) => (node.kind >= SyntaxKind.FirstJSDocNode && node.kind <= SyntaxKind.LastJSDocNode) ||
+    ((ts.isImportSpecifier(node) || ts.isExportSpecifier(node)) && node.isTypeOnly);
+  const walk = (node, visit) => {
+    if (erased(node)) return;
+    const children = [];
+    ts.forEachChild(node, (child) => { children.push(child); });
+    if (children.length === 0 && node.kind <= SyntaxKind.LastToken) {
+      if (node.kind !== SyntaxKind.EndOfFileToken) visit(node.kind, node.getStart(source), node.end);
+      return;
+    }
+    let pos = node.pos;
+    for (const child of children) {
+      scanGap(node, pos, child.pos, visit);
+      walk(child, visit);
+      pos = Math.max(pos, child.end);
+    }
+    scanGap(node, pos, node.end, visit);
+  };
+  return { walk };
 }
 
 function addLines(ctx, start, end, lines) {
@@ -582,10 +638,13 @@ function decoratedAnnotations(ts, node) {
 }
 
 // directiveComments are the comments the toolchain reads: the compiler's
-// pragmas (triple-slash directives, @jsx and its siblings) and the source
-// map comments node reads at run time.
+// pragmas (triple-slash directives, @jsx and its siblings), the source map
+// comments node reads at run time, and a hashbang, which the emit keeps
+// and which picks the program that runs the file.
 function directiveComments(ctx) {
   const ranges = [];
+  const shebang = hashbangRange(ctx.source.text);
+  if (shebang) ranges.push(shebang);
   for (const value of ctx.source.pragmas.values()) {
     for (const pragma of [].concat(value)) ranges.push(pragma.range);
   }
@@ -594,6 +653,14 @@ function directiveComments(ctx) {
     if (/^\/[/*][#@]\s*source(Mapping)?URL=/.test(text.slice(range.pos, range.end))) ranges.push(range);
   }
   return ranges;
+}
+
+// hashbangRange is the range of a hashbang line, the compiler's own reading:
+// "#!" at the very start, up to the line break.
+function hashbangRange(text) {
+  if (!text.startsWith('#!')) return null;
+  const match = /[\r\n\u2028\u2029]/.exec(text);
+  return { pos: 0, end: match ? match.index : text.length };
 }
 
 // --- constructs ---

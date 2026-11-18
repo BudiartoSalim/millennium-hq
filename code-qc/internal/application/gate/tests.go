@@ -34,6 +34,7 @@ func (*Tests) Rules() []port.Rule {
 		{Name: "tests-missing", Disableable: true},
 		{Name: "tests-failed", Disableable: true},
 		{Name: "uncovered-change", Disableable: true},
+		{Name: "line-directive", Disableable: true},
 		{Name: "tests-unconfigured", Disableable: false},
 		{Name: "tool-failed", Disableable: false},
 	}
@@ -56,7 +57,7 @@ type candidate struct {
 // Run checks the tests of the change.
 func (g *Tests) Run(ctx context.Context, in port.GateInput) ([]domain.Finding, error) {
 	candidates := g.candidates(ctx, in)
-	findings := g.missingTests(ctx, in, candidates)
+	findings := append(g.missingTests(ctx, in, candidates), g.lineDirectives(ctx, in)...)
 	if in.Tier != domain.TierFull {
 		return label(g.Name(), findings), nil
 	}
@@ -83,6 +84,28 @@ func (g *Tests) candidates(ctx context.Context, in port.GateInput) []candidate {
 	return out
 }
 
+// lineDirectives reports the line directives of every changed file in a
+// tested layer, test files included: they move coverage. A file that cannot
+// be analysed is reported by the structure gate.
+func (g *Tests) lineDirectives(ctx context.Context, in port.GateInput) []domain.Finding {
+	var findings []domain.Finding
+	for _, file := range in.Changes.Files {
+		lang, match, ok := ownedCode(in.Config, file)
+		analyzer, known := g.analyzers[lang]
+		if !ok || !known || in.Config.Packs.TestingOf(lang, match, file.Path) != domain.LayerTested {
+			continue
+		}
+		content, err := g.source.ReadWorking(file.Path)
+		if err != nil {
+			continue
+		}
+		if facts, err := analyzer.Analyze(ctx, file.Path, content); err == nil {
+			findings = append(findings, domain.LineDirectiveFindings(file.Path, facts.Constructs)...)
+		}
+	}
+	return findings
+}
+
 // ownedCode returns the language and component of a changed source file
 // that a component checks.
 func ownedCode(cfg domain.Config, file domain.ChangedFile) (domain.Language, domain.ComponentMatch, bool) {
@@ -106,8 +129,21 @@ func (g *Tests) logic(ctx context.Context, lang domain.Language, p string) (doma
 	if err != nil {
 		return domain.FileFacts{}, false
 	}
-	facts, err := analyzer.Analyze(ctx, p, content)
+	facts, err := analyzeRuntime(ctx, analyzer, p, content)
 	return facts, err == nil && domain.NeedsTests(facts)
+}
+
+// analyzeRuntime analyses content with its runtime code, which only this
+// gate needs and asks for. An analyzer that cannot establish runtime code
+// leaves it unknown, so the file counts as changed and every touched line
+// as runtime.
+func analyzeRuntime(ctx context.Context, analyzer port.Analyzer, p string, content []byte) (domain.FileFacts, error) {
+	if runtime, ok := analyzer.(port.RuntimeAnalyzer); ok {
+		return runtime.AnalyzeRuntime(ctx, p, content)
+	}
+	facts, err := analyzer.Analyze(ctx, p, content)
+	facts.Runtime = domain.RuntimeCode{}
+	return facts, err
 }
 
 func (g *Tests) missingTests(ctx context.Context, in port.GateInput, candidates []candidate) []domain.Finding {
@@ -129,16 +165,17 @@ func (g *Tests) missingTests(ctx context.Context, in port.GateInput, candidates 
 // for a change that only touched comments, whitespace or erased types. An
 // added file and an audit have no base to compare with. A base that is not
 // found, cannot be read or fails analysis gives unknown facts, which never
-// compare equal: the file counts as changed and needs its test change.
+// compare equal: the file counts as changed and needs its test change. So
+// does a file whose runtime code is unknown now, without reading the base.
 func (g *Tests) baseRuntime(ctx context.Context, base string, c candidate) domain.RuntimeCode {
-	if base == "" || c.file.Kind != domain.ChangeModified {
+	if base == "" || c.file.Kind != domain.ChangeModified || !c.runtime.Known() {
 		return domain.RuntimeCode{}
 	}
 	content, found, err := g.source.ReadAt(ctx, base, c.file.Path)
 	if err != nil || !found {
 		return domain.RuntimeCode{}
 	}
-	facts, err := g.analyzers[c.lang].Analyze(ctx, c.file.Path, content)
+	facts, err := analyzeRuntime(ctx, g.analyzers[c.lang], c.file.Path, content)
 	if err != nil {
 		return domain.RuntimeCode{}
 	}
@@ -208,19 +245,33 @@ func (g *Tests) uncovered(ctx context.Context, in port.GateInput, candidates []c
 		if unusable[c.match.Component.Name()] {
 			continue
 		}
-		lines, ok := coverage[c.file.Path]
-		if !ok {
-			findings = append(findings, domain.Finding{Rule: "uncovered-change", File: c.file.Path, Message: "no test executed this file" + c.note})
-			continue
-		}
 		touched, err := touchedLines(ctx, g.source, in.Changes.Base, c.file)
 		if err != nil {
 			return nil, err
 		}
-		if ranges := lines.Uncovered(touched, c.runtime); len(ranges) > 0 {
-			findings = append(findings, domain.Finding{Rule: "uncovered-change", File: c.file.Path, Line: ranges[0].First, Message: fmt.Sprintf(
-				"changed lines %s never run in any test%s", domain.FormatRanges(ranges), c.note)})
+		if finding, ok := uncoveredChange(c, coverage, touched); ok {
+			findings = append(findings, finding)
 		}
 	}
 	return findings, nil
+}
+
+// uncoveredChange reports the touched runtime lines of a candidate that no
+// test ran. A change that touched no runtime line has nothing that could
+// run, even in a file no test loads; with unknown runtime code every
+// touched line counts.
+func uncoveredChange(c candidate, coverage domain.Coverage, touched domain.LineSet) (domain.Finding, bool) {
+	if !c.runtime.HoldsAny(touched) {
+		return domain.Finding{}, false
+	}
+	lines, ok := coverage[c.file.Path]
+	if !ok {
+		return domain.Finding{Rule: "uncovered-change", File: c.file.Path, Message: "no test executed this file" + c.note}, true
+	}
+	ranges := lines.Uncovered(touched, c.runtime)
+	if len(ranges) == 0 {
+		return domain.Finding{}, false
+	}
+	return domain.Finding{Rule: "uncovered-change", File: c.file.Path, Line: ranges[0].First, Message: fmt.Sprintf(
+		"changed lines %s never run in any test%s", domain.FormatRanges(ranges), c.note)}, true
 }

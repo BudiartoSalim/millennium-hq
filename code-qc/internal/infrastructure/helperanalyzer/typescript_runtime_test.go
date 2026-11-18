@@ -125,6 +125,97 @@ func TestTypeScriptRuntimeDigest(t *testing.T) {
 	}
 }
 
+// Inline type specifiers are erased like whole type-only imports: adding
+// or removing one changes no runtime token and marks no line (QT-1). Value
+// specifiers still count.
+func TestTypeScriptInlineTypeSpecifiersAreErased(t *testing.T) {
+	a, _ := runtimeProject(t, `{}`)
+	const body = "export function sum(p: Pair): number {\n  return add(p[0], p[1]);\n}\n"
+	tests := []struct {
+		name, before, after string
+		same                bool
+	}{
+		{"type specifier added to an import", "import { type Pair, add } from './calc.js';\n", "import { type Pair, type Op, add } from './calc.js';\n", true},
+		{"type specifier added at the end", "import { add } from './calc.js';\n", "import { add, type Pair } from './calc.js';\n", true},
+		{"type specifier added to an export", "import { add } from './calc.js';\nexport { add as plus, type Pair };\n",
+			"import { add } from './calc.js';\nexport { add as plus, type Pair, type Op };\n", true},
+		{"value specifier added", "import { add } from './calc.js';\n", "import { add, mul } from './calc.js';\n", false},
+		{"value specifier renamed", "import { add } from './calc.js';\n", "import { add as plus } from './calc.js';\n", false},
+		{"type specifier made a value", "import { type Pair, add } from './calc.js';\n", "import { Pair, add } from './calc.js';\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before, after := knownRuntime(t, a, "web/src/m.ts", tt.before+body), knownRuntime(t, a, "web/src/m.ts", tt.after+body)
+			if got := domain.SameRuntime(before, after); got != tt.same {
+				t.Fatalf("same runtime = %v, want %v", got, tt.same)
+			}
+		})
+	}
+	src := "import {\n  type Pair,\n  add,\n} from './calc.js';\n" + body
+	if got := heldLines(src, knownRuntime(t, a, "web/src/m.ts", src)); slices.Contains(got, 2) || !slices.Contains(got, 3) {
+		t.Fatalf("runtime lines = %v; want line 3 (add) and not line 2 (type Pair)", got)
+	}
+}
+
+// A hashbang picks the program that runs the file, and the emit keeps it,
+// so it is runtime (QT-2).
+func TestTypeScriptHashbangIsRuntime(t *testing.T) {
+	a, _ := runtimeProject(t, `{}`)
+	const body = "export const x = 1;\n"
+	node, bun := knownRuntime(t, a, "web/src/m.ts", "#!/usr/bin/env node\n"+body), knownRuntime(t, a, "web/src/m.ts", "#!/usr/bin/env bun\n"+body)
+	if domain.SameRuntime(node, bun) || !bun.Holds(1) {
+		t.Fatalf("changing the hashbang must change the digest, and its line must be runtime; lines %v", heldLines("#!\n"+body, bun))
+	}
+}
+
+// A plain analysis leaves the runtime code out: only a request for it pays
+// for the transpile (PERF-1).
+func TestTypeScriptPlainAnalysisLeavesRuntimeUnknown(t *testing.T) {
+	a, _ := runtimeProject(t, `{}`)
+	const src = "export function f(): number {\n  return 1;\n}\n"
+	if r := run(t, a, "web/src/m.ts", src).Runtime; r.Known() {
+		t.Fatal("a plain analysis established runtime code")
+	}
+	if r := runRuntime(t, a, "web/src/m.ts", src).Runtime; !r.Known() {
+		t.Fatal("a runtime analysis of the same file must establish it")
+	}
+}
+
+// poisonedTypeScript is a typescript package that wraps the fixture's and
+// makes node.getChildren throw: the call builds and keeps a node for every
+// token, which on a 4 MiB file took the helper past a 512 MB heap.
+const poisonedTypeScript = `
+const ts = require(process.env.MILLENNIUM_TYPESCRIPT + '/node_modules/typescript');
+const sample = ts.createSourceFile('x.ts', 'f(a + 1); class C { m() {} }', ts.ScriptTarget.Latest, true);
+const prototypes = new Set();
+const collect = (node) => { prototypes.add(Object.getPrototypeOf(node)); ts.forEachChild(node, collect); };
+collect(sample);
+for (const proto of prototypes) {
+  proto.getChildren = () => { throw new Error('getChildren was called'); };
+}
+module.exports = ts;
+`
+
+// The runtime walk never asks the compiler for child token nodes (PERF-2):
+// it walks forEachChild and rescans the tokens between children.
+func TestTypeScriptRuntimeWalkMakesNoChildTokenNodes(t *testing.T) {
+	node, fixture := typeScriptFixture(t)
+	t.Setenv("MILLENNIUM_TYPESCRIPT", fixture)
+	root := repoWith(t, map[string]string{
+		"web/package.json":                         `{"name":"web"}`,
+		"web/tsconfig.json":                        `{"compilerOptions": {"experimentalDecorators": true}}`,
+		"web/node_modules/typescript/package.json": `{"name":"typescript","main":"index.js"}`,
+		"web/node_modules/typescript/index.js":     poisonedTypeScript,
+	})
+	a := TypeScript(root, node)
+	t.Cleanup(a.Close)
+	src := "import { a, type B } from './a';\n@dec\nexport class C {\n  @dec x: B = a;\n}\nexport enum E { A }\n"
+	facts, err := a.AnalyzeRuntime(t.Context(), "web/src/m.ts", []byte(src))
+	if err != nil || !facts.Runtime.Known() {
+		t.Fatalf("AnalyzeRuntime = %+v, %v; want known runtime code without getChildren", facts.Runtime, err)
+	}
+}
+
 func TestTypeScriptDigestKeepsMeaningfulLineBreaks(t *testing.T) {
 	a, _ := runtimeProject(t, `{}`)
 	const head = "export function f(v: number) {\n  return"
@@ -197,7 +288,7 @@ func TestTypeScriptRuntimeUnknownWhereGitNumbersOtherwise(t *testing.T) {
 		"export const x = 1; // c\u2029export const y = 2;\n",
 		"export const x = 1; // c\rexport const y = 2;\n",
 	} {
-		if r := run(t, a, "web/src/m.ts", src).Runtime; r.Known() {
+		if r := runRuntime(t, a, "web/src/m.ts", src).Runtime; r.Known() {
 			t.Fatalf("%q: runtime facts must be unknown", src)
 		}
 	}
@@ -289,6 +380,54 @@ export function make<T extends Shape>(
 export default Service;
 `
 
+// differentialRuntime and differentialErased are the lines of
+// differentialCorpus that hold runtime code and those that hold none, as
+// read from the corpus by hand, whatever the options: a check of the helper
+// that does not go through any source map. Lines left out of both (blank
+// lines, lone braces, and line 35: an undecorated field's annotation, whose
+// closing semicolon the compiler maps) may go either way.
+var (
+	differentialRuntime = []int{
+		2, 4, 5, // value imports, import = require
+		11, 12, 13, 14, 16, 17, 18, // enums, const included
+		20, 21, // a namespace with values
+		25, 26, 29, // a decorated class, a static field
+		31, 32, 33, // a decorated field and its annotation
+		34, 36, 37, 38, // fields
+		40, 41, 42, 43, 44, 46, // parameter properties, a decorated parameter's annotation
+		49, 50, 51, 52, 54, 55, // a decorated method, its parameter and return types
+		58, 59, 64, 65, // a getter, the implementation of an overload
+		69, 71, // an abstract class, a parameter property
+		74, 75, 77, 78, 81, // a generic function, the default export
+	}
+	differentialErased = []int{
+		1,       // a comment
+		3,       // a type-only import
+		7, 8, 9, // an interface
+		22,     // a type in a namespace
+		27,     // implements
+		30,     // a declare field
+		62, 63, // overload signatures
+		70, // an abstract field
+	}
+)
+
+// checkHandReadLines compares the runtime lines of differentialCorpus with
+// the lines read from it by hand.
+func checkHandReadLines(t *testing.T, r domain.RuntimeCode) {
+	t.Helper()
+	for _, line := range differentialRuntime {
+		if !r.Holds(line) {
+			t.Errorf("line %d holds runtime code but is marked non-runtime", line)
+		}
+	}
+	for _, line := range differentialErased {
+		if r.Holds(line) {
+			t.Errorf("line %d holds no runtime code but is marked runtime", line)
+		}
+	}
+}
+
 // transpiledLines transpiles src on its own, with the given options, and
 // returns the one-based source lines the output's source map points at,
 // decoded by the compiler's own decoder rather than the helper's.
@@ -341,9 +480,7 @@ func TestTypeScriptRuntimeLinesCoverEveryMappedLine(t *testing.T) {
 			if missed := slices.DeleteFunc(mapped, r.Holds); len(missed) > 0 {
 				t.Errorf("lines %v are mapped in the compiler's output but marked non-runtime", missed)
 			}
-			if r.Holds(1) {
-				t.Error("line 1 is a comment")
-			}
+			checkHandReadLines(t, r)
 		})
 	}
 }

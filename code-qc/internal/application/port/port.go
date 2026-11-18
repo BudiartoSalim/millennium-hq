@@ -203,9 +203,22 @@ type FileFinder interface {
 	NearestUp(from, marker, within string) (string, bool)
 }
 
-// Analyzer extracts facts from source files of one language.
+// Analyzer extracts facts from source files of one language. Analyze may
+// leave the file's runtime code unknown (see RuntimeAnalyzer).
 type Analyzer interface {
 	Analyze(ctx context.Context, path string, content []byte) (domain.FileFacts, error)
+}
+
+// RuntimeAnalyzer is an Analyzer that can also establish a file's runtime
+// code (domain.RuntimeCode), which can cost several times a plain analysis
+// (TypeScript transpiles the file for it). AnalyzeRuntime returns the facts
+// Analyze returns, with the runtime code established where the analyzer
+// can; a fact it cannot establish stays unknown. Only the tests gate needs
+// runtime code, so only it asks; an analyzer without the method gives it
+// unknown runtime code.
+type RuntimeAnalyzer interface {
+	Analyzer
+	AnalyzeRuntime(ctx context.Context, path string, content []byte) (domain.FileFacts, error)
 }
 
 // AttemptStore counts an agent's consecutive blocked stops. It lives where

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,25 @@ func TestRelatedTests(t *testing.T) {
 	if !NeedsTests(FileFacts{Functions: []FunctionFacts{{Key: "f"}}}) || NeedsTests(FileFacts{}) ||
 		NeedsTests(FileFacts{Test: true, Functions: []FunctionFacts{{Key: "f"}}}) {
 		t.Fatal("NeedsTests misclassified")
+	}
+}
+
+func TestLineDirectiveFindings(t *testing.T) {
+	constructs := []Construct{
+		{Kind: ConstructTLSVerifyOff, Line: 2, Detail: "InsecureSkipVerify: true"},
+		{Kind: ConstructLineDirective, Line: 5, Detail: "//line app.go:5000"},
+		{Kind: ConstructLineDirective, Line: 9, Detail: "/*line hidden.go:900*/"},
+	}
+	findings := LineDirectiveFindings("svc/internal/domain/user.go", constructs)
+	if len(findings) != 2 || findings[0].Line != 5 || findings[1].Line != 9 {
+		t.Fatalf("findings = %+v, want the directives on lines 5 and 9", findings)
+	}
+	for _, f := range findings {
+		if f.Rule != "line-directive" || f.File != "svc/internal/domain/user.go" || !strings.Contains(f.Message, "exclude") {
+			t.Fatalf("finding = %+v, want a line-directive finding that names exclude", f)
+		}
+	}
+	if got := LineDirectiveFindings("a.go", constructs[:1]); len(got) != 0 {
+		t.Fatalf("a file without directives got %+v", got)
 	}
 }

@@ -128,6 +128,23 @@ func moduleStem(p string) string {
 	return name
 }
 
+// LineDirectiveFindings reports every line directive of a file in a tested
+// layer, touched or not: a directive above unchanged lines still moves the
+// coverage of the changed lines below it, to lines that do not exist or to
+// lines that ran, so untested code would pass as tested. Only the config's
+// exclude, which declares generated code, takes a file out of this check.
+func LineDirectiveFindings(file string, constructs []Construct) []Finding {
+	var findings []Finding
+	for _, c := range constructs {
+		if c.Kind != ConstructLineDirective {
+			continue
+		}
+		findings = append(findings, Finding{Rule: "line-directive", File: file, Line: c.Line, Message: fmt.Sprintf(
+			"%s in a tested layer: %s; remove it, or, if the file is generated, declare it with \"exclude\" in the config", c.Detail, constructAdvice(c.Kind))})
+	}
+	return findings
+}
+
 // NeedsTests reports whether analysed code of a tested layer is production
 // logic: not test code, and with at least one function. Files that only
 // declare types or interfaces need no tests of their own. A generated-code
