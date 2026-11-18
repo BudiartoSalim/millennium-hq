@@ -6,7 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -17,7 +19,9 @@ import (
 // following it (Go reports one as neither a directory nor a symlink), while
 // Windows follows it, and `mklink /J` needs no privilege. The walk also
 // decides what a link that leads nowhere means, which differs between a
-// tool's path and a protected location (see danglingLink).
+// tool's path and a protected location (see danglingLink), and refuses
+// what it cannot resolve as the opening process would: the per-process
+// entries (perProcessPaths) and a volume Windows mounts nowhere.
 
 // entryKind is what a path names on the file system, as the walk reads it.
 type entryKind int
@@ -78,18 +82,29 @@ const (
 	danglingFollowed
 )
 
-// maxLinks bounds the links one walk follows, as Linux does.
-const maxLinks = 40
-
 // errBelowFile is a path that goes on below a part that is not a
 // directory: nothing can be created there.
 var errBelowFile = errors.New("not a directory, so nothing lies below it")
 
+// errTooManyLinks is a path through more links than the OS follows in one
+// path (maxLinks), such as a link that leads to itself: the OS opens
+// nothing through it, so nothing can be created there either.
+var errTooManyLinks = fmt.Errorf("more than %d links one after another, more than the OS follows in one path, so it may loop", maxLinks)
+
+// perProcessPaths lead somewhere else for each process that opens a path
+// through them, so the engine would resolve them in its own process rather
+// than in the one that opens the path, such as pi loading its extensions.
+// /proc/<pid> is matched too (see perProcess).
+var perProcessPaths = []string{"/proc/self", "/proc/thread-self", "/dev/fd", "/dev/stdin", "/dev/stdout", "/dev/stderr"}
+
 // fileSystem is what a walk reads: the kind of an entry, without following
-// it, and where a link leads. osFiles reads the real one.
+// it, where a link leads, and the paths Windows mounts a volume at, the
+// volume named by its GUID (`\\?\Volume{GUID}\`). osFiles reads the real
+// one.
 type fileSystem interface {
 	kind(path string) (entryKind, error)
 	readlink(path string) (string, error)
+	volumePaths(volume string) ([]string, error)
 }
 
 // walker walks paths over files, following at most maxLinks links in all.
@@ -143,6 +158,9 @@ func (w *walker) step(dir, part string) (reached, error) {
 		return reached{path: filepath.Dir(dir), kind: entryDir}, nil
 	}
 	next := filepath.Join(dir, part)
+	if perProcess(next) {
+		return reached{}, fmt.Errorf("resolve %s: it leads somewhere else for each process that opens it, so where it leads for the one that does is unknown", next)
+	}
 	kind, err := w.files.kind(next)
 	if err != nil {
 		return reached{}, fmt.Errorf("inspect %s: %w", next, err)
@@ -157,13 +175,13 @@ func (w *walker) step(dir, part string) (reached, error) {
 func (w *walker) follow(dir, link string) (reached, error) {
 	w.links++
 	if w.links > maxLinks {
-		return reached{}, fmt.Errorf("resolve %s: more than %d links one after another, which may loop", link, maxLinks)
+		return reached{}, fmt.Errorf("resolve %s: %w", link, errTooManyLinks)
 	}
 	target, err := w.files.readlink(link)
 	if err != nil {
 		return reached{}, fmt.Errorf("resolve %s: it is a link (a symlink, or on Windows a directory junction or another reparse point) whose target cannot be read, so where a path through it leads is unknown: %w", link, err)
 	}
-	from, parts, err := linkStart(dir, target)
+	from, parts, err := w.linkStart(dir, link, target)
 	if err != nil {
 		return reached{}, fmt.Errorf("resolve %s: %w", link, err)
 	}
@@ -174,13 +192,70 @@ func (w *walker) follow(dir, link string) (reached, error) {
 	return end, err
 }
 
-// linkStart is where a link's target is walked from, and its names: an
+// linkStart is where the target of link, an entry of dir, is walked from,
+// and its names. A volume named by its GUID (`\\?\Volume{GUID}\rest`),
+// which os.Readlink gives for a volume mount point and for a junction to a
+// volume, is walked from a path Windows mounts the volume at (see
+// volumeStart); any other target as plainTarget says.
+func (w *walker) linkStart(dir, link, target string) (string, []string, error) {
+	if volume, rest, ok := volumeTarget(target); ok {
+		return w.volumeStart(link, volume, rest)
+	}
+	return plainTarget(dir, target)
+}
+
+// volumeTarget splits a target that names a volume by its GUID into the
+// volume, `\\?\Volume{GUID}\` as Windows lists its mount paths by, and
+// the rest of the target below it.
+func volumeTarget(target string) (volume, rest string, ok bool) {
+	const prefix = `\\?\Volume{`
+	if len(target) < len(prefix) || !strings.EqualFold(target[:len(prefix)], prefix) {
+		return "", "", false
+	}
+	end := strings.IndexByte(target, '}') + 1
+	if end == 0 {
+		return "", "", false
+	}
+	rest, separated := strings.CutPrefix(target[end:], `\`)
+	if !separated && rest != "" {
+		return "", "", false
+	}
+	return target[:end] + `\`, rest, true
+}
+
+// volumeStart is where a path on volume, at rest below its root, is walked
+// from: below link itself when Windows mounts the volume there (a second
+// disk, a VHD or a Dev Drive mounted at C:\dev), so the path keeps the
+// spelling it is named by, and otherwise below the first path Windows
+// lists for the volume. A volume whose paths cannot be listed, or that
+// Windows mounts nowhere, is an error: no other spelling of its files is
+// known.
+func (w *walker) volumeStart(link, volume, rest string) (string, []string, error) {
+	mounts, err := w.files.volumePaths(volume)
+	if err != nil {
+		return "", nil, fmt.Errorf("its target %s is a volume whose mount paths cannot be read, so no other spelling of its files is known: %w", volume, err)
+	}
+	if len(mounts) == 0 {
+		return "", nil, fmt.Errorf("its target %s is a volume with no drive letter or mounted folder, so no other spelling of its files is known", volume)
+	}
+	parts := splitPath(rest)
+	if slices.ContainsFunc(mounts, func(mount string) bool { return strings.EqualFold(filepath.Clean(mount), link) }) {
+		return link, parts, nil
+	}
+	if !filepath.IsAbs(mounts[0]) {
+		return "", nil, fmt.Errorf("its target %s is a volume Windows mounts at %s, which is not an absolute path", volume, mounts[0])
+	}
+	from, mountParts, err := plainTarget("", mounts[0])
+	return from, append(mountParts, parts...), err
+}
+
+// plainTarget is where a link's target is walked from, and its names: an
 // absolute target from its volume's root, a relative one from the link's
-// directory. A target that is neither is an error, as on Windows a rooted
-// one without a volume (`\x`) or one with a volume and no root (`C:x`). So
-// is a device path (`\\?\`, `\??\`), such as a junction to a volume by its
-// GUID: no other spelling of the same file matches it.
-func linkStart(dir, target string) (string, []string, error) {
+// directory, dir. A target that is neither is an error, as on Windows a
+// rooted one without a volume (`\x`) or one with a volume and no root
+// (`C:x`). So is any other device path (`\\?\`, `\??\`): no other spelling
+// of the same file matches it.
+func plainTarget(dir, target string) (string, []string, error) {
 	switch {
 	case target == "":
 		return "", nil, errors.New("its target is empty")
@@ -224,6 +299,35 @@ func (f *osFiles) kind(p string) (entryKind, error) {
 
 func (f *osFiles) readlink(p string) (string, error) { return os.Readlink(p) }
 
+func (f *osFiles) volumePaths(volume string) ([]string, error) { return volumePathNames(volume) }
+
+// multiString is the strings of a Windows multi-string, UTF-16 strings
+// each ended by a NUL, the list ended by an empty one; a list cut off at
+// the end of buf ends there.
+func multiString(buf []uint16) []string {
+	var list []string
+	for len(buf) > 0 && buf[0] != 0 {
+		end := slices.Index(buf, 0)
+		if end < 0 {
+			end = len(buf)
+		}
+		list = append(list, string(utf16.Decode(buf[:end])))
+		buf = buf[min(end+1, len(buf)):]
+	}
+	return list
+}
+
+// perProcess reports whether p, a path the walk reaches, is one of
+// perProcessPaths or /proc/<pid>. These are Unix paths: on Windows a
+// walked path has a volume, so none matches.
+func perProcess(p string) bool {
+	if slices.Contains(perProcessPaths, p) {
+		return true
+	}
+	pid, ok := strings.CutPrefix(p, "/proc/")
+	return ok && pid != "" && strings.Trim(pid, "0123456789") == ""
+}
+
 // lstatKind is the kind of the entry at p, not followed.
 func lstatKind(p string) (entryKind, error) {
 	info, err := os.Lstat(p)
@@ -251,16 +355,20 @@ func NewResolver() *Resolver { return &Resolver{files: newOSFiles()} }
 // rest) still resolves. abs is cleaned as text, so a caller that cannot
 // trust its ".." parts refuses them first. A part that exists but cannot
 // be followed or looked at is an error, and so is a link that leads to
-// nothing and a part below a file: what the path reaches is unknown.
+// nothing, a walk through more links than the OS follows, a part below a
+// file, and a path through one that leads elsewhere for each process
+// (`/proc/self`): what the path reaches is unknown.
 func (r *Resolver) Resolve(abs string) (string, error) { return resolvePath(r.files, abs) }
 
 // Location is where a write to protected, a protected location such as
 // `.pi/extensions` (slash-separated), in the checkout at root lands. root
 // is a directory with its links followed, as Resolve gives it. A link that
 // leads to nothing is followed as it reads (see danglingFollowed), and ""
-// means nothing can be written there, because a part of it is a file. An
-// error means where it lands is unknown, as when a part may not be looked
-// at or is a link that cannot be read.
+// means nothing can be written there: a part of it is a file, or it goes
+// through more links than the OS follows, such as a link to itself, and
+// the next call resolves it anew. An error means where it lands is
+// unknown, as when a part may not be looked at, is a link that cannot be
+// read, or leads elsewhere for each process (`/proc/self`).
 func (r *Resolver) Location(root, protected string) (string, error) {
 	return location(r.files, root, protected)
 }
@@ -280,7 +388,7 @@ func resolvePath(files fileSystem, abs string) (string, error) {
 // location is Resolver.Location over files.
 func location(files fileSystem, root, protected string) (string, error) {
 	end, err := (&walker{files: files, dangling: danglingFollowed}).walk(root, splitPath(filepath.FromSlash(protected)))
-	if errors.Is(err, errBelowFile) {
+	if errors.Is(err, errBelowFile) || errors.Is(err, errTooManyLinks) {
 		return "", nil
 	}
 	if err != nil {

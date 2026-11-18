@@ -157,8 +157,10 @@ func TestProtectedLeadIn(t *testing.T) {
 }
 
 // A shell command that puts a link, a file or a directory where protected
-// paths lie (`.pi`, `.claude`), as a word of its own, changes them; one
-// that only names such a word, or a longer name, does not.
+// paths lie (`.pi`, `.claude`), or removes what is there, changes them:
+// such a word as an operand of ln, mv, cp, rm, install or `git mv`. A
+// command that only reads such a word does not, whatever redirection it
+// has; nor does a longer name.
 func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 	cfg := guardConfig(t)
 	tests := []struct{ command, want string }{
@@ -166,12 +168,43 @@ func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 		{"ln -sfn ../conf sub/.Pi/", "changes .pi"},
 		{"mv conf .claude", "changes .claude"},
 		{"git mv conf '.pi'", "changes .pi"},
+		{"git -C sub mv conf .pi", "changes .pi"},
 		{"cp -r conf --target-directory=.pi.", "changes .pi"},
+		{"cp -r x .pi", "changes .pi"},
+		{"install -d .claude", "changes .claude"},
 		{"rm -rf .claude && echo done", "changes .claude"},
+		{"rm -rf .claude 2>/dev/null", "changes .claude"},
+		{"ln -s conf .p'i'", "changes .pi"},
+		{`rm -rf "sub/.claude"`, "changes .claude"},
+		{`ln -s conf \.pi`, "changes .pi"},
+		{"/bin/mv conf .claude", "changes .claude"},
+		{"sudo rm -rf ~/.claude", "changes .claude"},
+		{"X=1 env -i ln -s conf .pi", "changes .pi"},
+		{"echo ok; ln -s conf .pi", "changes .pi"},
+		{"(cd sub && ln -s ../conf .pi)", "changes .pi"},
+		{"echo $(mv conf .claude)", "changes .claude"},
+		{"echo `mv conf .claude`", "changes .claude"},
+		{"find . | xargs -0 rm -rf .claude", "changes .claude"},
+		{"if true; then mv conf .pi; fi", "changes .pi"},
+		{"bash -c 'ln -s conf .pi'", "changes .pi"},
+		{`sh -ec "cd sub && mv conf .claude"`, "changes .claude"},
+		{"bash -c 'ls .claude 2>/dev/null'", ""},
+		{"bash script.sh .claude", ""},
 		{"ls .pi", ""},
+		{"ls -la .claude 2>/dev/null", ""},
+		{"find . -path ./.claude -prune -o -name '*.go' -print 2>/dev/null", ""},
+		{"grep -rn foo --exclude-dir=.claude . > /tmp/out.txt", ""},
+		{"du -sh ~/.claude 2>&1", ""},
+		{"cat .pi 2>&1 | head", ""},
+		{"grep -rn rm .claude", ""},
+		{"echo mv conf .claude", ""},
+		{"git log -- .claude", ""},
+		{"git -c core.x=y status .pi", ""},
+		{"ln -s a b > .pi", ""},
 		{"cp a.pi b.pi", ""},
 		{"mv notes.md .pid", ""},
 		{"rm -rf .claude/worktrees/agent", ""},
+		{"ls 'unclosed .claude", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {

@@ -169,7 +169,8 @@ type Deps struct {
 	// as ResolvePath resolves it, lands: with its links followed, one that
 	// leads nowhere as it reads, since a write lands there once its target
 	// exists. It is "" when nothing can be written there (a part of it is
-	// a file), and an error when where it lands is unknown.
+	// a file, or it goes through more links than the OS follows), and an
+	// error when where it lands is unknown.
 	ResolveLocation func(root, protected string) (string, error)
 	// ReadProposal reads a proposal file named on the command line,
 	// bounded and strictly.

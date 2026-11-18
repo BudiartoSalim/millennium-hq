@@ -9,7 +9,50 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"unsafe"
 )
+
+// maxLinks bounds the links one walk follows: as many reparse points as
+// Windows follows in one path, so a path the OS can open is never one the
+// walk gives up on.
+const maxLinks = 63
+
+// The standard library has no call that lists a volume's mount paths, so
+// the engine calls kernel32 itself; kernel32.dll is one of Windows' known
+// DLLs, which the loader takes from the system directory only.
+var procGetVolumePathNames = syscall.NewLazyDLL("kernel32.dll").NewProc("GetVolumePathNamesForVolumeNameW")
+
+const (
+	// errorMoreData is ERROR_MORE_DATA: the buffer was too small, and the
+	// call reported the size it needs.
+	errorMoreData syscall.Errno = 234
+	// maxVolumePathChars bounds the list of a volume's paths the engine
+	// reads, in UTF-16 code units.
+	maxVolumePathChars = 32 * 1024
+)
+
+// volumePathNames are the paths Windows mounts volume at (`\\?\Volume{GUID}\`),
+// its drive letter and mounted folders (`E:\`, `C:\dev\`), as
+// GetVolumePathNamesForVolumeNameW lists them.
+func volumePathNames(volume string) ([]string, error) {
+	name, err := syscall.UTF16PtrFromString(volume)
+	if err != nil {
+		return nil, fmt.Errorf("list the paths of volume %s: %w", volume, err)
+	}
+	size := uint32(syscall.MAX_PATH + 1)
+	for {
+		buf := make([]uint16, size)
+		var needed uint32
+		ok, _, callErr := procGetVolumePathNames.Call(uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(&buf[0])), uintptr(size), uintptr(unsafe.Pointer(&needed)))
+		if ok != 0 {
+			return multiString(buf), nil
+		}
+		if !errors.Is(callErr, errorMoreData) || needed <= size || needed > maxVolumePathChars {
+			return nil, fmt.Errorf("list the paths of volume %s: %w", volume, callErr)
+		}
+		size = needed
+	}
+}
 
 // entryOf is the kind of the entry info describes, from its mode and its
 // Windows file attributes (see classify). An entry without attributes

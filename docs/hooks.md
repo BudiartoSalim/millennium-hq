@@ -63,7 +63,7 @@ conventions.
 | Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off), wherever they lie |
 | Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`), in any worktree of the repository: the engineer cannot change the tests that judge its work |
 | Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one, in any worktree of the repository; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
-| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path, or put something at `.pi` or `.claude` (`ln -s conf .pi`, `mv conf .claude`), which hold protected paths |
+| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path, or that put, move or remove something at `.pi` or `.claude`, which hold protected paths: such a name as an operand of `ln`, `mv`, `cp`, `rm`, `install` or `git mv` (`ln -s conf .pi`, `mv conf .claude`, `rm -rf .claude`) |
 
 The guard checks every path a tool names twice: as written, and with its
 symlinks resolved in the longest part of the path that exists (a write may
@@ -87,9 +87,21 @@ through junctions without following them. A reparse point that redirects
 a name but whose target the engine cannot read blocks the call with the
 reason, since where a path through it leads is unknown. The engine also
 spells each resolved path by its long names, so a short 8.3 name
-(`PROGRA~1`) is no other spelling of a protected path. A link whose target
-is a device path (`\\?\Volume{...}\`), which no other spelling of the same
-file matches, blocks too.
+(`PROGRA~1`) is no other spelling of a protected path. A volume mount
+point, or a junction to a volume, reads as the volume's device path
+(`\\?\Volume{...}\`); the engine goes on from where Windows mounts that
+volume: the mount point itself for a second disk, VHD or Dev Drive
+mounted at a folder such as `C:\dev`, so a repository there works as on
+any drive. A volume Windows lists no drive letter or folder for, and any
+other device path (`\\?\C:\...`, `\??\...`), which no other spelling of
+the same file matches, blocks.
+
+On Linux and macOS, a path through `/proc/self`, `/proc/thread-self`,
+`/proc/<pid>`, `/dev/fd`, `/dev/stdin`, `/dev/stdout` or `/dev/stderr` is
+unknown: each leads somewhere else for each process that opens it, so the
+engine, in its own process, cannot tell where it leads for pi or a tool.
+A tool's path through one blocks the call, and a protected location that
+leads through one blocks every write (see below).
 
 A protected path is protected wherever it lies: `.millennium` as any
 segment of a path, and `.claude/settings.json`, `.claude/settings.local.json`,
@@ -122,14 +134,20 @@ A protected location that leads nowhere blocks nothing. A dangling
 symlink, such as a committed relative link that dangles in a worktree, is
 followed as it reads, and what it would lead to is protected: with `.pi`
 a dangling link to `conf`, creating `conf/extensions/x.ts` is denied. A
-location below a file (a file named `.claude`) reaches nothing, so
-nothing there needs protecting. Only a location whose lead is unknown,
-such as one through a directory the engine may not search or a link it
-cannot read, blocks, with the reason: every write when it is the acting
-checkout's, and otherwise the writes into the checkout it belongs to
-(which, for the main checkout, holds the worktrees under
-`.claude/worktrees/`). For other writes another checkout's such location
-is compared as named.
+location below a file (a file named `.claude`), and one through more
+links than the OS follows in one path (40 on Linux, 63 reparse points on
+Windows), such as a link to itself, reach nothing: the OS creates nothing
+there, so nothing needs protecting. Each call resolves the locations
+anew, so once such a location leads somewhere, that place is protected.
+
+A location whose lead is unknown blocks every write, in every checkout,
+until it can be resolved: one through a directory the engine may not
+search (`chmod 000` on a worktree), a link it cannot read, or a
+per-process path. Such a location might lead anywhere, the main
+checkout's `conf/` included, so no write can be checked. The message
+names the location and the way out: restore access to it, fix or remove
+the link it leads through, or remove a linked worktree you no longer need
+(`git worktree remove --force <path>`). Reads are not affected.
 A worktree whose root cannot be resolved is not looked at (see below).
 
 The guard acts only for a session whose own checkout is opted in (it has a
@@ -159,7 +177,9 @@ until you remove that worktree; the list may name no more worktrees than
 git keeps records for (entries under `.git/worktrees` with a `gitdir`
 file git can read at least one byte of, the ones git lists). A worktree
 whose root cannot be resolved, its parent replaced by a dangling symlink
-or a file, is compared as git names it and blocks nothing.
+or a file, is compared as git names it and blocks nothing; a protected
+location below a root that resolves blocks while its lead is unknown
+(see above).
 
 The role rules reach only the worktrees `git worktree list` names. A
 worktree moved with plain `mv` rather than `git worktree move` is listed
@@ -192,10 +212,18 @@ it, because the protected paths are unknown; reads stay allowed.
   config apply` writes sandbox rules that deny writes to the protected paths
   for every command, and Claude Code's sandbox already protects `.git/config`,
   `.git/hooks` and its own settings. The match is also coarse the other
-  way: a command that names a protected path, or has a word ending in
-  `.pi` or `.claude` (`sub/.pi`, `~/.claude/`), anywhere, and a word that
+  way: a command that names a protected path anywhere, and a word that
   can write (`>`, `cp`, `mv`, `ln`, `rm`, ...) anywhere, is denied, even
-  when the write goes elsewhere. Split such a command in two.
+  when the write goes elsewhere. Split such a command in two. A word
+  ending in `.pi` or `.claude` (`sub/.pi`, `~/.claude/`) is denied only as
+  an operand of `ln`, `mv`, `cp`, `rm`, `install` or `git mv`, read past
+  variable assignments and prefixes such as `sudo` and `env`, and in a
+  script run with `sh -c` or `bash -c`, so `ls -la .claude 2>/dev/null`
+  and `du -sh ~/.claude 2>&1` pass. The command is split as the shell
+  splits it (control operators, subshells, quotes, redirections), but not
+  every form is looked into: a command substitution inside double quotes,
+  a prefix with an option value (`sudo -u x rm ...`), or a script file is
+  not.
 - **A Stop hook that cannot run does not block.** Claude Code cannot send an
   agent back to repair a hook that will not start. If the engine is missing,
   agents can stop with unchecked work, which is why the tech lead's final
