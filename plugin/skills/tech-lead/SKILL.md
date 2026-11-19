@@ -37,9 +37,16 @@ In this skill, `millennium-code-qc` means the engine command
    suggest `/millennium:init-project` (new project) or `/millennium:adopt-project` (existing
    code); do not lead without gates. A design discussion alone needs no
    opt-in: `/millennium:solution-design <problem>`.
-2. `git status`: start from a clean tree. If the user has uncommitted work,
+2. Check the harness: the project's Claude Code settings set
+   `worktree.baseRef: "head"` (without it, engineers start from the default
+   branch), and `git check-ignore` reports the agent worktrees
+   (`.claude/worktrees/`, `.pi/worktrees/`) as ignored. When the config sets
+   no `paths.acceptanceTests`, propose one so qa-tester's tests have a home.
+   You cannot change protected settings or the config: tell the user what to
+   fix, or draft a proposal, and wait.
+3. `git status`: start from a clean tree. If the user has uncommitted work,
    ask whether to commit, stash or include it.
-3. Record the base. On the default branch, create a feature branch and
+4. Record the base. On the default branch, create a feature branch and
    take `git rev-parse HEAD`. On an existing branch, take where it forked
    from the default branch, `git merge-base HEAD origin/<default-branch>`
    (the local one without a remote), so its
@@ -82,6 +89,9 @@ if it has one, otherwise `docs/specs/<slug>.md`, committed with the change:
 - AC-1: <observable behaviour, testable from outside>
 ## Non-goals
 ## Constraints        (compatibility, performance budgets, sizes it must handle)
+## Runtime            (what the code really runs under: operating systems, shells,
+                       the actual tool implementations, language and toolchain
+                       versions, harnesses)
 ## Risk               (auth, input, secrets, crypto, permissions, money,
                        concurrency, data loss, hot paths: which apply)
 ## Approach           (the design note from step 1: options, decision, sources)
@@ -100,6 +110,11 @@ When the change touches auth, input from outside, secrets, crypto,
 permissions or another trust boundary, run `millennium:security-engineer` in
 threat-model mode with the spec path. Add its security requirements to the
 spec as SR-n, each with how it will be tested, and confirm them with the user.
+
+Before dispatching any package, fixes included, that introduces a security
+mechanism the threat model did not cover (a new guard, validator, sanitiser
+or permission check), run a short threat-model pass on that mechanism; its
+SRs join the spec and the package's slice.
 
 ## 4. Work packages
 
@@ -120,8 +135,12 @@ For each package, write down:
 ```
 Package P<n>: <name>
 Spec slice: <which ACs and SRs, quoted, plus the context they need>
+Runtime: <the spec's Runtime section, the parts this package runs under>
 Paths it may change: <glob patterns, e.g. services/api/internal/domain/**>
 Contract it builds against: <file and commit, if any>
+Prior findings: <fix packages: earlier findings on the code it touches, and their tests>
+Docs to update: <docs describing the behaviour it changes, design docs too; in its paths>
+Hot paths to measure: <path and size from Constraints, before and after; or none>
 Done when: <its ACs met, with unit tests; fast gate clean>
 ```
 
@@ -170,11 +189,17 @@ integrated branch is what gets checked from `<base>`.
    --untracked-files=all` lists as untracked (`??`), which `git diff` does
    not show. Does it do what the
    package asked, and only that?
-5. On a failure, send it back to the same engineer with the findings
+5. Check the report's claims: every AC and SR it lists names a test, and
+   that test is in the diff. Read a sample of them: each asserts the claim,
+   with expected values not taken from the code under test.
+6. On a failure, send it back to the same engineer with the findings
    (SendMessage to its agent id keeps its context). Otherwise commit in the
-   worktree, staging by explicit path every file you read, deletions and
-   renames included (never `git add -A`, which would also stage the
-   sandbox's placeholder files), with a message
+   worktree, staging by explicit path what `git -C <worktree> status
+   --porcelain --untracked-files=all` lists, deletions and renames included,
+   except character devices (`test -c`: the sandbox's placeholders over
+   protected paths) and untracked entries whose path does not exist. Never
+   filter by a name pattern (one once dropped `.github/`), and never
+   `git add -A`, which would also stage the placeholders. Use a message
    naming the package, and merge the branch into the
    feature branch (`git merge --no-ff <branch>`). Once merged, remove the
    worktree (`git worktree remove <path>`) and delete its branch.
@@ -218,11 +243,19 @@ every finding in the spec's Decision log:
 | id | from | severity | finding | disposition | reason |
 | CR-1 | correctness-reviewer | high | empty cart total is NaN | fix | AC-3 |
 | MR-2 | maintainability | low | helper name | reject | matches the package's existing naming |
+| SEC-3 | security-engineer | medium | symlinked config dir | defer | pre-existing; <issue link> |
 ```
 
+- **Pre-existing findings** (`origin: pre-existing`) are deferred as
+  follow-ups by default; `worsened` ones are triaged like `introduced`.
+  Fix a pre-existing one in this change only when the change makes it
+  reachable or worse (check the reviewer's call against `<base>`), or the
+  user asks. Critical and high ones still go to the user, with that default
+  as your recommendation.
 - **fix**: give it to the owning package's engineer in a new Agent call
   from the committed, integrated state, recording its `<start>` (step 5),
-  since the old worktree is gone once merged. Every
+  since the old worktree is gone once merged. List the earlier findings on
+  that code and their tests in the package (step 4). Every
   bug fix comes with a regression test that fails without the fix; a
   correctness-reviewer proof test can be that test.
 - **defer**: only with a reason and a follow-up (an issue link). Critical or
@@ -233,8 +266,15 @@ every finding in the spec's Decision log:
 
 Re-run step 6 for fixes. A fix that rewrites a
 significant part of the change (a new design, or more than about a third of
-the diff) gets a fresh review of that part by a new reviewer instance. After **3** fix rounds with findings
-still open, stop and bring the state to the user.
+the diff) gets a fresh review of that part by a new reviewer instance.
+
+Count rounds per component too. When one component (a module, a guard, a
+parser) draws findings in two consecutive review rounds, stop patching it:
+write a short design note with options (fail closed by construction, narrow
+the scope, accept and document a limit), what each costs and your
+recommendation, and ask the user before the next round. This comes on top
+of the cap: after **3** fix rounds with findings still open, stop and bring
+the state to the user.
 
 ## 10. Final gate
 
