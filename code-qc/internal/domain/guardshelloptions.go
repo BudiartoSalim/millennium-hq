@@ -16,17 +16,18 @@ const (
 	// reads them.
 	bundledShorts optionSyntax = "bundled"
 	// separateShorts: each short option is a word of its own, its value
-	// attached (`-n5`, `-U3`) or the next word (`-n 5`), and `-<n>` is a
-	// number (`git log -3`), as git's revision and diff options are read.
+	// attached (`-n5`, `-U3`), and `-<n>` is a number (`git log -3`), as
+	// git's revision and diff options are read.
 	separateShorts optionSyntax = "separate"
 )
 
 // readOnlyOptions are the options of a program, or of one of its
 // commands, that keep it read-only; any other option makes it not
 // read-only. An option that takes a value is listed as valued only when
-// the program takes the next word as its value too: reading that word as
-// a value where the program reads it as an option would let an option
-// through unchecked, while the reverse only refuses more.
+// the program reads the next word as its value in one pass with its
+// other options: reading that word as a value where the program reads it
+// as an option would let an option through unchecked. Where it may not
+// (git, see attachedValue), the value must be attached.
 type readOnlyOptions struct {
 	syntax optionSyntax
 	// flags take no value.
@@ -34,23 +35,34 @@ type readOnlyOptions struct {
 	// attached take a value only attached to them (`--color=always`,
 	// `-uno`), or none; a short one only in separateShorts.
 	attached []string
+	// attachedValue take a value, and are read-only only with it attached
+	// (`--since=x`, `-n5`); a short one only in separateShorts. Written
+	// alone, git takes the next word as the value, but git log reads its
+	// own options (`--decorate`) in a pass before its revision options, so
+	// which word that is cannot be told from the text: `git log --before
+	// --decorate --after --output=x` writes x (round 10, R10-CR-1).
+	attachedValue []string
 	// valued take a value, attached (`--glob=x`, `-A3`) or as the next
-	// word (`--glob x`, `-A 3`).
+	// word (`--glob x`, `-A 3`); a short one only in bundledShorts. A next
+	// word that starts with a dash is not read-only, though the program
+	// reads it as the value: in doubt, it is not.
 	valued []string
 }
 
 // with is o with the options of more added, in o's syntax.
 func (o readOnlyOptions) with(more readOnlyOptions) readOnlyOptions {
 	return readOnlyOptions{
-		syntax:   o.syntax,
-		flags:    slices.Concat(o.flags, more.flags),
-		attached: slices.Concat(o.attached, more.attached),
-		valued:   slices.Concat(o.valued, more.valued),
+		syntax:        o.syntax,
+		flags:         slices.Concat(o.flags, more.flags),
+		attached:      slices.Concat(o.attached, more.attached),
+		attachedValue: slices.Concat(o.attachedValue, more.attachedValue),
+		valued:        slices.Concat(o.valued, more.valued),
 	}
 }
 
 // allow reports whether every option among args, up to a `--` after
-// which every word is an operand, is one of o. A word that starts with a
+// which every word is an operand, is one of o, and no value an option
+// takes as the next word starts with a dash. A word that starts with a
 // dash and is not the value of the option before it is an option; `-`
 // alone is an operand, standard input.
 func (o readOnlyOptions) allow(args []string) bool {
@@ -59,7 +71,7 @@ func (o readOnlyOptions) allow(args []string) bool {
 			continue
 		}
 		values, ok := o.option(args[i])
-		if !ok {
+		if !ok || (values > 0 && i+1 < len(args) && strings.HasPrefix(args[i+1], "-")) {
 			return false
 		}
 		i += values
@@ -76,7 +88,7 @@ func (o readOnlyOptions) option(arg string) (int, bool) {
 	case o.syntax == bundledShorts:
 		return o.shortBundle(arg[1:])
 	}
-	return o.shortOption(arg)
+	return 0, o.shortOption(arg)
 }
 
 // longOption is option for a long option, arg, with its value attached
@@ -87,23 +99,25 @@ func (o readOnlyOptions) longOption(arg string) (int, bool) {
 	switch {
 	case slices.Contains(o.valued, name):
 		return valueWords(arg[len(name):]), true
+	case slices.Contains(o.attachedValue, name):
+		return 0, hasValue
 	case slices.Contains(o.attached, name):
 		return 0, true
 	}
 	return 0, !hasValue && slices.Contains(o.flags, name)
 }
 
-// shortOption is option for a short option, arg, as separateShorts reads
-// it.
-func (o readOnlyOptions) shortOption(arg string) (int, bool) {
+// shortOption reports whether a short option, arg, as separateShorts
+// reads it, is one of o; it takes no word after it as its value.
+func (o readOnlyOptions) shortOption(arg string) bool {
 	name := arg[:2]
 	switch {
-	case slices.Contains(o.valued, name):
-		return valueWords(arg[2:]), true
+	case slices.Contains(o.attachedValue, name):
+		return len(arg) > len(name)
 	case slices.Contains(o.attached, name), slices.Contains(o.flags, arg):
-		return 0, true
+		return true
 	}
-	return 0, isDigits(arg[1:])
+	return isDigits(arg[1:])
 }
 
 // shortBundle is option for a bundle of short options, letters, as

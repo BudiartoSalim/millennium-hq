@@ -243,7 +243,10 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"pushd", false},
 		{"pushd +1", false},
 		{"popd x", false},
-		{"ls @C 2>&1 >&2 <&0 >&-", true},
+		{"ls @C 2>&1 >&2 1>&2 >&- &>/dev/null &>> /tmp/x", true},
+		{"ls @C <&0", false},
+		{"ls @C &> @C/settings.json", false},
+		{"ls @C &>> @P/settings.json", false},
 		{"ls @C > /dev/null 2> /dev/stderr >> /tmp/out.txt", true},
 		{"ls > @C", false},
 		{"ls > sub/@P", false},
@@ -397,13 +400,20 @@ func TestShellGuardConverges(t *testing.T) {
 
 // writerCorpus is every writer with every target spelling, each target
 // written plainly, through a variable and through a command
-// substitution, inside every wrapper; and every command that writes in a
-// directory it enters, with every target spelling as the directory.
+// substitution, inside every wrapper; every writer that zsh's globs hide
+// from the option checks, with every target spelling, inside every
+// wrapper; and every command that writes in a directory it enters, with
+// every target spelling as the directory.
 func writerCorpus() []string {
 	var corpus []string
 	for _, writer := range corpusWriters() {
 		for _, target := range corpusTargets() {
 			corpus = append(corpus, wrapped(targetForms(writer, target))...)
+		}
+	}
+	for _, writer := range corpusGlobWriters() {
+		for _, target := range corpusTargets() {
+			corpus = append(corpus, wrapped([]string{fmt.Sprintf(writer, target)})...)
 		}
 	}
 	for _, enter := range corpusChdirs() {
@@ -412,6 +422,24 @@ func writerCorpus() []string {
 		}
 	}
 	return corpus
+}
+
+// corpusGlobWriters are writers of their operand, %s, with a word zsh
+// reads as a glob and the scanner did not (R10-SEC-1, R10-SEC-2): the
+// numeric globs `<->` and `<1-9>`, which the scanner read as two
+// redirections that took the option after them as a target, and with
+// extendedglob `^x`, `a~b` and `~x` (a named directory), which may expand
+// into a planted file named as an option. Those after a redirection write
+// when the glob expands into `-delete` or `--output=…`.
+func corpusGlobWriters() []string {
+	var writers []string
+	for _, glob := range []string{"<->", "<1-9>", "/dev/fd/<->", "^x", "a~b", "~x"} {
+		writers = append(writers,
+			"find %s "+glob+" -delete", "find %s "+glob+" -rm", "rg x %s "+glob+" --pre=rm",
+			"git diff "+glob+" --output=%s", "git log "+glob+" --ext-diff -- %s > /tmp/x",
+			"find %s "+glob+" > /tmp/x", "git diff "+glob+" -- %s 2>/dev/null")
+	}
+	return writers
 }
 
 // wrapped is each of commands inside each of corpusWrappers.
