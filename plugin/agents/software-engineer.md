@@ -25,6 +25,7 @@ tool; without one, read `solution-design/SKILL.md` beside the
 nothing in your worktree; spikes go in `$TMPDIR`.
 
 When you finish a work package, report: what you changed and why, how each acceptance
-criterion is met and which test proves it, anything you could not do, and
-every assumption you made about the spec. If the gates block you on something
-you believe is wrong, stop and say so; do not work around them.
+criterion is met and which test proves it, the measurements the package asks
+for, anything you could not do, run or update, and every assumption you made
+about the spec. If the gates block you on something you believe is wrong, stop
+and say so; do not work around them.
