@@ -125,6 +125,17 @@ Notes:
   worktree for spikes, and a brief keeps their output to a design note. The
   chosen approach is part of the spec, so reviewers check the code against
   the decision.
+- **The runtime is inventoried, and security checks have defaults.** The
+  design, the spec's Runtime section and the threat model list what the code
+  really runs under (operating systems, shells, the actual tool
+  implementations, toolchain versions, harnesses), and engineers verify
+  against that list rather than assumed defaults. Code that decides what is
+  allowed uses an allowlist, denies what it cannot classify, does not trust
+  a re-implementation of another program's parser, and comes with a
+  differential test when a protection is rewritten or narrowed. The
+  `solution-design`, `threat-model` and `engineering-standards` skills carry
+  the inventory; `solution-design` and `engineering-standards` the defaults,
+  and `threat-model` asks about parser differentials at every boundary.
 - **When a gate seems wrong, the lead escalates.** The playbook forbids working
   around a gate; the lead brings the case to the user. The stop hook enforces
   the same: repeated blocked attempts escalate to the user instead of passing.
@@ -152,14 +163,21 @@ understand and design (lead, with the user; solution-design): reference
   -> lead triage: every finding gets a disposition (fix / defer + reason /
      reject + reason) in the decision log
   -> fix loop, bounded rounds: every bug fix comes with a regression test;
-     a significant rewrite gets a fresh review and a re-test
+     a significant rewrite gets a fresh review and a re-test; a component
+     with medium-or-higher findings to fix in two consecutive fix rounds
+     gets a design note with options and the user's decision; after 3
+     rounds with findings open, the user decides
   -> final gates: the CI-equivalent run (every check, against the target
      branch, config required) plus the full test suite and supply chain
   -> summary with the decision log
 ```
 
-Reviewer output is structured JSON (severity, `file:line`, evidence, failure
-scenario, suggested fix) so findings can be triaged and logged mechanically.
+Reviewer output is structured JSON (severity, origin, `file:line`, evidence,
+failure scenario, suggested fix) so findings can be triaged and logged
+mechanically. The origin (`introduced`, `worsened`, `pre-existing`) sets the
+default: pre-existing findings become follow-ups unless the change makes them
+reachable or worse, or the user asks, and they do not block a reviewer's
+`approved` verdict.
 
 ## Parallel work
 

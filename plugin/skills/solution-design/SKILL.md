@@ -26,6 +26,8 @@ change nothing in the repository: the output is a design note.
 - **Open-ended** ("something that behaves like X", a new subsystem, an
   algorithm you have not built here before): every step below.
 
+At every scale, list the runtime (section 1).
+
 ## 1. Frame the problem
 
 Restate the goal in your own words and separate:
@@ -34,6 +36,10 @@ Restate the goal in your own words and separate:
 - the **constraints**: scale (messages per second, data size, users),
   latency, durability, consistency, the deployment and operations it must
   fit, the existing stack, the dependency policy;
+- the **runtime**: the operating systems, shells, real tool implementations
+  (Claude Code runs bfs as `find` and ugrep as `grep`), toolchain versions
+  and harnesses the code will run under. It goes in the spec's Runtime
+  section; check behaviour on each entry rather than assume it;
 - the **unknowns**: what you would have to guess.
 
 Ask now the questions whose answer changes the direction ("must a delayed
@@ -97,6 +103,20 @@ For each option:
   it recovers), new dependencies, security, fit with the conventions;
 - the main risk, and how it would show up.
 
+When an option makes a security decision (what to allow, deny, validate or
+sanitise), its defaults are:
+
+- an allowlist, not a denylist;
+- whatever it cannot classify is denied;
+- no trust in a re-implementation of another program's parser; if one is
+  unavoidable, accept only a subset shown to be read the same way, tested
+  against the real program;
+- a rewrite or narrowing of a protection comes with a differential test:
+  everything the old version denied is still denied.
+
+State in the option's trade-offs which defaults it follows, and why it
+departs from any.
+
 Then a comparison table and a **recommendation** with the reason, and what
 would change your mind ("if delays can reach days, option B instead").
 
@@ -126,6 +146,7 @@ as an engineer in your final message to the lead:
 ```markdown
 ## Approach
 ### Problem          (goal, constraints, assumptions still open)
+### Runtime          (operating systems, shells, tools, toolchains, harnesses)
 ### Reference behaviour   (needed / not needed, with sources)
 ### Approaches surveyed   (patterns and prior art, with sources)
 ### Options          (each as above; spike results with numbers)
