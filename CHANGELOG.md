@@ -3,11 +3,44 @@
 User-facing changes to millennium and its engine, `millennium-code-qc`.
 Releases of the engine are tagged `code-qc/vX.Y.Z` (see docs/releasing.md).
 
-## Unreleased
+## 0.4.0
 
 From the field feedback of a `/millennium:tech-lead` run on 0.3.1. The spec
 and the full decision log (119 findings and what was done with each) are in
-`docs/specs/field-feedback-blockers.md`.
+`docs/specs/field-feedback-blockers.md`; the retrospective that led to the
+skill changes is `docs/specs/field-feedback-blockers-retrospective.md`, and
+their spec is `docs/specs/agent-output-quality.md`.
+
+### Agents and skills
+
+Aimed at better first drafts from the agents that plan and write code, so a
+run needs fewer review rounds:
+
+- **Engineers** (`engineering-standards`): checks that decide what is
+  allowed use an allowlist, deny what they cannot classify, never trust a
+  re-implementation of another program's parser, and prove a rewritten
+  protection still denies what the old one did; behaviour is verified under
+  the real runtime (shells, tool implementations, operating systems), not
+  assumed defaults; tests never take expected values from the code under
+  test; hot paths are measured before and after; a fix is checked against
+  the earlier findings on the same code; docs follow behaviour.
+- **Planning**: the threat model starts from a runtime inventory, asks about
+  parser differentials and fail-closed denial of service at every boundary,
+  and marks each threat introduced, worsened or pre-existing; solution design
+  defaults security decisions to the principles above; specs gain a
+  `## Runtime` section.
+- **Reviewers** (`review-protocol`): every finding carries an `origin`
+  (`introduced`, `worsened`, `pre-existing`); pre-existing findings do not
+  block an approved verdict.
+- **The tech lead**: pre-existing findings become follow-ups by default
+  (critical and high still go to you); when one component draws fix-worthy
+  findings of medium or higher in two consecutive fix rounds, the lead stops
+  patching and brings a design note to you; work packages carry the runtime,
+  prior findings and their tests, the docs to update and the hot paths to
+  measure; integration checks that every claimed test exists and runs, and
+  stages by what git lists rather than by name patterns; preflight checks
+  that agent worktrees are ignored and branch from `HEAD`, and proposes
+  `config apply` when they are not.
 
 ### Fixed
 
