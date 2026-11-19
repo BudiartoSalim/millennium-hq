@@ -57,7 +57,7 @@ func TestProvablyReadOnlyRefusesWhatTheScannerMayMisread(t *testing.T) {
 		"ls\t@C ; ls  @P",
 		"ls '{x}' @C > /dev/null",
 	})
-	// No `<` in any form (R10-SEC-1).
+	// No unquoted `<` in any form (R10-SEC-1, R11-CR-2).
 	assertProvablyReadOnly(t, false, []string{"ls @C < x > /tmp/y"})
 }
 
@@ -147,6 +147,63 @@ func TestProvablyReadOnlyRipgrep(t *testing.T) {
 	})
 }
 
+// grep, egrep and fgrep are read-only only with the options of
+// grepReadOnly, which GNU grep and ugrep, Claude Code's grep, both read
+// as searching and printing options, alone or bundled, their values
+// attached or the next word, a next word that does not start with a dash
+// (R11-SEC-3): ugrep's options that run a program, write a file or read
+// options from one, `-z` and `-Z`, every abbreviation and every option
+// not listed are not, nor is a glob among the arguments, which may expand
+// into an option.
+func TestProvablyReadOnlyGrep(t *testing.T) {
+	assertProvablyReadOnly(t, true, []string{
+		"grep foo @C/settings.json",
+		"grep -rn foo --exclude-dir=@C . > /tmp/out.txt",
+		"grep -rRnilLcwxvEFGPsqHhoaI foo @C",
+		"grep -nA3 -B 2 -C1 -m5 -e x -ey -f pats --regexp=x --regexp y --file=p --file p foo @C",
+		"grep --include='*.go' --include x --exclude=y --exclude-dir @P --include-dir=z --binary-files=text foo @C",
+		"grep --max-count=1 --max-count 1 --after-context=1 --before-context 1 --context=2 foo @C",
+		"grep --null --line-number --ignore-case --files-with-matches --files-without-match --count foo @C",
+		"grep --word-regexp --line-regexp --invert-match --extended-regexp --fixed-strings --perl-regexp foo @C",
+		"grep --recursive --dereference-recursive --no-messages --quiet --silent --with-filename foo @C",
+		"grep --no-filename --only-matching --text --color --colour=always --color=never foo @C",
+		"grep -- -z @C",
+		"grep foo - @C",
+		"egrep 'a|b' @C",
+		"fgrep -x foo @C 2>/dev/null",
+	})
+	assertProvablyReadOnly(t, false, []string{
+		"grep --filter='*:rm -rf @M' x README.md",
+		"grep --filter '*:rm -rf @M' x README.md",
+		"grep --save-config=@C/settings.json x > /tmp/out",
+		"grep --save-config x @C",
+		"grep --config x @C",
+		"grep --config=x foo @C",
+		"grep ---x foo @C",
+		"grep --filter-magic-label=x:y foo @C",
+		"grep --pager=x foo @C",
+		"grep --view foo @C",
+		"grep --format-open=x foo @C",
+		"grep -z foo @C",
+		"grep -Z foo @C",
+		"grep -rz foo @C",
+		"grep -nZ foo @C",
+		"grep --fil='*:rm' foo @C",
+		"grep --colors=x foo @C",
+		"grep --null=x foo @C",
+		"grep -e -x foo @C",
+		"grep --include --filter=x foo @C",
+		"grep -A -1 foo @C",
+		"grep -3 foo @C",
+		"grep -d recurse foo @C",
+		"grep -Q foo @C",
+		"grep foo @C/*.json",
+		"egrep --filter=x foo @C",
+		"fgrep -z foo @C",
+		"grep foo @C --filter=x",
+	})
+}
+
 // git is read-only only with a read-only command and, after it, only the
 // options of readOnlyGitCommands for that command (R9-CR-2), each value
 // attached (R10-CR-1): an output option, abbreviated or not, and every
@@ -214,6 +271,12 @@ func TestProvablyReadOnlyGitOptions(t *testing.T) {
 		"git rev-parse --git-path x",
 		"git ls-files --with-tree=x @P",
 		"git log @C --output=x",
+		// `-<n>` only where it is listed, after `log` (R11-CR-1).
+		"git status -3 -- @C",
+		"git diff -3 -- @C",
+		"git show -3 HEAD",
+		"git rev-parse -1 HEAD",
+		"git ls-files -3 @P",
 	})
 }
 
@@ -423,4 +486,42 @@ func TestGuardShellDeniesTheRound9Probes(t *testing.T) {
 	}
 	assertProvablyReadOnly(t, false, probes)
 	assertShellDenied(t, probes)
+}
+
+// The reviewers' probes of round 10 (R11-SEC-1 to R11-SEC-4), each of
+// which the shell runs as a write of a protected path or a program the
+// guard did not see. The scanner ended the command at the `&` of `&>`
+// and `&>>`, where bash and zsh read a redirection and go on with the
+// same command: `find .millennium &>/dev/null echo -delete` runs `find
+// .millennium echo -delete` (proven in bash 5.3). zsh reads one digit
+// before a redirection as its descriptor, so `git -C 10>/dev/null
+// checkout log` runs `git -C 10 checkout log`. ugrep, Claude Code's
+// grep, runs `--filter` and writes `--save-config`'s file; zsh's
+// MAGIC_EQUAL_SUBST expands `=rm` after a `:`.
+func TestGuardShellDeniesTheRound10Probes(t *testing.T) {
+	probes := []string{
+		"find @M &>/dev/null echo -delete",
+		"rg x @M &>/dev/null echo --pre=rm",
+		"git log &>/dev/null echo -1 '--format=tformat:x' --output=@M/config.json",
+		"git diff &>/dev/null echo --output=@C/settings.json",
+		"find @M &>>/dev/null true -delete",
+		"find @M 2&>/dev/null echo -delete",
+		"git -C 10>/dev/null checkout log -- ../@C/settings.json",
+		"git -C 10>/dev/null checkout status -- ../@M",
+		"git -C 12>/dev/null restore log -- ../@C/settings.json",
+		"grep --filter='*:rm -rf @M' x README.md",
+		"grep --save-config=@C/settings.json x > /tmp/out",
+		"ls x=a:=rm @C > /tmp/x",
+	}
+	assertProvablyReadOnly(t, false, probes)
+	assertShellDenied(t, probes)
+	// A redirection never ends a simple command, in bash, zsh or the
+	// scanner: what follows `>&2`, `2>&1` or `>/dev/null` is more of its
+	// arguments, checked as any other.
+	hidden := []string{
+		"find @M >&2 echo -delete", "find @M 2>&1 echo -delete", "rg x @M 1>&2 echo --pre=rm",
+		"find @M >/dev/null echo -delete", "git diff 2>/dev/null echo --output=@C/settings.json",
+	}
+	assertProvablyReadOnly(t, false, hidden)
+	assertShellDenied(t, hidden)
 }

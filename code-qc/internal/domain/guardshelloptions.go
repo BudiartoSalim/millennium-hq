@@ -16,9 +16,13 @@ const (
 	// reads them.
 	bundledShorts optionSyntax = "bundled"
 	// separateShorts: each short option is a word of its own, its value
-	// attached (`-n5`, `-U3`), and `-<n>` is a number (`git log -3`), as
-	// git's revision and diff options are read.
+	// attached (`-n5`, `-U3`), as git's revision and diff options are
+	// read.
 	separateShorts optionSyntax = "separate"
+	// separateShortsAndCount: as separateShorts, and `-<n>` is a number of
+	// commits (`git log -3`), as git log reads it; other git commands read
+	// it otherwise (`git diff -3` is `--theirs`), or not at all.
+	separateShortsAndCount optionSyntax = "separate-and-count"
 )
 
 // readOnlyOptions are the options of a program, or of one of its
@@ -107,8 +111,9 @@ func (o readOnlyOptions) longOption(arg string) (int, bool) {
 	return 0, !hasValue && slices.Contains(o.flags, name)
 }
 
-// shortOption reports whether a short option, arg, as separateShorts
-// reads it, is one of o; it takes no word after it as its value.
+// shortOption reports whether a short option, arg, as separateShorts or
+// separateShortsAndCount reads it, is one of o; it takes no word after it
+// as its value.
 func (o readOnlyOptions) shortOption(arg string) bool {
 	name := arg[:2]
 	switch {
@@ -117,7 +122,7 @@ func (o readOnlyOptions) shortOption(arg string) bool {
 	case slices.Contains(o.attached, name), slices.Contains(o.flags, arg):
 		return true
 	}
-	return isDigits(arg[1:])
+	return o.syntax == separateShortsAndCount && isDigits(arg[1:])
 }
 
 // shortBundle is option for a bundle of short options, letters, as

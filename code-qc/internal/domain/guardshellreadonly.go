@@ -7,15 +7,16 @@ import (
 
 // readOnlyCommands only read files and run nothing else, whatever their
 // arguments: none of GNU coreutils' and BSD's ls, cat, head, tail, wc,
-// du, stat, readlink, realpath, basename and dirname, GNU grep, or bash's
-// and zsh's echo and true has an option that writes a file, runs a
-// program or sets a shell variable. A command of them changes a file only
-// through a redirection of its output. printf is not one (`printf -v
-// HOME` sets a variable, and with it where `cd` goes), nor is file
-// (`--compile`, abbreviated as `--co`, writes a magic file).
+// du, stat, readlink, realpath, basename and dirname, or bash's and zsh's
+// echo and true has an option that writes a file, runs a program or sets
+// a shell variable. A command of them changes a file only through a
+// redirection of its output. printf is not one (`printf -v HOME` sets a
+// variable, and with it where `cd` goes), nor is file (`--compile`,
+// abbreviated as `--co`, writes a magic file), nor grep, which is ugrep
+// in Claude Code (`--filter` runs a program, `--save-config` writes a
+// file; see grepReadOnly).
 var readOnlyCommands = []string{
-	"ls", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep", "du", "stat", "readlink", "realpath",
-	"basename", "dirname", "echo", "true",
+	"ls", "cat", "head", "tail", "wc", "du", "stat", "readlink", "realpath", "basename", "dirname", "echo", "true",
 }
 
 // checkedReadCommands only read files unless an argument makes them run a
@@ -25,6 +26,9 @@ var readOnlyCommands = []string{
 // argument to check, and goes wherever the directory stack says.
 var checkedReadCommands = map[string]func(args []string) bool{
 	"find":  readOnlyFind,
+	"grep":  readOnlyGrep,
+	"egrep": readOnlyGrep,
+	"fgrep": readOnlyGrep,
 	"rg":    readOnlyRipgrep,
 	"git":   readOnlyGit,
 	"cd":    readOnlyChdir,
@@ -51,13 +55,14 @@ var readOnlyGitCommands = map[string]readOnlyOptions{
 		flags:    []string{"-s", "--short", "-b", "--branch", "--long"},
 		attached: []string{"--porcelain", "-u", "--untracked-files", "--ignored"},
 	},
-	"log": gitDiffOutput.with(readOnlyOptions{
+	"log": readOnlyOptions{
+		syntax:   separateShortsAndCount,
 		flags:    []string{"--oneline", "--graph", "--all", "--follow"},
 		attached: []string{"--decorate", "--pretty"},
 		attachedValue: []string{
 			"-n", "--max-count", "--since", "--until", "--after", "--before", "--author", "--grep", "--format",
 		},
-	}),
+	}.with(gitDiffOutput),
 	"diff": gitDiffOutput.with(readOnlyOptions{flags: []string{"--cached", "--staged"}}),
 	"show": gitDiffOutput.with(readOnlyOptions{
 		flags:         []string{"--oneline"},
@@ -95,6 +100,31 @@ var ripgrepReadOnly = readOnlyOptions{
 	valued: []string{
 		"-e", "--regexp", "-g", "--glob", "-t", "--type", "-A", "--after-context", "-B", "--before-context",
 		"-C", "--context", "-m", "--max-count", "--max-depth", "--color",
+	},
+}
+
+// grepReadOnly are the options of grep, egrep and fgrep that only choose
+// what they search and how they print, in both GNU grep and ugrep (which
+// Claude Code runs as grep); either reads short options bundled, and a
+// value attached or as the next word. Any other is not read-only: ugrep's
+// `--filter` runs programs (`--filter-magic-label` picks which),
+// `--save-config` writes a file, `--config` and `---FILE` read options
+// from one, `--pager` and `--view` start programs, and `-z` and `-Z` mean
+// one thing in GNU grep and another in ugrep (decompression, fuzzy
+// matching).
+var grepReadOnly = readOnlyOptions{
+	syntax: bundledShorts,
+	flags: []string{
+		"-r", "-R", "-n", "-i", "-l", "-L", "-c", "-w", "-x", "-v", "-E", "-F", "-G", "-P", "-s", "-q", "-H", "-h",
+		"-o", "-a", "-I", "--null", "--line-number", "--ignore-case", "--files-with-matches", "--files-without-match",
+		"--count", "--word-regexp", "--line-regexp", "--invert-match", "--extended-regexp", "--fixed-strings",
+		"--perl-regexp", "--recursive", "--dereference-recursive", "--no-messages", "--quiet", "--silent",
+		"--with-filename", "--no-filename", "--only-matching", "--text",
+	},
+	attached: []string{"--color", "--colour"},
+	valued: []string{
+		"-A", "-B", "-C", "-e", "-f", "-m", "--include", "--exclude", "--exclude-dir", "--include-dir",
+		"--binary-files", "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context",
 	},
 }
 
@@ -169,6 +199,12 @@ func isNegativeNumber(arg string) bool {
 // ripgrepReadOnly.
 func readOnlyRipgrep(args []string) bool {
 	return ripgrepReadOnly.allow(args)
+}
+
+// readOnlyGrep checks the arguments of grep, egrep and fgrep: only the
+// options of grepReadOnly (R11-SEC-3).
+func readOnlyGrep(args []string) bool {
+	return grepReadOnly.allow(args)
 }
 
 // readOnlyTest is the check of test and [: no `-v`, and no argument that
