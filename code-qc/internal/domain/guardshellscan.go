@@ -41,7 +41,7 @@ const globChars = "*?[{"
 // their targets included. It splits at the control operators (`;`, `&&`,
 // `|`, a newline) and at the parentheses and backquotes of subshells and
 // command substitutions, takes quotes and backslashes as the shell takes
-// them, decodes `$'…'` strings, and reads digits written right before a
+// them (a backslash-newline joins lines), decodes `$'…'` strings, and reads digits written right before a
 // redirection operator as the file descriptor it redirects (`2>`). Shell
 // syntax beyond that, such as a command substitution inside double quotes,
 // is read as plain words.
@@ -78,8 +78,7 @@ type shellScanner struct {
 func (s *shellScanner) scan(runes []rune, i int) int {
 	switch r := runes[i]; {
 	case r == '\\' && i+1 < len(runes):
-		s.quoted = true
-		s.add(runes[i+1])
+		s.escaped(runes[i+1])
 		return i + 1
 	case r == '\'' || r == '"':
 		return s.quotedString(runes, i)
@@ -123,14 +122,16 @@ func isDigits(s string) bool {
 
 // quotedString reads the quoted string that starts at i into the word,
 // and returns the index of its closing quote. Inside double quotes a
-// backslash escapes `"`, `\`, `$` and a backquote; inside single quotes
-// nothing is escaped.
+// backslash escapes `"`, `\`, `$`, a backquote and a newline (see
+// escaped); inside single quotes nothing is escaped.
 func (s *shellScanner) quotedString(runes []rune, i int) int {
 	quote := runes[i]
 	s.inWord, s.quoted = true, true
 	for i++; i < len(runes) && runes[i] != quote; i++ {
-		if quote == '"' && runes[i] == '\\' && i+1 < len(runes) && strings.ContainsRune("\"\\$`", runes[i+1]) {
+		if quote == '"' && runes[i] == '\\' && i+1 < len(runes) && strings.ContainsRune("\"\\$`\n", runes[i+1]) {
 			i++
+			s.escaped(runes[i])
+			continue
 		}
 		s.word.WriteRune(runes[i])
 	}
@@ -221,6 +222,15 @@ func numericEscape(digits []rune, base, limit int) (rune, int) {
 		value = value*base + d
 	}
 	return rune(value), n
+}
+
+// escaped adds r, which a backslash escapes, to the word being read; a
+// backslash-newline joins lines and adds nothing (`.p\⏎i` is `.pi`).
+func (s *shellScanner) escaped(r rune) {
+	if r != '\n' {
+		s.quoted = true
+		s.add(r)
+	}
 }
 
 // add adds r to the word being read.

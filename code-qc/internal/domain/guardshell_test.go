@@ -94,6 +94,28 @@ func TestScriptsIn(t *testing.T) {
 	}
 }
 
+// Each line of a script of more than one line is matched as a script as
+// well, so a quote in a comment or a here-document's body, which the
+// scanner reads as one, hides no line the shell runs; a backslash-newline
+// joins a name the shell joins.
+func TestMatchScriptReadsEachLine(t *testing.T) {
+	tests := []struct{ script, want string }{
+		{"ls #'\nln -s conf $'\\x2epi'\n#'", ".pi"},
+		{"cat <<EOF\nit's\nEOF\nmv conf $'\\056claude'", ".claude"},
+		{"ln -s conf .p\\\ni", ".pi"},
+		{"ls\nls", ""},
+	}
+	for _, tt := range tests {
+		if got := matchScript(tt.script, 0); got.protected != tt.want {
+			t.Errorf("matchScript(%q).protected = %q, want %q", tt.script, got.protected, tt.want)
+		}
+	}
+	if got := linesOf("ls"); got != nil {
+		t.Errorf("linesOf(%q) = %q, want none", "ls", got)
+	}
+	assertShellDenied(t, []string{"echo x > .p\\\ni/settings.json", "echo x > \"@C/settings.js\\\non\""})
+}
+
 // Scripts inside scripts are matched to maxScriptDepth; a script one
 // deeper is not, and the floor, which reads the whole command's text,
 // still denies what lies in it.

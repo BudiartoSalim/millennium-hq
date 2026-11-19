@@ -176,7 +176,8 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"ls -la @C 2>/dev/null", true},
 		{"cat @P/settings.json | head -5 | wc -l; echo done && true || test -d @C; [ -d @P ]", true},
 		{"tail -n 3 x; egrep a x; fgrep b x; du -sh ~/@C 2>&1; stat @C; readlink @P; realpath @P", true},
-		{"basename @C; dirname @P/x; printf '%s' x; grep -rn rm @C; (ls @C)", true},
+		{"basename @C; dirname @P/x; grep -rn rm @C; (ls @C)", true},
+		{"printf '%s' x; ls @C", false},
 		{"ls $HOME/@C", false},
 		{"ls `pwd`/@C", false},
 		{"ls '$x'", false},
@@ -188,7 +189,7 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"if ls @C; then ls; fi", false},
 		{"ls @C | xargs rm", false},
 		{"cat <<EOF\nrm -rf @C\nEOF", false},
-		{"grep x <<< 'ln -s conf @P'", true},
+		{"grep x <<< 'ln -s conf @P'", false},
 		{"find . -path ./@C -prune -o -name '*.go' -print 2>/dev/null", true},
 		{"find @C -exec rm {} +", false},
 		{"find @C -execdir rm {} +", false},
@@ -204,11 +205,10 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"rg --hostname-bin ./x foo @C", false},
 		{"ls\r@C", false},
 		{"ls @C", false},
-		{"ls\t@C\nls  @P", true},
-		{"file @C/settings.json", true},
-		{"file -C -m x", false},
-		{"file -bC x", false},
-		{"file --compile x", false},
+		{"ls\t@C;ls  @P", true},
+		{"ls\t@C\nls  @P", false},
+		{"file @C/settings.json", false},
+		{"file --co -m x", false},
 		{"git status -- @C", true},
 		{"git -C @C --no-pager -P --no-optional-locks log -- x > /tmp/x", true},
 		{"git diff main -- @C > /tmp/x", true},
@@ -225,8 +225,9 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"git log -o x", false},
 		{"git log -- '*.go'", true},
 		{"git log -- *.go", false},
-		{"cd; ls @C", true},
-		{"cd sub && ls @C > /tmp/x", true},
+		{"cd; ls @C", false},
+		{"cd sub && ls @C > /tmp/x", false},
+		{"cd ./sub && ls @C > /tmp/x", true},
 		{"cd ..", true},
 		{"cd @C && ls", false},
 		{"cd sub/@P/x", false},
@@ -234,7 +235,8 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"cd -", false},
 		{"cd a b", false},
 		{"cd x*", false},
-		{"pushd sub; ls @C; popd", true},
+		{"pushd ./sub; ls @C", true},
+		{"pushd ./sub; ls @C; popd", false},
 		{"pushd", false},
 		{"pushd +1", false},
 		{"popd x", false},
@@ -426,6 +428,8 @@ func corpusWriters() []string {
 		"echo x > %s", "echo x >> %s", "tee %s < x", "sed -i s/a/b/ %s", "truncate -s0 %s", "dd if=x of=%s",
 		"chmod 000 %s", "cp x %s", "mv x %s", "ln -s conf %s", "rm -rf %s", "install -d %s",
 		"git rm -r %s", "git mv x %s", "git checkout main -- %s", "git restore --source=HEAD~3 %s",
+		"find %s -name x -rm", "find %s -delete", "find . -fprint %s", "find . -fprint0 %s", "find . -fprintf %s x",
+		"find . -fls %s", "git log --output=%s", "git diff --outp=%s", "git log --out %s",
 	}
 }
 
@@ -440,11 +444,13 @@ func corpusTargets() []string {
 	}
 }
 
-// targetForms is writer with target written plainly, through a variable,
-// and through a command substitution.
+// targetForms is writer with target written plainly, after a
+// backslash-newline, through a variable, and through a command
+// substitution.
 func targetForms(writer, target string) []string {
 	return []string{
 		fmt.Sprintf(writer, target),
+		fmt.Sprintf(writer, "\\\n"+target),
 		"D=" + target + "; " + fmt.Sprintf(writer, "$D"),
 		fmt.Sprintf(writer, `"$(printf %s `+target+`)"`),
 	}
@@ -452,8 +458,9 @@ func targetForms(writer, target string) []string {
 
 // corpusWrappers run a command: as it is, in a shell's -c script, through
 // eval, a pipe, a here-string or env -S, after a prefix, from find
-// -exec, in a loop's body, a subshell or a command substitution, or in a
-// directory a prefix enters.
+// -exec, in a loop's body, a subshell or a command substitution, in a
+// directory a prefix enters, or on a line after a read-only command whose
+// comment or here-document holds a quote.
 func corpusWrappers() []func(string) string {
 	quoted := func(format string) func(string) string {
 		return func(c string) string { return fmt.Sprintf(format, shellQuote(c)) }
@@ -466,14 +473,21 @@ func corpusWrappers() []func(string) string {
 		quoted("echo %s | sh"), quoted("sh <<< %s"), quoted("env -S %s"), prefixed("timeout 5 %s"),
 		prefixed("nice -n 5 %s"), prefixed("sudo -u root %s"), prefixed(`find . -exec %s \;`),
 		prefixed("for x in 1; do %s; done"), prefixed("(%s)"), prefixed(`echo "$(%s)"`), prefixed("env -C sub %s"),
-		prefixed("sudo -D sub %s"),
+		prefixed("sudo -D sub %s"), prefixed("ls #'\n%s\n#'"), prefixed("ls # it's\n%s"),
+		prefixed("cat <<EOF\necho it's\nEOF\n%s"), prefixed("cat <<'EOF'\necho '\nEOF\n%s"),
 	}
 }
 
-// corpusChdirs write in the directory, %s, they enter.
+// corpusChdirs write in the directory, %s, they enter, alone or after
+// commands that are read-only on their own (R8-CR-2), or after setting
+// where `cd` goes (R8-SEC-5).
 func corpusChdirs() []string {
 	return []string{
 		"cd %s && tee settings.json < x", "env -C %s tee settings.json < x", "env --chdir=%s tee settings.json < x",
-		"sudo -D %s tee settings.json < x", "pushd %s; echo x > settings.json",
+		"sudo -D %s tee settings.json < x", "pushd %s; echo x > settings.json", "cd %s && echo x > settings.json",
+		"cd ./x && cat y; cd %s && echo x > settings.json", "ls; cd %s && cat y > settings.json",
+		"cd %s; echo x > settings.json", "pushd ./x; popd; cd %s && echo x > settings.json",
+		"printf -v HOME %%s %s && cd && printf {} > settings.json", "printf -v HOME %%s %s && cd ~ && echo x > settings.json",
+		"printf -v CDPATH %%s %s && cd x && echo x > settings.json",
 	}
 }

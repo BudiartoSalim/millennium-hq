@@ -9,10 +9,12 @@ import (
 
 var (
 	// shellWrite matches shell commands that can change a file: round 4's
-	// pattern, and the in-place editors and the file and archive commands
-	// it did not name.
+	// pattern, the in-place editors and the file and archive commands it
+	// did not name, find's actions that delete or write (bfs's `-rm`
+	// matches `rm`), and git's output option, abbreviated or not.
 	shellWrite = regexp.MustCompile(`>|\btee\b|\bsed\s+(-\S*\s+)*-i|\b(sed|perl|g?awk)\b[^\n;|&]*\s(-i|--in-place)|` +
-		`\b(mv|cp|rm|ln|chmod|truncate|install|dd|unlink|link|rsync|tar|patch|sponge)\b|\bgit\s+(checkout|restore|rm|mv|apply)\b`)
+		`\b(mv|cp|rm|ln|chmod|truncate|install|dd|unlink|link|rsync|tar|patch|sponge)\b|\bgit\s+(checkout|restore|rm|mv|apply)\b|` +
+		`(^|\s)-(delete|fprint0?|fprintf|fls)\b|(^|\s)--ou`)
 	// applyCommand matches the human-only command that changes the rules.
 	applyCommand = regexp.MustCompile(`\bmillennium-code-qc(\.exe)?["']?\s+config\s+apply\b`)
 )
@@ -93,15 +95,16 @@ func (m *shellMatch) add(inner shellMatch) {
 // matchScript matches a shell script at depth, the number of scripts it
 // lies inside: each simple command that changes a protected path (see
 // matchSimpleCommand) changes it. The scripts its words may hold (see
-// scriptsIn) are matched too, to maxScriptDepth. What it names otherwise
-// is left to the floor, which reads every word found here.
+// scriptsIn), and its lines (see linesOf), are matched too, to
+// maxScriptDepth. What it names otherwise is left to the floor, which
+// reads every word found here.
 func matchScript(script string, depth int) shellMatch {
 	scan := scanShell(script)
 	m := shellMatch{words: scan.words, writes: writeLike(script, scan.words)}
 	for i := 0; m.protected == "" && i < len(scan.commands); i++ {
 		m.add(matchSimpleCommand(scan.commands[i].words))
 	}
-	inner := scriptsIn(scan)
+	inner := append(scriptsIn(scan), linesOf(script)...)
 	for i := 0; m.protected == "" && depth < maxScriptDepth && i < len(inner); i++ {
 		m.add(matchScript(inner[i], depth+1))
 	}
@@ -162,6 +165,17 @@ func gitSubcommand(args []string) (command string, configured bool) {
 		}
 	}
 	return "", configured
+}
+
+// linesOf are the lines of a script of more than one line, each matched
+// as a script as well: the scanner reads no comment and no here-document,
+// so a quote in one would hide the lines after it, which the shell runs
+// (`ls #'⏎ln -s conf $'\x2epi'`).
+func linesOf(script string) []string {
+	if !strings.Contains(script, "\n") {
+		return nil
+	}
+	return strings.Split(script, "\n")
 }
 
 // scriptsIn are the scripts the words of a scanned script may hold, each
