@@ -243,7 +243,9 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"pushd", false},
 		{"pushd +1", false},
 		{"popd x", false},
-		{"ls @C 2>&1 >&2 1>&2 >&- &>/dev/null &>> /tmp/x", true},
+		{"ls @C 2>&1 >&2 1>&2 >&- >/dev/null 2>> /tmp/x", true},
+		{"ls @C &>/dev/null", false},
+		{"ls @C &>> /tmp/x", false},
 		{"ls @C <&0", false},
 		{"ls @C &> @C/settings.json", false},
 		{"ls @C &>> @P/settings.json", false},
@@ -400,10 +402,10 @@ func TestShellGuardConverges(t *testing.T) {
 
 // writerCorpus is every writer with every target spelling, each target
 // written plainly, through a variable and through a command
-// substitution, inside every wrapper; every writer that zsh's globs hide
-// from the option checks, with every target spelling, inside every
-// wrapper; and every command that writes in a directory it enters, with
-// every target spelling as the directory.
+// substitution, inside every wrapper; every writer that zsh's globs or a
+// redirection hide from the option checks, with every target spelling,
+// inside every wrapper; and every command that writes in a directory it
+// enters, with every target spelling as the directory.
 func writerCorpus() []string {
 	var corpus []string
 	for _, writer := range corpusWriters() {
@@ -411,7 +413,7 @@ func writerCorpus() []string {
 			corpus = append(corpus, wrapped(targetForms(writer, target))...)
 		}
 	}
-	for _, writer := range corpusGlobWriters() {
+	for _, writer := range slices.Concat(corpusGlobWriters(), corpusRedirectWriters()) {
 		for _, target := range corpusTargets() {
 			corpus = append(corpus, wrapped([]string{fmt.Sprintf(writer, target)})...)
 		}
@@ -440,6 +442,31 @@ func corpusGlobWriters() []string {
 			"find %s "+glob+" > /tmp/x", "git diff "+glob+" -- %s 2>/dev/null")
 	}
 	return writers
+}
+
+// corpusRedirectWriters are writers of their operand, %s, with a
+// redirection and a read-only command's name before the option that
+// writes. bash and zsh read the redirection and go on with the same
+// command, while the scanner ended it at the `&` of `&>` and `&>>`, and
+// read the name as a new command whose arguments the option was
+// (R11-SEC-1); and git commands whose own option takes as its value a
+// descriptor of more than one digit, which zsh reads as a word, the
+// scanner as a descriptor, so that the command git runs is the word
+// after it (R11-SEC-2).
+func corpusRedirectWriters() []string {
+	var writers []string
+	for _, redirect := range []string{
+		"&>/dev/null echo", "&>>/dev/null true", "2&>/dev/null echo", ">/dev/null echo", "2>/dev/null echo",
+		">>/dev/null echo", ">&2 echo", "2>&1 echo", "1>&2 grep",
+	} {
+		writers = append(writers,
+			"find %s "+redirect+" -delete", "find %s "+redirect+" -rm", "rg x %s "+redirect+" --pre=rm",
+			"git diff "+redirect+" --output=%s", "git log "+redirect+" -1 '--format=tformat:x' --output=%s",
+			"grep x %s "+redirect+" --save-config=%[1]s")
+	}
+	return append(writers,
+		"git -C 10>/dev/null checkout log -- %s", "git -C 10>/dev/null checkout status -- %s",
+		"git -C 12>/dev/null restore log -- %s", "git -C 99>&1 checkout log -- %s")
 }
 
 // wrapped is each of commands inside each of corpusWrappers.

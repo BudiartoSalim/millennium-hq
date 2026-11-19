@@ -33,6 +33,10 @@ func TestScanShell(t *testing.T) {
 		{"echo $(mv a b) `rm c`", [][]string{{"echo", "$"}, {"mv", "a", "b"}, {"rm", "c"}}, []string{"echo", "$", "mv", "a", "b", "rm", "c"}},
 		{"ls .claude 2>/dev/null", [][]string{{"ls", ".claude"}}, []string{"ls", ".claude", "/dev/null"}},
 		{"rm 2>&1 x", [][]string{{"rm", "x"}}, []string{"rm", "1", "x"}},
+		// A redirection never ends a simple command, as in bash (R11-SEC-1).
+		{"find x 2>&1 echo -delete", [][]string{{"find", "x", "echo", "-delete"}}, []string{"find", "x", "1", "echo", "-delete"}},
+		{"find x >&2 echo -delete", [][]string{{"find", "x", "echo", "-delete"}}, []string{"find", "x", "2", "echo", "-delete"}},
+		{"find x 1>&2 >&- y", [][]string{{"find", "x", "y"}}, []string{"find", "x", "2", "-", "y"}},
 		{"echo a2>x 2 >y '2'>z", [][]string{{"echo", "a2", "2", "2"}}, []string{"echo", "a2", "x", "2", "y", "2", "z"}},
 		{"cat <<EOF >>out x", [][]string{{"cat", "x"}}, []string{"cat", "EOF", "out", "x"}},
 		{"ln a >| b c", [][]string{{"ln", "a", "c"}}, []string{"ln", "a", "b", "c"}},

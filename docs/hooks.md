@@ -265,24 +265,30 @@ it, because the protected paths are unknown; reads stay allowed.
       rules for globbed words below still apply to;
     - `=`, except at the start of a word that is longer than `=` itself
       (zsh replaces `=ls` by the path of `ls`, and reads `==` as one) or
-      right after another `=` (`x==ls`, with zsh's `MAGIC_EQUAL_SUBST`),
-      so `[ a = b ]` passes and `[ a == b ]` does not;
+      right after another `=` or a `:` (`x==ls` and `x=a:=ls`, with
+      zsh's `MAGIC_EQUAL_SUBST`), so `[ a = b ]` passes and `[ a == b ]`
+      does not;
     - `~` only as the first character of a word and followed by `/` or
       the word's end (`~/.claude`, `cd ~`): `~x`, `~+`, `~-` and `a~b`
       name other directories or are extendedglob's exclusion;
-    - the operators `|`, `||`, `;`, `&&`, `>`, `>>`, `>&` (`>&2`,
-      `2>&1`, `1>&2`, `>&-`), `&>` and `&>>`, with a file descriptor's
-      digits before them (`2>`, `2>>`). `&>` and `&>>` write both
-      streams to their target, which is checked as any other
-      redirection's. A lone `&`, `|&`, `;;`, `>|` and zsh's `&|` and `&!`
-      are not;
+    - the operators `|`, `||`, `;`, `&&`, `>` and `>>`, and `>&` only
+      before one digit or `-` that ends the word (`>&2`, `2>&1`, `1>&2`,
+      `>&-`), each redirection with at most one digit before it as its
+      file descriptor (`2>`, `2>>`): zsh reads only one, so `10>x` is
+      the word `10` and a redirection there, and descriptor 10 in bash.
+      Any other `&` is not: a lone `&`, `|&`, zsh's `&|` and `&!`, and
+      `&>` and `&>>` (write `>x 2>&1`), after which bash and zsh go on
+      with the same command, so a word after the target is one more
+      argument (`find x &>/dev/null echo -delete` runs `find x echo
+      -delete`). Nor are `;;`, `>|` or `>& file`;
     - quoted strings, closed, that hold only printable ASCII and spaces
       but `$`, backquote, backslash, `!`, `#`, `(` and `)`; a single
       quote right after a closing one (`'a''b'`, which zsh's
       `RC_QUOTES` reads as one quote) is refused too.
 
-    So no `<` in any form (a redirection from a file, `<&0`, a
-    here-document or here-string, zsh's `<->`), and no `^`, `!`, `%`,
+    So no unquoted `<` in any form (a redirection from a file, `<&0`, a
+    here-document or here-string, zsh's `<->`; inside quotes it is
+    literal, `grep '<x>'`), and no `^`, `!`, `%`,
     `{`, `}`, `(`, `)`, `#`, `$`, backquote, backslash, newline, other
     control character or character outside ASCII, quoted or not where
     the list above says so. A command with a subshell, with `!` or
@@ -290,11 +296,31 @@ it, because the protected paths are unknown; reads stay allowed.
     `%` (`git log --format=%h`; write `'--format=%h'`) is never
     read-only. Then every simple command in it, in pipelines and
     lists alike, must be named literally and be one of:
-    - `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `egrep`, `fgrep`, `du`,
-      `stat`, `readlink`, `realpath`, `basename`, `dirname`, `echo` or
-      `true`, with any arguments: none of them has an option that
-      writes, runs a program or sets a variable. `printf` (`-v` sets
-      one) and `file` (`--compile` writes) are not on the list;
+    - `ls`, `cat`, `head`, `tail`, `wc`, `du`, `stat`, `readlink`,
+      `realpath`, `basename`, `dirname`, `echo` or `true`, with any
+      arguments: none of them has an option that writes, runs a program
+      or sets a variable. `printf` (`-v` sets one) and `file`
+      (`--compile` writes) are not on the list;
+    - `grep`, `egrep` or `fgrep` whose every option is one of `-r`,
+      `-R`, `-n`, `-i`, `-l`, `-L`, `-c`, `-w`, `-x`, `-v`, `-E`, `-F`,
+      `-G`, `-P`, `-s`, `-q`, `-H`, `-h`, `-o`, `-a`, `-I`, `-A`, `-B`,
+      `-C`, `-e`, `-f`, `-m` (short options may be bundled, `-rnA3`), or
+      `--null`, `--line-number`, `--ignore-case`, `--files-with-matches`,
+      `--files-without-match`, `--count`, `--word-regexp`,
+      `--line-regexp`, `--invert-match`, `--extended-regexp`,
+      `--fixed-strings`, `--perl-regexp`, `--recursive`,
+      `--dereference-recursive`, `--no-messages`, `--quiet`, `--silent`,
+      `--with-filename`, `--no-filename`, `--only-matching`, `--text`,
+      `--color[=…]`, `--colour[=…]`, `--include`, `--exclude`,
+      `--exclude-dir`, `--include-dir`, `--binary-files`, `--regexp`,
+      `--file`, `--max-count`, `--after-context`, `--before-context`,
+      `--context`, written in full, those that take a value with it
+      attached (`--include=x`, `-A3`) or as the next word, which must not
+      start with a dash. These read the same in GNU grep and in ugrep,
+      which Claude Code runs as `grep`; any other is not read-only, such
+      as ugrep's `--filter` (runs a program), `--save-config` (writes a
+      file), `--config`, `---FILE`, `--pager`, `--view`, and `-z` and
+      `-Z`, which mean something else in each;
     - `test` or `[` without `-v` and without an argument that holds a
       `[` (other than the name `[` itself): bash evaluates an array
       subscript as arithmetic, so `[ -v 'a[HOME=7]' ]` sets `HOME`;
@@ -369,8 +395,9 @@ it, because the protected paths are unknown; reads stay allowed.
       goes where `HOME`, `OLDPWD` or `CDPATH` say. `popd` is never
       read-only.
 
-    The arguments of `find`, `rg`, `git`, `cd`, `pushd`, `test` and `[`
-    must not hold an unquoted glob. Every redirection must duplicate or close
+    The arguments of `find`, `grep`, `egrep`, `fgrep`, `rg`, `git`,
+    `cd`, `pushd`, `test` and `[` must not hold an unquoted glob, which
+    may expand into an option. Every redirection must duplicate or close
     a file descriptor (`2>&1`) or write to a path, without glob or brace
     and not starting with `!` (zsh's `>!`), that is not and does not lie
     in a protected path, `.pi` or `.claude` (`/dev/null`,
@@ -385,10 +412,12 @@ it, because the protected paths are unknown; reads stay allowed.
     `ls .claude > /tmp/x # list`, a read-only command on two lines,
     `(ls .claude) > /tmp/x`, `bash -c 'ls .claude 2>/dev/null'`,
     `grep x < .claude/settings.json > /tmp/x`,
-    `find .claude ! -name x 2>/dev/null` and
+    `find .claude ! -name x 2>/dev/null`,
+    `ls .claude &>/dev/null` and
     `git log -n 5 -- .claude > /tmp/x` are denied. Split a denied
     read-only command, drop the comment, the second line or the
-    redirection, or rewrite it with inert text (`-n5`, `-not`).
+    redirection, or rewrite it with inert text (`-n5`, `-not`,
+    `>/dev/null 2>&1`).
   - **What it misses.** A name spliced from parts the shell joins when
     the command runs (`.p${X}i`, `${X:-.pi}`, `.p$@i`, an option glued
     to it as in `mv -t.pi`); globs and brace expansions (`.p?`,

@@ -11,7 +11,7 @@ import (
 // an option whose value must be attached is not read-only without it;
 // and every word after `--` is an operand. Bundles of short options are
 // read only in bundledShorts, and `-<n>` is a number only in
-// separateShorts.
+// separateShortsAndCount (R11-CR-1).
 func TestReadOnlyOptionsAllow(t *testing.T) {
 	options := readOnlyOptions{
 		flags:         []string{"-a", "-b", "--all"},
@@ -19,8 +19,8 @@ func TestReadOnlyOptionsAllow(t *testing.T) {
 		attachedValue: []string{"-n", "--since"},
 		valued:        []string{"-e", "--glob"},
 	}
-	bundled, separate := options, options
-	bundled.syntax, separate.syntax = bundledShorts, separateShorts
+	bundled, separate, counted := options, options, options
+	bundled.syntax, separate.syntax, counted.syntax = bundledShorts, separateShorts, separateShortsAndCount
 	tests := []struct {
 		options readOnlyOptions
 		args    string
@@ -50,7 +50,14 @@ func TestReadOnlyOptionsAllow(t *testing.T) {
 		{bundled, "--color -x", false},
 		{bundled, "--since=x --since=-y", true},
 		{bundled, "--since x", false},
-		{separate, "-a -b -u -uno --color=x -n5 -n-1 -3 -10 --since=x --since=", true},
+		{separate, "-a -b -u -uno --color=x -n5 -n-1 --since=x --since=", true},
+		{separate, "-3", false},
+		{separate, "-10", false},
+		{counted, "-a -b -u -uno --color=x -n5 -n-1 -3 -10 --since=x --since=", true},
+		{counted, "-n 5", false},
+		{counted, "-ab", false},
+		{counted, "-3x", false},
+		{counted, "-e x", false},
 		{separate, "-n 5", false},
 		{separate, "-n", false},
 		{separate, "--since x", false},
