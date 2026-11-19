@@ -76,4 +76,6 @@ Smoke and acceptance runs: a table of checks or criteria with pass or fail,
 and the commands to reproduce. Bugs, from any mode, as findings in the
 `review-protocol` JSON format with `id` prefix `QT`; instead of `file` and
 `line`, give `evidence` as the exact reproduction steps, the expected result
-from the spec, and the actual result.
+from the spec, and the actual result. You do not read the change, so set
+`origin` to `introduced` unless the spec or the base behaviour shows the bug
+was there before.
