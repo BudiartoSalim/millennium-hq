@@ -87,7 +87,9 @@ End your answer with exactly one JSON object in a fenced `json` block:
 }
 ```
 
-- `verdict` is `approved` only with no critical, high or medium findings.
+- `verdict` is `approved` only with no critical, high or medium findings
+  that are `introduced` or `worsened`; `pre-existing` ones are reported but
+  do not block it.
 - `id` prefixes: `CR` (correctness-reviewer), `SEC` (security-engineer), `MR`
   (maintainability-reviewer), `PERF` (performance-reviewer), `QT` (qa-tester).
 - `category` is a short slug such as `spec`, `edge-case`, `test-quality`,

@@ -11,10 +11,10 @@ In this skill, `millennium-code-qc` means the engine command
 
 ## Before writing code
 
-1. Read your package: the spec slice, the acceptance criteria (AC-n) and
-   security requirements (SR-n) it covers, the paths you may change, and the
-   contract you build against. If anything is ambiguous, say so in your report
-   rather than guessing silently; when a guess is unavoidable, make the
+1. Read your package: the spec slice and its ACs and SRs, the runtime, the
+   paths you may change, the contract, prior findings and their tests, docs
+   to update and hot paths to measure. If anything is ambiguous, say so in
+   your report rather than guessing; when a guess is unavoidable, make the
    smallest one and list it.
 2. Read the code you will change and its neighbours. Match their style,
    naming, error handling and test idiom.
@@ -40,16 +40,13 @@ In this skill, `millennium-code-qc` means the engine command
   `# type: ignore`, `# noqa`, `shellcheck disable`) needs a written reason
   after it, and only when the tool is wrong, never to hide a real problem.
   TODOs need an issue link.
-- **Know the runtime.** Verify behaviour under the implementations the code
-  really runs on (the spec's runtime inventory when it has one: operating
-  systems, shells, the actual tool implementations, toolchain versions,
-  harnesses), not assumed defaults. Report what you could not run.
-- **Update the docs** in your paths that describe behaviour you change; report
-  the ones outside your paths.
-- **Fixing a finding.** Close it without reopening what it replaces: check the
-  fix against the earlier findings on the same code that your package lists,
-  and keep their tests passing. Prefer the smallest change, with a test that
-  fails without it. A fix that needs a redesign is reported, not improvised.
+- **Know the runtime.** Verify behaviour on the operating systems, shells,
+  tool implementations, toolchains and harnesses it lists, not assumed ones.
+- **Update the docs** in your paths that describe behaviour you change.
+- **Fixing a finding.** Close it without reopening what it replaces: keep
+  the prior findings your package lists closed and their tests passing.
+  Prefer the smallest change, with a test that fails without it. A fix that
+  needs a redesign is reported, not improvised.
 
 ## Security checks
 
@@ -73,9 +70,10 @@ sanitiser, a permission check):
   none; the correctness-reviewer reviews your tests for exactly that.
 - Never derive expected values from the code under test (its output, or a
   copy of its logic): a self-referential oracle proves nothing.
-- Every AC and SR your report claims names a test that exists in your change.
+- Every AC and SR your report claims names a test on the integrated branch:
+  yours, an earlier package's, or qa-tester's acceptance test.
 - When the spec's Constraints or your package name a hot path or a size,
-  measure before and after your change and report the numbers.
+  measure before and after your change.
 - Cover the edges: empty, one, many, boundaries, invalid input, error paths.
 - You do not write or change acceptance tests (`tests/acceptance` by
   default). qa-tester owns them and the hooks deny you.
