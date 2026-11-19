@@ -4,6 +4,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -160,11 +161,10 @@ func TestProtectedLeadIn(t *testing.T) {
 
 // A shell command that puts a link, a file or a directory where protected
 // paths lie (`.pi`, `.claude`), or removes what is there, changes them:
-// such a word in a simple command where ln, mv, cp, rm, install or a
-// replacing git command stands among the words, even as another
-// command's argument (`grep -rn rm .claude`). A command that only reads
-// such a word does not, whatever redirection it has; nor does a longer
-// name.
+// such a word in a command that can write. A command that provably only
+// reads does not, even with a write-like word among its arguments
+// (`grep -rn rm .claude`) or a redirection outside protected paths; nor
+// does a longer name.
 func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 	cfg := guardConfig(t)
 	tests := []struct{ command, want string }{
@@ -192,7 +192,8 @@ func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 		{"if true; then mv conf .pi; fi", "changes .pi"},
 		{"bash -c 'ln -s conf .pi'", "changes .pi"},
 		{`sh -ec "cd sub && mv conf .claude"`, "changes .claude"},
-		{"bash -c 'ls .claude 2>/dev/null'", ""},
+		// A shell is never provably read-only (round 4 denied it too).
+		{"bash -c 'ls .claude 2>/dev/null'", "changes .claude"},
 		{"bash script.sh .claude", ""},
 		{"ls .pi", ""},
 		{"ls -la .claude 2>/dev/null", ""},
@@ -200,11 +201,14 @@ func TestGuardShellCommandsThatReplaceWhatHoldsProtectedPaths(t *testing.T) {
 		{"grep -rn foo --exclude-dir=.claude . > /tmp/out.txt", ""},
 		{"du -sh ~/.claude 2>&1", ""},
 		{"cat .pi 2>&1 | head", ""},
-		{"grep -rn rm .claude", "changes .claude"},
-		{"echo mv conf .claude", "changes .claude"},
+		// grep and echo only read, whatever their arguments.
+		{"grep -rn rm .claude", ""},
+		{"echo mv conf .claude", ""},
 		{"git log -- .claude", ""},
-		{"git -c core.x=y status .pi", ""},
-		{"ln -s a b > .pi", ""},
+		// -c can make status an alias, or set a program git runs (R7-SEC-3).
+		{"git -c core.x=y status .pi", "changes .pi"},
+		// The redirection writes a file named .pi (round 4 denied it too).
+		{"ln -s a b > .pi", "changes .pi"},
 		{"cp a.pi b.pi", ""},
 		{"mv notes.md .pid", ""},
 		{"rm -rf .claude/worktrees/agent", ""},
@@ -239,9 +243,10 @@ func TestGuardShellDeniesProtectedPathsSpelledWithQuotes(t *testing.T) {
 		{`bash -c "cp x '.claude'/settings.json"`, "changes .claude/settings.json"},
 		{`cat '.claude'/settings.json`, ""},
 		{`cat '.pi'/extensions/x.ts`, ""},
-		// Coarse, as for the unquoted spelling: the write goes elsewhere.
-		{`cat '.pi'/extensions/x.ts > /tmp/x.ts`, "changes .pi/extensions"},
-		{`cp '.claude'/settings.json.bak /tmp`, ""},
+		// cat only reads, and the redirection writes outside protected paths.
+		{`cat '.pi'/extensions/x.ts > /tmp/x.ts`, ""},
+		// The floor reads `.claude` between the quotes, as round 4 did.
+		{`cp '.claude'/settings.json.bak /tmp`, "changes .claude"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {
@@ -290,8 +295,9 @@ func TestGuardShellStillDeniesReplacingWhatHoldsProtectedPaths(t *testing.T) {
 }
 
 // Where the matcher cannot place what a replacing command changes, the
-// whole command is read coarsely: a command that can write and a word, or
-// a part of one, that is a leading part of a protected path is denied.
+// floor reads the whole command: a command that can write and a word, or
+// a part of one, that is a leading part of a protected path is denied,
+// unless the command is provably read-only.
 func TestGuardShellReadsWhatItCannotPlaceCoarsely(t *testing.T) {
 	cfg := guardConfig(t)
 	tests := []struct{ command, want string }{
@@ -310,7 +316,8 @@ func TestGuardShellReadsWhatItCannotPlaceCoarsely(t *testing.T) {
 		{"cd .claude/worktrees/x && go test ./... > /tmp/out", ""},
 		{"for f in *.go; do rm -f $f.bak; done", ""},
 		{"find . -name '*.tmp' | xargs rm", ""},
-		{"ls $HOME/.claude 2>/dev/null", ""},
+		// An expansion is never provably read-only (round 4 denied it too).
+		{"ls $HOME/.claude 2>/dev/null", "changes .claude"},
 		{"rm -rf \"$TMPDIR/x\"", ""},
 	}
 	for _, tt := range tests {
@@ -320,11 +327,15 @@ func TestGuardShellReadsWhatItCannotPlaceCoarsely(t *testing.T) {
 	}
 }
 
+// round4Write is round 4's shellWrite (7f65e61), kept as it was: the
+// production pattern has since grown.
+var round4Write = regexp.MustCompile(`>|\btee\b|\bsed\s+(-\S*\s+)*-i|\b(mv|cp|rm|ln|chmod|truncate|install|dd)\b|\bgit\s+(checkout|restore|rm|mv|apply)\b`)
+
 // round4Denies is the shell guard of round 4 (7f65e61), the reference the
 // current one must not fall behind: a command that can write and names a
 // protected path anywhere, or a word that ends with a leading part of one.
 func round4Denies(command string) bool {
-	if !shellWrite.MatchString(command) {
+	if !round4Write.MatchString(command) {
 		return false
 	}
 	for _, protected := range ProtectedPaths() {
@@ -343,9 +354,10 @@ func round4Denies(command string) bool {
 // Round 5 narrowed the shell guard so that read-only commands pass
 // (R5-CR-3), and in doing so let through commands that round 4 denied
 // (R6-CR-1, R6-CR-2). Every command round 4 denied in its tests and in the
-// reviewers' lists is still denied, every read-only command passes, and
-// across a sweep of replacing commands, prefixes, spellings and wrappers
-// nothing round 4 denies is allowed.
+// reviewers' lists is still denied, every read-only command of R5-CR-3 and
+// of the reviewers' lists passes, and across a sweep of replacing
+// commands, prefixes, spellings and wrappers nothing round 4 denies is
+// allowed (TestShellGuardConverges sweeps wider).
 func TestGuardShellDeniesWhatRound4DeniedAndPassesReadOnlyCommands(t *testing.T) {
 	cfg := guardConfig(t)
 	denied := []string{
@@ -375,6 +387,8 @@ func TestGuardShellDeniesWhatRound4DeniedAndPassesReadOnlyCommands(t *testing.T)
 		"ls -la .claude 2>/dev/null", "find . -path ./.claude -prune -o -name '*.go' -print 2>/dev/null",
 		"grep -rn foo --exclude-dir=.claude . > /tmp/out.txt", "du -sh ~/.claude 2>&1", "cat .pi/settings.json",
 		"git status -- .claude", "git log -- .pi", "git diff -- .claude",
+		"ls .claude | grep x > /tmp/x", "git diff main -- .claude > /tmp/x", "stat .claude >/dev/null 2>&1",
+		"git -C .claude log > /tmp/x",
 	}
 	for _, command := range readOnly {
 		if got := Guard(cfg, ToolCall{Tool: "Bash", Command: command}); got.Deny {

@@ -63,7 +63,7 @@ conventions.
 | Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off), wherever they lie |
 | Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`), in any worktree of the repository: the engineer cannot change the tests that judge its work |
 | Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one, in any worktree of the repository; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
-| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path, however it is quoted (`cp x '.claude'/settings.json`, `echo x > ".pi"/extensions/x.ts`), or that put, move, remove or restore something at `.pi` or `.claude`, which hold protected paths: such a name in a command where `ln`, `mv`, `cp`, `rm`, `install`, `git rm`, `git mv`, `git checkout` or `git restore` stands among the words, after any prefix (`ln -s conf .pi`, `timeout 5 mv conf .claude`, `find . -exec rm -rf .claude \;`, `git checkout main -- .claude`), in an `eval` string or a `sh -c` script |
+| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that can write and name a protected path, or `.pi` or `.claude`, which hold protected paths, however it is spelled (`cp x '.claude'/settings.json`, `ln -s conf $'\x2epi'`, `D=.claude; tee $D/settings.json`, `echo 'ln -s conf .pi' \| sh`, `env -C .claude …`, `chmod 000 .claude`), unless the command provably only reads (`ls -la .claude 2>/dev/null`, `git diff -- .claude > /tmp/x`); see [What the hooks cannot do](#what-the-hooks-cannot-do) |
 
 The guard checks every path a tool names twice: as written, and with its
 symlinks resolved in the longest part of the path that exists (a write may
@@ -224,32 +224,63 @@ it, because the protected paths are unknown; reads stay allowed.
   ways no pattern recognises. The OS sandbox is what stops that: `millennium
   config apply` writes sandbox rules that deny writes to the protected paths
   for every command, and Claude Code's sandbox already protects `.git/config`,
-  `.git/hooks` and its own settings. The match is also coarse the other
-  way: a command that names a protected path anywhere, in its text or as
-  a word with its quotes removed (a redirection's target included), and a
-  word that can write (`>`, `cp`, `mv`, `ln`, `rm`, ...) anywhere, is
-  denied, even when the write goes elsewhere
-  (`cat .pi/extensions/x.ts > /tmp/x.ts`). Split such a command in two.
-  A word ending in `.pi` or `.claude` (`sub/.pi`, `~/.claude/`, `'.pi'`,
-  `$'\x2epi'`) is denied in a simple command where `ln`, `mv`, `cp`,
-  `rm`, `install`, or `rm`, `mv`, `checkout` or `restore` after `git`,
-  stands anywhere among the words, even as another command's argument:
-  `grep -rn rm .claude` is denied too. Read-only commands pass:
-  `ls -la .claude 2>/dev/null`, `du -sh ~/.claude 2>&1`,
-  `git log -- .pi`. The command is split as the shell splits it (control
-  operators, subshells, quotes, `$'…'` strings, redirections), and the
-  scripts of `eval` and `sh -c` (or `bash -c`, ...) are matched the same
-  way, four levels deep. Where the guard cannot tell what a command
-  changes, it denies coarsely, as above, when a word or a part of one
-  anywhere in the command ends in `.pi` or `.claude`: a replacing command
-  whose operands hold an expansion (`for d in .pi; do ln -s conf $d;
-  done`, `"$(echo .pi)"`) or come from `xargs`'s input, a command named
-  by an expansion (`$RM`), a `cd` or `pushd` into `.pi` or `.claude`, and
-  scripts nested deeper than four levels. Not every form is looked into:
-  globs and brace expansions (`.p?`, `.p{i,}`), a script file, a name
-  that only a variable or a command substitution produces when the
-  command runs (`mv conf "$(cat name)"`), and commands other than those
-  named (`rsync`, `tar`, `unlink`) are not.
+  `.git/hooks` and its own settings. The match is coarse on purpose, a
+  floor with one way out:
+  - **The floor.** A command that can write and names a protected path,
+    or `.pi` or `.claude`, is denied. It can write when a write-like word
+    appears anywhere in it: a redirection (`>`), `tee`, `sed -i` or
+    `--in-place`, `perl -i`, `awk -i inplace`, `mv`, `cp`, `rm`, `ln`,
+    `chmod`, `truncate`, `install`, `dd`, `unlink`, `link`, `rsync`,
+    `tar`, `patch`, `sponge`, `git checkout`, `restore`, `rm`, `mv` or
+    `apply`, or a git whose own options set its config (`git -c …`,
+    `--config-env`, `--exec-path`), since any git command can then be an
+    alias. It names one when a word, or a part of one between white
+    space, quotes, operators, `=`, `$`, `{` and `}`, is a protected path or
+    ends in `.pi` or `.claude` (`sub/.pi`, `~/.claude/`, `D=.claude`,
+    `"$(echo .pi)"`), read as written and as the shell reads it: quotes
+    removed, `$'…'` strings decoded (`$'\x2epi'`), redirection targets
+    included. Every word that holds shell syntax is read as a script as
+    well, whatever runs it (`bash -c -- '…'`, `echo '…' | sh`,
+    `sh <<< '…'`, `env -S '…'`, `su -c`, `ssh`, a git alias, `"$(…)"`),
+    as are `eval`'s arguments, four levels deep; deeper scripts are read
+    as text. The write may go elsewhere and still be denied
+    (`cp .claude/settings.json /tmp/x`); split such a command in two.
+  - **The way out: provably read-only commands pass.** A command passes
+    the floor when every simple command in it, in pipelines, lists and
+    subshells alike, is named literally and is one of `ls`, `cat`,
+    `head`, `tail`, `wc`, `grep`, `egrep`, `fgrep`, `du`, `stat`,
+    `readlink`, `realpath`, `basename`, `dirname`, `echo`, `printf`,
+    `true`, `test`, `[`; `rg` without `--pre` or `--hostname-bin`;
+    `find` without `-exec`, `-execdir`, `-ok`, `-okdir`, `-delete`,
+    `-fprint…` or `-fls`; `file` without `-C`; `git status`, `log`,
+    `diff`, `show`, `rev-parse` or `ls-files` with no own option but
+    `-C <dir>`, `--no-pager`, `-P` or `--no-optional-locks` and no
+    `-o`/`--output`; `cd`, `pushd` or `popd` into a directory that is
+    not, and does not lie in, a protected path, `.pi` or `.claude`. The
+    options of `rg`, `find`, `file`, `git` and the directories of `cd`
+    must not hold an unquoted glob or brace. Every redirection must
+    duplicate or close a file descriptor (`2>&1`) or write to a path,
+    without glob or brace, that is not and does not lie in a protected
+    path, `.pi` or `.claude` (`/dev/null`, `/tmp/out.txt`). The command
+    must hold no `$` and no backquote at all, and no white space but
+    spaces, tabs and newlines. Anything else (`eval`, a shell, `xargs`,
+    `sudo`, a variable assignment, a shell keyword such as `for` or `if`)
+    is not read-only. So `ls -la .claude 2>/dev/null`,
+    `find . -path ./.claude -prune -o -name '*.go' -print 2>/dev/null`,
+    `grep -rn foo --exclude-dir=.claude . > /tmp/out.txt`,
+    `du -sh ~/.claude 2>&1`, `git -C .claude log > /tmp/x` and
+    `cat .pi/extensions/x.ts > /tmp/x.ts` pass, and
+    `ls $HOME/.claude 2>/dev/null`, `cd .claude && ls 2>/dev/null` and
+    `bash -c 'ls .claude 2>/dev/null'` are denied.
+  - **What it misses.** A name spliced from parts the shell joins when
+    the command runs (`.p${X}i`, `${X:-.pi}`, `.p$@i`, an option glued
+    to it as in `mv -t.pi`); globs and brace expansions (`.p?`,
+    `.claude/settings.js*`, `.claude/settings.{json,}`); a name only a
+    variable or a command substitution produces at run time
+    (`mv conf "$(cat name)"`); a script file, or a program in another
+    language (`python3 -c …`), that writes on its own; a program a
+    command starts that its configuration names (a repository's
+    `core.fsmonitor`); and writers not listed above.
 - **A Stop hook that cannot run does not block.** Claude Code cannot send an
   agent back to repair a hook that will not start. If the engine is missing,
   agents can stop with unchecked work, which is why the tech lead's final

@@ -9,7 +9,9 @@ import (
 // A simple command puts, moves or removes something when a replacing
 // command or a replacing git command stands anywhere among its words,
 // past any prefix and its option values; git's subcommand is found past
-// git's own options and their values.
+// git's own options and their values, after every git among the words,
+// and a git whose own options set its config replaces whatever its
+// command, since that command can be an alias.
 func TestIsReplacing(t *testing.T) {
 	tests := []struct {
 		words []string
@@ -23,12 +25,20 @@ func TestIsReplacing(t *testing.T) {
 		{[]string{"find", ".", "-exec", "install", "{}", ";"}, true},
 		{[]string{"mvn", "rmdir", "cpp"}, false},
 		{[]string{"git", "rm", "a"}, true},
-		{[]string{"sudo", "git", "--git-dir", "x", "-C", "sub", "-c", "k=v", "--no-pager", "restore", "a"}, true},
+		{[]string{"sudo", "git", "--git-dir", "x", "-C", "sub", "--no-pager", "restore", "a"}, true},
 		{[]string{"git", "checkout", "main"}, true},
 		{[]string{"git", "status", "mv"}, true},
 		{[]string{"git", "log", "--", ".pi"}, false},
 		{[]string{"git", "--work-tree"}, false},
 		{[]string{"git"}, false},
+		{[]string{"sudo", "-u", "git", "git", "checkout", "main", "--", ".claude"}, true},
+		{[]string{"sudo", "-u", "git", "git", "log"}, false},
+		{[]string{"git", "-c", "alias.co=checkout", "co", "main"}, true},
+		{[]string{"git", "-c", "core.x=y", "status"}, true},
+		{[]string{"git", "--config-env", "x=Y", "checkout"}, true},
+		{[]string{"git", "--config-env=alias.x=Y", "x"}, true},
+		{[]string{"git", "--exec-path=/tmp/x", "status"}, true},
+		{[]string{"git", "-C", "-c", "status"}, false},
 	}
 	for _, tt := range tests {
 		if got := isReplacing(tt.words); got != tt.want {
@@ -37,21 +47,27 @@ func TestIsReplacing(t *testing.T) {
 	}
 }
 
-// The scripts a simple command runs are eval's arguments and a shell's -c
-// script, wherever among its words the eval or the shell stands.
+// The scripts a simple command may run are eval's arguments, joined, and
+// every word before them that holds shell syntax, whatever runs it: a
+// shell's -c past any of its options (R7-SEC-2), env -S, ssh, a command
+// substitution in double quotes.
 func TestScriptsOf(t *testing.T) {
 	tests := []struct {
 		words, want []string
 	}{
 		{nil, nil},
-		{[]string{"ls", "-c", "x"}, nil},
+		{[]string{"ls", "-c", "x", "a.pi", "--x=y", "~/{a,b}*"}, nil},
 		{[]string{"eval", "ln", "-s", "conf .pi"}, []string{"ln -s conf .pi"}},
 		{[]string{"eval"}, []string{""}},
 		{[]string{"sudo", "-u", "root", "/bin/bash", "--norc", "-lc", "rm a", "b"}, []string{"rm a"}},
-		{[]string{"find", ".", "-exec", "sh", "-ec", "mv {} x", ";"}, []string{"mv {} x"}},
-		{[]string{"eval", "sh", "-c", "x"}, []string{"sh -c x", "x"}},
-		{[]string{"bash", "-c"}, nil},
-		{[]string{"bash", "--norc", "script.sh"}, nil},
+		{[]string{"find", ".", "-exec", "sh", "-ec", "mv {} x", ";"}, []string{"mv {} x", ";"}},
+		{[]string{"x 'y'", "eval", "sh", "-c", "x"}, []string{"sh -c x", "x 'y'"}},
+		{[]string{"bash", "-c", "--", "rm a"}, []string{"rm a"}},
+		{[]string{"sh", "-o", "errexit", "-c", "-e", "rm a"}, []string{"rm a"}},
+		{[]string{"env", "-S", "ln -s conf .pi"}, []string{"ln -s conf .pi"}},
+		{[]string{"cp", "x", "$(printf .pi)"}, []string{"$(printf .pi)"}},
+		{[]string{"a\tb", "a\nb", "a'b", `a"b`, `a\b`, "a$b", "a`b", "a;b", "a&b", "a|b", "a(b", "a)b", "a<b", "a>b"},
+			[]string{"a\tb", "a\nb", "a'b", `a"b`, `a\b`, "a$b", "a`b", "a;b", "a&b", "a|b", "a(b", "a)b", "a<b", "a>b"}},
 	}
 	for _, tt := range tests {
 		if got := scriptsOf(tt.words); !slices.Equal(got, tt.want) {
@@ -60,47 +76,35 @@ func TestScriptsOf(t *testing.T) {
 	}
 }
 
-// What a simple command changes cannot be placed when its replacing
-// command takes operands from an expansion or from xargs' input, when the
-// command is named by an expansion, or when it changes into a leading part
-// of a protected path.
-func TestUnplaced(t *testing.T) {
+// A redirection's target that holds shell syntax is a script too (a
+// here-string fed to a shell); one without is not.
+func TestScriptsIn(t *testing.T) {
 	tests := []struct {
-		words []string
-		want  bool
+		command string
+		want    []string
 	}{
-		{[]string{"ln", "-s", "conf", "x"}, false},
-		{[]string{"ln", "-s", "conf", "$d"}, true},
-		{[]string{"mv", "`x`", "y"}, true},
-		{[]string{"xargs", "rm", "-rf"}, true},
-		{[]string{"ls", "$HOME/.claude"}, false},
-		{[]string{"X=1", "$RM", "-rf", "x"}, true},
-		{[]string{"X=1"}, false},
-		{[]string{"cd", "sub/.claude/"}, true},
-		{[]string{"pushd", ".pi"}, true},
-		{[]string{"cd", ".claude/worktrees/x"}, false},
-		{[]string{"ls", ".claude"}, false},
+		{"ls > out", nil},
+		{"sh <<< 'ln -s conf .pi' > out", []string{"ln -s conf .pi"}},
+		{"echo 'a b' | sh; eval x", []string{"a b", "x"}},
 	}
 	for _, tt := range tests {
-		replacing := isReplacing(tt.words)
-		if got := unplaced(tt.words, replacing); got != tt.want {
-			t.Errorf("unplaced(%q, %v) = %v, want %v", tt.words, replacing, got, tt.want)
+		if got := scriptsIn(scanShell(tt.command)); !slices.Equal(got, tt.want) {
+			t.Errorf("scriptsIn(%q) = %q, want %q", tt.command, got, tt.want)
 		}
 	}
 }
 
 // Scripts inside scripts are matched to maxScriptDepth; a script one
-// deeper is not placed, so the coarse fallback reads the whole command.
+// deeper is not, and the floor, which reads the whole command's text,
+// still denies what lies in it.
 func TestMatchScriptStopsAtTheDepthLimit(t *testing.T) {
-	inner := matchScript("eval ln -s conf x", maxScriptDepth)
-	if inner.protected != "" || !inner.unplaced {
-		t.Errorf("a script at the limit: %+v, want unplaced", inner)
+	// The eval's script names `.pi` only once its `$'…'` string is decoded.
+	script := `eval "ln -s conf \$'\\x2epi'"`
+	if at := matchScript(script, maxScriptDepth); at.protected != "" {
+		t.Errorf("a script at the limit: %+v, want its inner script unmatched", at)
 	}
-	if above := matchScript("eval ln -s conf x", maxScriptDepth-1); above.unplaced {
-		t.Errorf("a script above the limit: %+v, want placed", above)
-	}
-	if at := matchScript("ls x", maxScriptDepth); at.unplaced {
-		t.Errorf("a command that runs no script at the limit: %+v, want placed", at)
+	if above := matchScript(script, maxScriptDepth-1); above.protected != ".pi" {
+		t.Errorf("a script above the limit: %+v, want .pi", above)
 	}
 	// Scripts nested past the limit, each a shell -c inside the last.
 	command := "ln -s conf $d"

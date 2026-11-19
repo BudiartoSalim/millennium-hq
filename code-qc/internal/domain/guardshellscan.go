@@ -5,36 +5,72 @@ import (
 	"unicode"
 )
 
+// shellScan is a shell command split as far as the shell guard needs.
+type shellScan struct {
+	// commands are its simple commands, each without its redirections.
+	commands []shellCommand
+	// words are every word read, the targets of redirections included.
+	words []string
+	// redirects are its redirections, in the order read.
+	redirects []shellRedirect
+}
+
+// shellCommand is a simple command.
+type shellCommand struct {
+	words []string
+	// globbed: a word holds an unquoted `*`, `?`, `[` or `{`, which the
+	// shell may expand into any name, an option included (`-del*` into a
+	// file named `-delete`).
+	globbed bool
+}
+
+// shellRedirect is a redirection: its operator (`>`, `>>`, `>&`, `<<<`)
+// and its target, "" when the shell gives it none the scanner can read
+// (`echo >;`, a process substitution `>(…)`).
+type shellRedirect struct {
+	op, target string
+}
+
+// globChars are the characters that, unquoted, make the shell expand a
+// word into names.
+const globChars = "*?[{"
+
 // scanShell splits a shell command as far as matching it needs: into its
-// simple commands, each as its words without the targets of its
-// redirections (`2>/dev/null`), and into every word it reads, those
-// targets included. It splits at the control operators (`;`, `&&`, `|`, a
-// newline) and at the parentheses and backquotes of subshells and command
-// substitutions, takes quotes and backslashes as the shell takes them, and
-// decodes `$'…'` strings. Shell syntax beyond that, such as a command
-// substitution inside double quotes, is read as plain words.
-func scanShell(command string) (commands [][]string, words []string) {
+// simple commands, each as its words without its redirections
+// (`2>/dev/null`), the redirections themselves, and every word it reads,
+// their targets included. It splits at the control operators (`;`, `&&`,
+// `|`, a newline) and at the parentheses and backquotes of subshells and
+// command substitutions, takes quotes and backslashes as the shell takes
+// them, decodes `$'…'` strings, and reads digits written right before a
+// redirection operator as the file descriptor it redirects (`2>`). Shell
+// syntax beyond that, such as a command substitution inside double quotes,
+// is read as plain words.
+func scanShell(command string) shellScan {
 	var s shellScanner
 	runes := []rune(command)
 	for i := 0; i < len(runes); i++ {
 		i = s.scan(runes, i)
 	}
 	s.endCommand()
-	return s.commands, s.all
+	return s.result
 }
 
-// shellScanner collects the simple commands and words of a shell command,
-// one rune at a time.
+// shellScanner collects the simple commands, redirections and words of a
+// shell command, one rune at a time.
 type shellScanner struct {
-	commands [][]string
-	words    []string
-	// all are the words read so far, redirection targets included.
-	all  []string
-	word strings.Builder
+	result shellScan
+	// words are the words of the simple command being read.
+	words []string
+	// globbed: a word of the simple command being read holds a glob.
+	globbed bool
+	word    strings.Builder
 	// inWord: a word has begun, even an empty quoted one.
 	inWord bool
-	// redirect: the next word is the target of a redirection.
-	redirect bool
+	// quoted: part of the word being read is quoted or escaped.
+	quoted bool
+	// pending is the operator of a redirection whose target is the next
+	// word, "" for none.
+	pending string
 }
 
 // scan reads the rune at i, with the runes that belong to it, and returns
@@ -42,35 +78,56 @@ type shellScanner struct {
 func (s *shellScanner) scan(runes []rune, i int) int {
 	switch r := runes[i]; {
 	case r == '\\' && i+1 < len(runes):
+		s.quoted = true
 		s.add(runes[i+1])
 		return i + 1
 	case r == '\'' || r == '"':
-		return s.quoted(runes, i)
+		return s.quotedString(runes, i)
 	case r == '$' && i+1 < len(runes) && strings.ContainsRune(`'"`, runes[i+1]):
 		return s.dollarQuoted(runes, i+1)
 	case strings.ContainsRune(";&|()`\n", r):
 		s.endCommand()
 	case r == '<' || r == '>':
-		s.endWord()
-		s.redirect = true
-		for i+1 < len(runes) && strings.ContainsRune("<>&|", runes[i+1]) {
-			i++
-		}
+		return s.redirection(runes, i)
 	case unicode.IsSpace(r):
 		s.endWord()
 	default:
+		s.globbed = s.globbed || strings.ContainsRune(globChars, r)
 		s.add(r)
 	}
 	return i
 }
 
-// quoted reads the quoted string that starts at i into the word, and
-// returns the index of its closing quote. Inside double quotes a
+// redirection reads the redirection operator that starts at i, all of
+// `<>&|` that follows it (`>>`, `>&`, `<<<`, `>|`), and returns the index
+// of its last rune. Unquoted digits right before it are the file
+// descriptor it redirects, not a word.
+func (s *shellScanner) redirection(runes []rune, i int) int {
+	if s.inWord && !s.quoted && isDigits(s.word.String()) {
+		s.resetWord()
+	}
+	s.endWord()
+	start := i
+	for i+1 < len(runes) && strings.ContainsRune("<>&|", runes[i+1]) {
+		i++
+	}
+	s.endRedirection()
+	s.pending = string(runes[start : i+1])
+	return i
+}
+
+// isDigits reports whether s is one or more ASCII digits.
+func isDigits(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
+}
+
+// quotedString reads the quoted string that starts at i into the word,
+// and returns the index of its closing quote. Inside double quotes a
 // backslash escapes `"`, `\`, `$` and a backquote; inside single quotes
 // nothing is escaped.
-func (s *shellScanner) quoted(runes []rune, i int) int {
+func (s *shellScanner) quotedString(runes []rune, i int) int {
 	quote := runes[i]
-	s.inWord = true
+	s.inWord, s.quoted = true, true
 	for i++; i < len(runes) && runes[i] != quote; i++ {
 		if quote == '"' && runes[i] == '\\' && i+1 < len(runes) && strings.ContainsRune("\"\\$`", runes[i+1]) {
 			i++
@@ -85,7 +142,7 @@ func (s *shellScanner) quoted(runes []rune, i int) int {
 // backslash escapes decoded (`$'\x2epi'` is `.pi`).
 func (s *shellScanner) dollarQuoted(runes []rune, i int) int {
 	if runes[i] == '"' {
-		return s.quoted(runes, i)
+		return s.quotedString(runes, i)
 	}
 	end := i + 1
 	for end < len(runes) && runes[end] != '\'' {
@@ -94,7 +151,7 @@ func (s *shellScanner) dollarQuoted(runes []rune, i int) int {
 		}
 		end++
 	}
-	s.inWord = true
+	s.inWord, s.quoted = true, true
 	s.word.WriteString(decodeANSIC(runes[i+1 : min(end, len(runes))]))
 	return end
 }
@@ -179,21 +236,37 @@ func (s *shellScanner) endWord() {
 		return
 	}
 	word := s.word.String()
-	s.all = append(s.all, word)
-	if s.redirect {
-		s.redirect = false
+	s.result.words = append(s.result.words, word)
+	if s.pending != "" {
+		s.result.redirects = append(s.result.redirects, shellRedirect{op: s.pending, target: word})
+		s.pending = ""
 	} else {
 		s.words = append(s.words, word)
 	}
+	s.resetWord()
+}
+
+// resetWord drops the word being read.
+func (s *shellScanner) resetWord() {
 	s.word.Reset()
-	s.inWord = false
+	s.inWord, s.quoted = false, false
+}
+
+// endRedirection records a redirection still waiting for its target as
+// one without a target the scanner can read.
+func (s *shellScanner) endRedirection() {
+	if s.pending != "" {
+		s.result.redirects = append(s.result.redirects, shellRedirect{op: s.pending})
+		s.pending = ""
+	}
 }
 
 // endCommand ends the simple command being read.
 func (s *shellScanner) endCommand() {
 	s.endWord()
+	s.endRedirection()
 	if len(s.words) > 0 {
-		s.commands = append(s.commands, s.words)
+		s.result.commands = append(s.result.commands, shellCommand{words: s.words, globbed: s.globbed})
 	}
-	s.words, s.redirect = nil, false
+	s.words, s.globbed = nil, false
 }
