@@ -26,6 +26,8 @@ change nothing in the repository: the output is a design note.
 - **Open-ended** ("something that behaves like X", a new subsystem, an
   algorithm you have not built here before): every step below.
 
+At every scale, list the runtime (section 1).
+
 ## 1. Frame the problem
 
 Restate the goal in your own words and separate:
@@ -34,6 +36,10 @@ Restate the goal in your own words and separate:
 - the **constraints**: scale (messages per second, data size, users),
   latency, durability, consistency, the deployment and operations it must
   fit, the existing stack, the dependency policy;
+- the **runtime**: the operating systems, shells, real tool implementations
+  (Claude Code runs bfs as `find` and ugrep as `grep`), toolchain versions
+  and harnesses the code will run under. It goes in the spec's Runtime
+  section; check behaviour on each entry rather than assume it;
 - the **unknowns**: what you would have to guess.
 
 Ask now the questions whose answer changes the direction ("must a delayed
@@ -54,11 +60,6 @@ Write down:
 - which of these the user actually needs, and which are incidental to that
   system's scale or history. Confirm the list with the user: it becomes the
   acceptance criteria.
-
-In every case, inventory the runtime what you build will run under: the
-operating systems, shells, real tool implementations (Claude Code runs bfs
-as `find` and ugrep as `grep`), toolchain versions and harnesses. It goes in
-the spec's Runtime section; check behaviour on each entry, never assume it.
 
 ## 3. Survey the approaches
 
@@ -145,7 +146,8 @@ as an engineer in your final message to the lead:
 ```markdown
 ## Approach
 ### Problem          (goal, constraints, assumptions still open)
-### Reference behaviour   (needed / not needed, with sources; the runtime)
+### Runtime          (operating systems, shells, tools, toolchains, harnesses)
+### Reference behaviour   (needed / not needed, with sources)
 ### Approaches surveyed   (patterns and prior art, with sources)
 ### Options          (each as above; spike results with numbers)
 ### Comparison       (table)

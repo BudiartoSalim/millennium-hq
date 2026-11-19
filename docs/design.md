@@ -164,9 +164,9 @@ understand and design (lead, with the user; solution-design): reference
      reject + reason) in the decision log
   -> fix loop, bounded rounds: every bug fix comes with a regression test;
      a significant rewrite gets a fresh review and a re-test; a component
-     with findings in two consecutive rounds gets a design note with
-     options and the user's decision; after 3 rounds with findings open,
-     the user decides
+     with medium-or-higher findings to fix in two consecutive fix rounds
+     gets a design note with options and the user's decision; after 3
+     rounds with findings open, the user decides
   -> final gates: the CI-equivalent run (every check, against the target
      branch, config required) plus the full test suite and supply chain
   -> summary with the decision log
@@ -176,7 +176,8 @@ Reviewer output is structured JSON (severity, origin, `file:line`, evidence,
 failure scenario, suggested fix) so findings can be triaged and logged
 mechanically. The origin (`introduced`, `worsened`, `pre-existing`) sets the
 default: pre-existing findings become follow-ups unless the change makes them
-reachable or worse, or the user asks.
+reachable or worse, or the user asks, and they do not block a reviewer's
+`approved` verdict.
 
 ## Parallel work
 

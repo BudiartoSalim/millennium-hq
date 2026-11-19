@@ -44,19 +44,20 @@ crosses process or network boundaries.
   - **Fail-closed denial of service**: can one bad input or state (a
     malformed file, a stale lock, an unreadable entry) block every call, not
     only the bad one?
-- **Origin**: mark each threat `introduced` (the change creates it, or makes
-  it reachable or worse) or `pre-existing` (it is there without the change).
+- **Origin**, as in `review-protocol`: `introduced` (the change creates it),
+  `worsened` (it exists, and the change makes it reachable, more likely or
+  worse) or `pre-existing` (it exists, and the change leaves it as it was).
   Pre-existing threats are follow-up candidates, not requirements here.
 - **Abuse cases**: "an authenticated user changes the order id in the URL to
   read another user's order".
 
 ## 3. Output
 
-A markdown section the lead pastes into the spec:
+Markdown the lead merges into the spec:
 
 ```markdown
 ## Threat model
-Runtime: <operating systems, shells, tool implementations, toolchain versions, harnesses>
+Add to the spec's Runtime section: <the entries it lacks, or none>
 Assets: ...
 Boundaries: ...
 
@@ -72,6 +73,6 @@ Boundaries: ...
 ```
 
 Every requirement must be checkable by a test, and name the test level
-(unit, acceptance). Requirements cover introduced threats. List open
-questions for the user separately, such as risk the spec should accept
-explicitly rather than mitigate, and any high or critical pre-existing threat.
+(unit, acceptance). Requirements cover introduced and worsened threats.
+List open questions for the user separately, such as risk the spec should
+accept rather than mitigate, and any high or critical pre-existing threat.

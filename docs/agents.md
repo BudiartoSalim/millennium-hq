@@ -27,10 +27,14 @@ agent. It stops and reports where the interactive lead would ask you.
 The workflow, in order:
 
 0. **Preflight**: the gates are on, the tree is clean, and the harness is
-   ready for parallel work: subagent worktrees branch from `HEAD`
-   (`worktree.baseRef: "head"`), the agent worktrees are git-ignored, and the
-   config has an acceptance-test path. The lead tells you what to fix rather
-   than changing protected settings itself.
+   ready for parallel work: the agent worktrees are git-ignored and, under
+   Claude Code, subagent worktrees branch from `HEAD`
+   (`worktree.baseRef: "head"`; pi always does). For a gap, the lead drafts
+   a proposal of the current config for you to apply with
+   `millennium-code-qc config apply`, which writes both, rather than changing
+   protected settings itself. It proposes an acceptance-test path only when
+   the default, `tests/acceptance`, or the configured one does not fit the
+   layout, and does not wait for it.
 1. **Understand and design** (the `solution-design` skill), scaled to the
    problem. For a small, clear change: read the code and ask what is
    unclear. For an open-ended one, such as "a message broker with delayed
@@ -47,7 +51,8 @@ The workflow, in order:
    what the code really runs under: operating systems, shells, the actual
    tool implementations, language and toolchain versions, and harnesses.
 3. **Threat model** by the security engineer when the change touches a trust
-   boundary; its security requirements (SR-n) join the spec. A package that
+   boundary; its security requirements (SR-n) join the spec, and its
+   runtime additions the spec's Runtime section. A package that
    adds a security mechanism the threat model did not cover gets a short
    threat-model pass on it before dispatch.
 4. **Work packages** with disjoint paths, contracts first, at most three
@@ -61,20 +66,27 @@ The workflow, in order:
    full gate in its worktree, from the commit the worktree was dispatched
    from (a worktree dispatched after other packages merged holds their
    changes too), a check that every criterion the engineer's report claims
-   names a test in the diff (reading a sample), then a commit of what
-   `git status` lists, minus the sandbox's placeholder devices, and a merge;
+   names a test that exists on the integrated branch and runs (its own, an
+   earlier package's, or qa-tester's acceptance test; reading a sample),
+   then a commit of what `git status` lists, minus the sandbox's placeholder
+   devices and untracked entries whose path does not exist, and a merge;
    then the full gate on the integrated branch, from the feature's base.
+   Docs the engineer could not update go to their package or a follow-up,
+   its measurements are held to the spec's Constraints, and what it could
+   not run goes into the summary's residual risks.
 7. **Smoke test** by qa-tester.
 8. **Review panel** in parallel: correctness and maintainability always;
    security and performance by risk; acceptance and exploratory testing.
 9. **Triage**: every finding fixed (with a regression test), deferred (with a
-   follow-up) or rejected (with evidence), in the spec's decision log.
+   follow-up) or rejected (with evidence), in the spec's decision log, whose
+   `test` column records each fix's regression test.
    - A `pre-existing` finding (see [Reviewer reports](#reviewer-reports)) is
      a follow-up by default; it is fixed in the change only when the change
      makes it reachable or worse, or you ask. Critical and high ones still
      come to you, with that default stated.
-   - **Convergence rule**: when one component draws findings in two
-     consecutive review rounds, the lead stops patching it, writes a short
+   - **Convergence rule**: when one component draws findings of medium or
+     higher, dispositioned fix, from any source, in two consecutive fix
+     rounds, the lead stops patching it, writes a short
      design note with options (fail closed by construction, narrow the
      scope, accept and document a limit), and asks you before the next
      round.
@@ -123,7 +135,7 @@ The workflow, in order:
 | `review-protocol` | every reviewer | What a finding is, severities, each finding's origin, and the JSON report format. |
 | `correctness-review` | correctness-reviewer | Spec conformance, edge cases, error paths, test quality, failing tests as proof. |
 | `security-review` | security-engineer | Source-to-sink review of a diff, authorization, secrets, crypto, limits. |
-| `threat-model` | security-engineer | The runtime inventory first, then assets, boundaries, STRIDE (with parser differentials and fail-closed denial of service named), abuse cases, testable security requirements; each threat checked against the runtime and marked introduced or pre-existing, the pre-existing ones listed as follow-up candidates. |
+| `threat-model` | security-engineer | The runtime inventory first, then assets, boundaries, STRIDE (with parser differentials and fail-closed denial of service named), abuse cases, testable security requirements; each threat checked against the runtime and marked with its origin (introduced, worsened or pre-existing), the pre-existing ones listed as follow-up candidates; its runtime additions go to the spec's Runtime section. |
 | `security-research` | security-engineer | Variant analysis, source-to-sink across the codebase, surface audits; local proof only. |
 | `maintainability-review` | maintainability-reviewer | Architecture fit, naming, cohesion, duplication, readability. |
 | `performance-review` | performance-reviewer | Complexity at stated sizes, queries, memory, blocking I/O, limits. |
@@ -139,9 +151,9 @@ differential test showing everything the old version denied is still
 denied. `engineering-standards` holds them for engineers, and
 `solution-design` uses them as the default for design options.
 
-The **runtime inventory** lives in the spec's Runtime section. The
-threat model starts from it, the lead passes it to each work package, and
-engineers verify behaviour against it.
+The **runtime inventory** lives in the spec's Runtime section. The design
+lists it at every scale, the threat model completes it, the lead passes it
+to each work package, and engineers verify behaviour against it.
 
 The skills hold no convention-specific rules: the engineer and the
 maintainability reviewer follow the guide of each convention the repository
@@ -186,7 +198,9 @@ logged the same way:
 Severities: `critical` (data loss, breach, main path broken), `high` (a
 criterion or security requirement not met, a bug users will hit), `medium`
 (a less common path, or a defect that will cause bugs soon), `low`. A
-verdict is `approved` only without critical, high or medium findings.
+verdict is `approved` only without critical, high or medium findings that
+are `introduced` or `worsened`; pre-existing ones are reported but do not
+block it.
 
 Every finding carries an `origin`: `introduced` (the change adds the
 problem), `worsened` (it was there before, and the change makes it reachable,

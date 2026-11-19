@@ -37,13 +37,16 @@ In this skill, `millennium-code-qc` means the engine command
    suggest `/millennium:init-project` (new project) or `/millennium:adopt-project` (existing
    code); do not lead without gates. A design discussion alone needs no
    opt-in: `/millennium:solution-design <problem>`.
-2. Check the harness: the project's Claude Code settings set
-   `worktree.baseRef: "head"` (without it, engineers start from the default
-   branch), and `git check-ignore` reports the agent worktrees
-   (`.claude/worktrees/`, `.pi/worktrees/`) as ignored. When the config sets
-   no `paths.acceptanceTests`, propose one so qa-tester's tests have a home.
-   You cannot change protected settings or the config: tell the user what to
-   fix, or draft a proposal, and wait.
+2. Check the harness: `git check-ignore -q .claude/worktrees/` and
+   `git check-ignore -q .pi/worktrees/` each succeed (the trailing slash
+   matters while a directory does not exist), and under Claude Code (pi
+   branches from `HEAD` itself) `.claude/settings.json` or
+   `.claude/settings.local.json` sets `worktree.baseRef: "head"`, without
+   which engineers start from the default branch. For a gap, write
+   `millennium-code-qc config export` to `millennium.proposal.json` and wait
+   for the user's `millennium-code-qc config apply`, which writes both. If
+   `paths.acceptanceTests` (default `tests/acceptance`) does not fit the
+   layout, propose another path; do not wait for it.
 3. `git status`: start from a clean tree. If the user has uncommitted work,
    ask whether to commit, stash or include it.
 4. Record the base. On the default branch, create a feature branch and
@@ -89,9 +92,8 @@ if it has one, otherwise `docs/specs/<slug>.md`, committed with the change:
 - AC-1: <observable behaviour, testable from outside>
 ## Non-goals
 ## Constraints        (compatibility, performance budgets, sizes it must handle)
-## Runtime            (what the code really runs under: operating systems, shells,
-                       the actual tool implementations, language and toolchain
-                       versions, harnesses)
+## Runtime            (what it really runs under: operating systems, shells, the
+                       actual tool implementations, toolchain versions, harnesses)
 ## Risk               (auth, input, secrets, crypto, permissions, money,
                        concurrency, data loss, hot paths: which apply)
 ## Approach           (the design note from step 1: options, decision, sources)
@@ -109,12 +111,13 @@ ruled out becomes non-goals.
 When the change touches auth, input from outside, secrets, crypto,
 permissions or another trust boundary, run `millennium:security-engineer` in
 threat-model mode with the spec path. Add its security requirements to the
-spec as SR-n, each with how it will be tested, and confirm them with the user.
+spec as SR-n, each with how it will be tested, merge its runtime additions
+into the spec's Runtime section, and confirm both with the user.
 
 Before dispatching any package, fixes included, that introduces a security
 mechanism the threat model did not cover (a new guard, validator, sanitiser
 or permission check), run a short threat-model pass on that mechanism; its
-SRs join the spec and the package's slice.
+SRs and runtime additions join the spec and the package.
 
 ## 4. Work packages
 
@@ -148,18 +151,17 @@ Show the plan to the user before dispatching.
 
 ## 5. Dispatch
 
-1. **Commit first.** Engineer worktrees branch from `HEAD` (millennium sets
-   `worktree.baseRef: "head"`), so uncommitted work is invisible to them.
-   Commit the spec and any contract, record `<start>` = `git rev-parse HEAD`,
-   and dispatch with no commit in between: every worktree dispatched in that
-   message starts from `<start>`. Each later dispatch into a new worktree (a
-   package that waited, a fix after a merge) records its own `<start>` the
-   same way; a fix sent to an engineer whose worktree still exists keeps
-   that worktree's `<start>`.
+1. **Commit first.** Engineer worktrees branch from `HEAD` (step 0), so
+   uncommitted work is invisible to them. Commit the spec and any contract,
+   record `<start>` = `git rev-parse HEAD`, and dispatch with no commit in
+   between: every worktree dispatched in that message starts from `<start>`.
+   Each later dispatch into a new worktree (a package that waited, a fix
+   after a merge) records its own `<start>` the same way; a fix sent to an
+   engineer whose worktree still exists keeps that worktree's `<start>`.
 2. Start every independent package in the same message: one
    `millennium:software-engineer` Agent call per package, each in the background. Give
-   each engineer only its package: the spec slice, its paths, the contract,
-   and the spec path for reference. Not other packages' details.
+   each engineer its package block from step 4 as written, every field, and
+   the spec path for reference. Not other packages' details.
 3. In the same message, start `millennium:qa-tester` in **acceptance** mode
    with the spec path: it writes the black-box acceptance tests from the spec
    while the engineers build.
@@ -170,13 +172,12 @@ Show the plan to the user before dispatching.
 ## 6. Integrate
 
 For each finished package, in its worktree (the path and branch the Agent
-result reports, or `git worktree list`), check the package's change from
-the `<start>` its worktree was dispatched from (step 5). It covers what the
-engineer committed as well as the working tree, which the stop hook,
-comparing with `HEAD`, does not. Not `<base>`: a worktree dispatched after
-other packages were merged holds their changes too, and checked from
-`<base>` it would report their files as out of scope and re-check them. The
-integrated branch is what gets checked from `<base>`.
+result reports, or `git worktree list`), check its change from the `<start>`
+its worktree was dispatched from (step 5): that covers what the engineer
+committed as well as the working tree, which the stop hook, comparing with
+`HEAD`, does not. Not from `<base>`: a worktree dispatched after other
+packages merged holds their changes too, which would show as out of scope.
+The integrated branch is what gets checked from `<base>`.
 
 1. `git -C <worktree> merge-base --is-ancestor <start> HEAD` must succeed;
    if it does not, the worktree did not start from `<start>`: stop and bring
@@ -187,22 +188,23 @@ integrated branch is what gets checked from `<base>`.
 4. Read the change yourself: `git -C <worktree> diff <start>` for tracked
    files, and every new file `git -C <worktree> status --porcelain
    --untracked-files=all` lists as untracked (`??`), which `git diff` does
-   not show. Does it do what the
-   package asked, and only that?
-5. Check the report's claims: every AC and SR it lists names a test, and
-   that test is in the diff. Read a sample of them: each asserts the claim,
-   with expected values not taken from the code under test.
+   not show. Does it do what the package asked, and only that?
+5. Check the report. Each AC and SR names a test that exists on the
+   integrated branch and runs: the package's, an earlier package's, or
+   qa-tester's. Read a sample: each asserts its claim, with expected values
+   not taken from the code under test. Route docs outside its paths to their
+   package or a follow-up, hold measurements to the Constraints (a miss is a
+   failure), and keep what it could not run for step 11.
 6. On a failure, send it back to the same engineer with the findings
-   (SendMessage to its agent id keeps its context). Otherwise commit in the
-   worktree, staging by explicit path what `git -C <worktree> status
-   --porcelain --untracked-files=all` lists, deletions and renames included,
-   except character devices (`test -c`: the sandbox's placeholders over
-   protected paths) and untracked entries whose path does not exist. Never
-   filter by a name pattern (one once dropped `.github/`), and never
-   `git add -A`, which would also stage the placeholders. Use a message
-   naming the package, and merge the branch into the
-   feature branch (`git merge --no-ff <branch>`). Once merged, remove the
-   worktree (`git worktree remove <path>`) and delete its branch.
+   (SendMessage to its agent id keeps its context).
+7. Otherwise commit in the worktree with a message naming the package,
+   staging by explicit path what `git -C <worktree> status --porcelain
+   --untracked-files=all` lists, deletions and renames included, except:
+   - character devices (`test -c`), the sandbox's placeholders;
+   - untracked entries whose path does not exist.
+   Never filter by a name pattern, never `git add -A`.
+8. Merge the branch into the feature branch (`git merge --no-ff <branch>`),
+   then remove the worktree (`git worktree remove <path>`) and its branch.
 
 After merging every package and the acceptance tests, commit the integrated
 state (fix worktrees and reviewers' worktrees branch from it) and run
@@ -240,24 +242,23 @@ Reviewers answer in the JSON format of the `review-protocol` skill. Record
 every finding in the spec's Decision log:
 
 ```
-| id | from | severity | finding | disposition | reason |
-| CR-1 | correctness-reviewer | high | empty cart total is NaN | fix | AC-3 |
-| MR-2 | maintainability | low | helper name | reject | matches the package's existing naming |
-| SEC-3 | security-engineer | medium | symlinked config dir | defer | pre-existing; <issue link> |
+| id | from | severity | finding | disposition | reason | test |
+| CR-1 | correctness-reviewer | high | empty cart total is NaN | fix | AC-3 | total_empty_test.go |
+| MR-2 | maintainability | low | helper name | reject | matches the package's existing naming | - |
+| SEC-3 | security-engineer | medium | symlinked config dir | defer | pre-existing; <issue link> | - |
 ```
 
 - **Pre-existing findings** (`origin: pre-existing`) are deferred as
-  follow-ups by default; `worsened` ones are triaged like `introduced`.
-  Fix a pre-existing one in this change only when the change makes it
-  reachable or worse (check the reviewer's call against `<base>`), or the
-  user asks. Critical and high ones still go to the user, with that default
-  as your recommendation.
+  follow-ups by default; `worsened` ones are triaged like `introduced`. Fix
+  a pre-existing one now only when the change makes it reachable or worse
+  (check the call against `<base>`) or the user asks. Critical and high
+  ones still go to the user, with that default as your recommendation.
 - **fix**: give it to the owning package's engineer in a new Agent call
   from the committed, integrated state, recording its `<start>` (step 5),
   since the old worktree is gone once merged. List the earlier findings on
   that code and their tests in the package (step 4). Every
-  bug fix comes with a regression test that fails without the fix; a
-  correctness-reviewer proof test can be that test.
+  bug fix comes with a regression test that fails without the fix (a
+  correctness-reviewer proof test can be it), recorded in the `test` column.
 - **defer**: only with a reason and a follow-up (an issue link). Critical or
   high security findings are never deferred without the user's explicit
   agreement.
@@ -268,13 +269,12 @@ Re-run step 6 for fixes. A fix that rewrites a
 significant part of the change (a new design, or more than about a third of
 the diff) gets a fresh review of that part by a new reviewer instance.
 
-Count rounds per component too. When one component (a module, a guard, a
-parser) draws findings in two consecutive review rounds, stop patching it:
-write a short design note with options (fail closed by construction, narrow
-the scope, accept and document a limit), what each costs and your
-recommendation, and ask the user before the next round. This comes on top
-of the cap: after **3** fix rounds with findings still open, stop and bring
-the state to the user.
+When one component (a module, a guard, a parser) draws findings of medium
+or higher, dispositioned fix, from any source, in two consecutive fix
+rounds, stop patching it: write a short design note with options (fail
+closed by construction, narrow the scope, accept and document a limit),
+their costs and your recommendation, and ask the user before the next
+round. After **3** fix rounds with findings open, bring the state to the user.
 
 ## 10. Final gate
 
@@ -297,7 +297,8 @@ word: if it does not pass, the work is not done, whatever any report says.
 - Everything the reports list as disabled, waived or suppressed.
 - Proposals waiting for the user (`millennium.proposal.json`: a config change
   or dependency approvals) with the exact `millennium-code-qc config apply` command.
-- Residual risks and deferred items with their follow-ups.
+- Residual risks, what the reports say could not be run among them, and
+  deferred items with their follow-ups.
 
 ## Escalating
 
