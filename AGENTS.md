@@ -49,6 +49,7 @@ scripts/check-modes.sh        fails unless plugin/scripts/ is executable in git 
                               release-build.sh run it; scripts/test-check-modes.sh tests it)
 scripts/release-build.sh      reproducible release builds and the engine lock
 scripts/test-launcher.sh      the launcher's tests (verify.sh runs them)
+CHANGELOG.md                  user-facing changes, newest first
 docs/                         user documentation; docs/design.md is the design
 ```
 
