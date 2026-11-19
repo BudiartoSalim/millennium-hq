@@ -254,16 +254,23 @@ it, because the protected paths are unknown; reads stay allowed.
     the floor only when the guard reads it exactly as the shell does, so
     it must be one line of printable ASCII, spaces and tabs, and hold no
     `$`, backquote, `#` (a comment, in which quotes do not count),
-    backslash, `<<` (a here-document or here-string), and no `}` right
-    before `<`, `>` or `&` (`{name}>file` assigns a variable). Then every
-    simple command in it, in pipelines, lists and subshells alike, must
-    be named literally and be one of:
+    backslash, `<<` (a here-document or here-string), `(` or `)`, quoted
+    or not, and no `}` right before `<`, `>` or `&` (`{name}>file`
+    assigns a variable). zsh, Claude Code's shell on macOS, reads
+    parentheses after a word as glob qualifiers, some of which run code
+    (`ls *(e:'rm -rf x':)`), and bash and zsh read them as a subshell, an
+    arithmetic command (`(( PATH = 0 ))`) or a function definition, so a
+    command with a subshell, or with `'('` among `find`'s arguments, is
+    never read-only. Then every simple command in it, in pipelines and
+    lists alike, must be named literally and be one of:
     - `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `egrep`, `fgrep`, `du`,
-      `stat`, `readlink`, `realpath`, `basename`, `dirname`, `echo`,
-      `true`, `test`, `[`, with any arguments: none of them has an
-      option that writes, runs a program or sets a variable. `printf`
-      (`-v` sets one) and `file` (`--compile` writes) are not on the
-      list;
+      `stat`, `readlink`, `realpath`, `basename`, `dirname`, `echo` or
+      `true`, with any arguments: none of them has an option that
+      writes, runs a program or sets a variable. `printf` (`-v` sets
+      one) and `file` (`--compile` writes) are not on the list;
+    - `test` or `[` without `-v` and without an argument that holds a
+      `[` (other than the name `[` itself): bash evaluates an array
+      subscript as arithmetic, so `[ -v 'a[HOME=7]' ]` sets `HOME`;
     - `find` whose every argument that starts with a dash is a number
       (`-mtime -1`), `-newerXY`, or one of `-L`, `-H`, `-P`, `-name`,
       `-iname`, `-path`, `-ipath`, `-wholename`, `-iwholename`, `-regex`,
@@ -275,15 +282,44 @@ it, because the protected paths are unknown; reads stay allowed.
       `-samefile`, `-readable`, `-writable`, `-executable`, `-true`,
       `-false`, `-follow`, `-noleaf`, `-daystart`, `-prune`, `-quit`,
       `-o`, `-or`, `-a`, `-and`, `-not`, `-print`, `-print0`, `-printf`,
-      `-ls` (plus `!` and a quoted `'('`, `')'`); any other, such as
-      `-exec`, `-delete`, `-fprint` or bfs's `-rm`, is not read-only;
-    - `rg` without `--pre`, `--pre-glob`, `--hostname-bin` or
-      `--search-zip`, abbreviated or not, and without `-z` in a bundle of
-      short options;
+      `-ls` (plus `!`); any other, such as `-exec`, `-delete`, `-fprint`
+      or bfs's `-rm`, is not read-only;
+    - `rg` whose every option is one of `-n`, `-i`, `-S`, `-l`, `-c`,
+      `-w`, `-F`, `-u` (also `-uu`), `-0`, `-e`, `-g`, `-t`, `-A`, `-B`,
+      `-C`, `-m` (short options may be bundled, `-inA3`), or
+      `--line-number`, `--ignore-case`, `--smart-case`,
+      `--files-with-matches`, `--count`, `--word-regexp`,
+      `--fixed-strings`, `--hidden`, `--no-ignore`, `--unrestricted`,
+      `--files`, `--json`, `--null`, `--regexp`, `--glob`, `--type`,
+      `--after-context`, `--before-context`, `--context`, `--max-count`,
+      `--max-depth`, `--color`, written in full, those that take a value
+      with it attached (`--glob=x`, `-A3`) or as the next word; any
+      other, such as `--pre`, `--hostname-bin` or `-z`, which run
+      programs, is not read-only;
     - `git status`, `log`, `diff`, `show`, `rev-parse` or `ls-files`
       with no own option but `-C <dir>`, `--no-pager`, `-P` or
-      `--no-optional-locks`, and no `-o` or `--output` (abbreviated or
-      not) after the command;
+      `--no-optional-locks`, and after the command only options from its
+      list, each a word of its own and written in full:
+      - `log`, `diff` and `show`: `-p`, `--patch`, `--name-only`,
+        `--name-status`, `--no-color`, and `--stat`, `-U`, `--unified`,
+        `--word-diff` and `--color`, alone or with a value attached
+        (`--stat=100`, `-U3`);
+      - `log` also: `--oneline`, `--graph`, `--all`, `--follow`,
+        `--decorate`, `--format=…`, `--pretty`, `-<n>`, and `-n`,
+        `--max-count`, `--since`, `--until`, `--after`, `--before`,
+        `--author` and `--grep`, with a value attached or as the next
+        word;
+      - `diff` also: `--cached`, `--staged`;
+      - `show` also: `--oneline`, `--format=…`, `--pretty`;
+      - `status`: `-s`, `--short`, `-b`, `--branch`, `--long`,
+        `--porcelain`, `-u` (`-uno`), `--untracked-files`, `--ignored`;
+      - `rev-parse`: `--show-toplevel`, `--verify`, `-q`, `--quiet`,
+        `--abbrev-ref`, `--short`;
+      - `ls-files`: `-o`, `--others`, `-m`, `--modified`, `-d`,
+        `--deleted`, `-c`, `--cached`, `--exclude-standard`, `-z`.
+
+      Any other, such as `--output` or `--ext-diff`, is not read-only;
+      after `--`, every word is a path;
     - `cd` or `pushd` with exactly one directory, written as an absolute
       path, `.`, `..`, or starting with `./` or `../`, that is not and
       does not lie in a protected path, `.pi` or `.claude`
@@ -291,8 +327,8 @@ it, because the protected paths are unknown; reads stay allowed.
       goes where `HOME`, `OLDPWD` or `CDPATH` say. `popd` is never
       read-only.
 
-    The arguments of `find`, `rg`, `git`, `cd` and `pushd` must not hold
-    an unquoted glob or brace. Every redirection must duplicate or close
+    The arguments of `find`, `rg`, `git`, `cd`, `pushd`, `test` and `[`
+    must not hold an unquoted glob or brace. Every redirection must duplicate or close
     a file descriptor (`2>&1`) or write to a path, without glob or brace
     and not starting with `!` (zsh's `>!`), that is not and does not lie
     in a protected path, `.pi` or `.claude` (`/dev/null`,
@@ -304,8 +340,9 @@ it, because the protected paths are unknown; reads stay allowed.
     `du -sh ~/.claude 2>&1`, `git -C .claude log > /tmp/x` and
     `cat .pi/extensions/x.ts > /tmp/x.ts` pass, and
     `ls $HOME/.claude 2>/dev/null`, `cd .claude && ls 2>/dev/null`,
-    `ls .claude > /tmp/x # list`, a read-only command on two lines, and
-    `bash -c 'ls .claude 2>/dev/null'` are denied. Split a denied
+    `ls .claude > /tmp/x # list`, a read-only command on two lines,
+    `(ls .claude) > /tmp/x` and `bash -c 'ls .claude 2>/dev/null'` are
+    denied. Split a denied
     read-only command, or drop the comment, the second line or the
     redirection.
   - **What it misses.** A name spliced from parts the shell joins when
@@ -317,9 +354,16 @@ it, because the protected paths are unknown; reads stay allowed.
     language (`python3 -c …`), that writes on its own; a program a
     command starts that its configuration names (a repository's
     `core.fsmonitor`, `diff.external`); a symlink made earlier that
-    leads into a protected path (`cd ./link`); a function, alias or
-    program on `PATH` that the user's shell setup puts in place of a
-    listed one; and writers not listed above (`sort -o`, `curl -o`).
+    leads into a protected path (`cd ./link`); a relative path that
+    resolves into a protected location without naming it, since the
+    guard reads the command's text, not the directory it runs in (from
+    a worktree under `.claude/worktrees/`,
+    `cd ../.. && echo {} > settings.json` or
+    `echo {} > ../../settings.json` writes `.claude/settings.json`;
+    Claude Code's OS sandbox covers this, pi has none); a function,
+    alias or program on `PATH` that the user's shell setup puts in place
+    of a listed one; and writers not listed above (`sort -o`,
+    `curl -o`).
 - **A Stop hook that cannot run does not block.** Claude Code cannot send an
   agent back to repair a hook that will not start. If the engine is missing,
   agents can stop with unchecked work, which is why the tech lead's final

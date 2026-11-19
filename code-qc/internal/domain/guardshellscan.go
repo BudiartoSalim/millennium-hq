@@ -20,7 +20,8 @@ type shellCommand struct {
 	words []string
 	// globbed: a word holds an unquoted `*`, `?`, `[` or `{`, which the
 	// shell may expand into any name, an option included (`-del*` into a
-	// file named `-delete`).
+	// file named `-delete`). A lone `[`, the test command's name, is no
+	// pattern: bash and zsh both read it as written.
 	globbed bool
 }
 
@@ -64,6 +65,8 @@ type shellScanner struct {
 	// globbed: a word of the simple command being read holds a glob.
 	globbed bool
 	word    strings.Builder
+	// wordGlobbed: the word being read holds an unquoted glob character.
+	wordGlobbed bool
 	// inWord: a word has begun, even an empty quoted one.
 	inWord bool
 	// quoted: part of the word being read is quoted or escaped.
@@ -91,7 +94,7 @@ func (s *shellScanner) scan(runes []rune, i int) int {
 	case unicode.IsSpace(r):
 		s.endWord()
 	default:
-		s.globbed = s.globbed || strings.ContainsRune(globChars, r)
+		s.wordGlobbed = s.wordGlobbed || strings.ContainsRune(globChars, r)
 		s.add(r)
 	}
 	return i
@@ -246,6 +249,7 @@ func (s *shellScanner) endWord() {
 		return
 	}
 	word := s.word.String()
+	s.globbed = s.globbed || (s.wordGlobbed && word != "[")
 	s.result.words = append(s.result.words, word)
 	if s.pending != "" {
 		s.result.redirects = append(s.result.redirects, shellRedirect{op: s.pending, target: word})
@@ -259,7 +263,7 @@ func (s *shellScanner) endWord() {
 // resetWord drops the word being read.
 func (s *shellScanner) resetWord() {
 	s.word.Reset()
-	s.inWord, s.quoted = false, false
+	s.inWord, s.quoted, s.wordGlobbed = false, false, false
 }
 
 // endRedirection records a redirection still waiting for its target as
