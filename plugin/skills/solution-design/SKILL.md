@@ -55,6 +55,11 @@ Write down:
   system's scale or history. Confirm the list with the user: it becomes the
   acceptance criteria.
 
+In every case, inventory the runtime what you build will run under: the
+operating systems, shells, real tool implementations (Claude Code runs bfs
+as `find` and ugrep as `grep`), toolchain versions and harnesses. It goes in
+the spec's Runtime section; check behaviour on each entry, never assume it.
+
 ## 3. Survey the approaches
 
 Find how the problem is solved in practice, not only how you would solve it:
@@ -97,6 +102,20 @@ For each option:
   it recovers), new dependencies, security, fit with the conventions;
 - the main risk, and how it would show up.
 
+When an option makes a security decision (what to allow, deny, validate or
+sanitise), its defaults are:
+
+- an allowlist, not a denylist;
+- whatever it cannot classify is denied;
+- no trust in a re-implementation of another program's parser; if one is
+  unavoidable, accept only a subset shown to be read the same way, tested
+  against the real program;
+- a rewrite or narrowing of a protection comes with a differential test:
+  everything the old version denied is still denied.
+
+State in the option's trade-offs which defaults it follows, and why it
+departs from any.
+
 Then a comparison table and a **recommendation** with the reason, and what
 would change your mind ("if delays can reach days, option B instead").
 
@@ -126,7 +145,7 @@ as an engineer in your final message to the lead:
 ```markdown
 ## Approach
 ### Problem          (goal, constraints, assumptions still open)
-### Reference behaviour   (needed / not needed, with sources)
+### Reference behaviour   (needed / not needed, with sources; the runtime)
 ### Approaches surveyed   (patterns and prior art, with sources)
 ### Options          (each as above; spike results with numbers)
 ### Comparison       (table)
