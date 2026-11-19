@@ -232,46 +232,82 @@ it, because the protected paths are unknown; reads stay allowed.
     `--in-place`, `perl -i`, `awk -i inplace`, `mv`, `cp`, `rm`, `ln`,
     `chmod`, `truncate`, `install`, `dd`, `unlink`, `link`, `rsync`,
     `tar`, `patch`, `sponge`, `git checkout`, `restore`, `rm`, `mv` or
-    `apply`, or a git whose own options set its config (`git -c …`,
+    `apply`, find's `-delete`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`
+    or bfs's `-rm`, an option starting `--ou` (git's `--output` and its
+    abbreviations), or a git whose own options set its config (`git -c …`,
     `--config-env`, `--exec-path`), since any git command can then be an
     alias. It names one when a word, or a part of one between white
     space, quotes, operators, `=`, `$`, `{` and `}`, is a protected path or
     ends in `.pi` or `.claude` (`sub/.pi`, `~/.claude/`, `D=.claude`,
     `"$(echo .pi)"`), read as written and as the shell reads it: quotes
-    removed, `$'…'` strings decoded (`$'\x2epi'`), redirection targets
-    included. Every word that holds shell syntax is read as a script as
-    well, whatever runs it (`bash -c -- '…'`, `echo '…' | sh`,
-    `sh <<< '…'`, `env -S '…'`, `su -c`, `ssh`, a git alias, `"$(…)"`),
-    as are `eval`'s arguments, four levels deep; deeper scripts are read
-    as text. The write may go elsewhere and still be denied
-    (`cp .claude/settings.json /tmp/x`); split such a command in two.
+    removed, a backslash-newline joining what it splits (`.p\⏎i`), `$'…'`
+    strings decoded (`$'\x2epi'`), redirection targets included. Every
+    word that holds shell syntax is read as a script as well, whatever
+    runs it (`bash -c -- '…'`, `echo '…' | sh`, `sh <<< '…'`,
+    `env -S '…'`, `su -c`, `ssh`, a git alias, `"$(…)"`), as are `eval`'s
+    arguments and each line of a command of several lines (so a quote in
+    a comment or a here-document hides no line after it), four levels
+    deep; deeper scripts are read as text. The write may go elsewhere and
+    still be denied (`cp .claude/settings.json /tmp/x`); split such a
+    command in two.
   - **The way out: provably read-only commands pass.** A command passes
-    the floor when every simple command in it, in pipelines, lists and
-    subshells alike, is named literally and is one of `ls`, `cat`,
-    `head`, `tail`, `wc`, `grep`, `egrep`, `fgrep`, `du`, `stat`,
-    `readlink`, `realpath`, `basename`, `dirname`, `echo`, `printf`,
-    `true`, `test`, `[`; `rg` without `--pre` or `--hostname-bin`;
-    `find` without `-exec`, `-execdir`, `-ok`, `-okdir`, `-delete`,
-    `-fprint…` or `-fls`; `file` without `-C`; `git status`, `log`,
-    `diff`, `show`, `rev-parse` or `ls-files` with no own option but
-    `-C <dir>`, `--no-pager`, `-P` or `--no-optional-locks` and no
-    `-o`/`--output`; `cd`, `pushd` or `popd` into a directory that is
-    not, and does not lie in, a protected path, `.pi` or `.claude`. The
-    options of `rg`, `find`, `file`, `git` and the directories of `cd`
-    must not hold an unquoted glob or brace. Every redirection must
-    duplicate or close a file descriptor (`2>&1`) or write to a path,
-    without glob or brace, that is not and does not lie in a protected
-    path, `.pi` or `.claude` (`/dev/null`, `/tmp/out.txt`). The command
-    must hold no `$` and no backquote at all, and no white space but
-    spaces, tabs and newlines. Anything else (`eval`, a shell, `xargs`,
-    `sudo`, a variable assignment, a shell keyword such as `for` or `if`)
-    is not read-only. So `ls -la .claude 2>/dev/null`,
+    the floor only when the guard reads it exactly as the shell does, so
+    it must be one line of printable ASCII, spaces and tabs, and hold no
+    `$`, backquote, `#` (a comment, in which quotes do not count),
+    backslash, `<<` (a here-document or here-string), and no `}` right
+    before `<`, `>` or `&` (`{name}>file` assigns a variable). Then every
+    simple command in it, in pipelines, lists and subshells alike, must
+    be named literally and be one of:
+    - `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `egrep`, `fgrep`, `du`,
+      `stat`, `readlink`, `realpath`, `basename`, `dirname`, `echo`,
+      `true`, `test`, `[`, with any arguments: none of them has an
+      option that writes, runs a program or sets a variable. `printf`
+      (`-v` sets one) and `file` (`--compile` writes) are not on the
+      list;
+    - `find` whose every argument that starts with a dash is a number
+      (`-mtime -1`), `-newerXY`, or one of `-L`, `-H`, `-P`, `-name`,
+      `-iname`, `-path`, `-ipath`, `-wholename`, `-iwholename`, `-regex`,
+      `-iregex`, `-regextype`, `-lname`, `-ilname`, `-type`, `-xtype`,
+      `-maxdepth`, `-mindepth`, `-depth`, `-mount`, `-xdev`, `-newer`,
+      `-anewer`, `-cnewer`, `-mtime`, `-mmin`, `-atime`, `-amin`,
+      `-ctime`, `-cmin`, `-size`, `-empty`, `-perm`, `-user`, `-group`,
+      `-uid`, `-gid`, `-nouser`, `-nogroup`, `-links`, `-inum`,
+      `-samefile`, `-readable`, `-writable`, `-executable`, `-true`,
+      `-false`, `-follow`, `-noleaf`, `-daystart`, `-prune`, `-quit`,
+      `-o`, `-or`, `-a`, `-and`, `-not`, `-print`, `-print0`, `-printf`,
+      `-ls` (plus `!` and a quoted `'('`, `')'`); any other, such as
+      `-exec`, `-delete`, `-fprint` or bfs's `-rm`, is not read-only;
+    - `rg` without `--pre`, `--pre-glob`, `--hostname-bin` or
+      `--search-zip`, abbreviated or not, and without `-z` in a bundle of
+      short options;
+    - `git status`, `log`, `diff`, `show`, `rev-parse` or `ls-files`
+      with no own option but `-C <dir>`, `--no-pager`, `-P` or
+      `--no-optional-locks`, and no `-o` or `--output` (abbreviated or
+      not) after the command;
+    - `cd` or `pushd` with exactly one directory, written as an absolute
+      path, `.`, `..`, or starting with `./` or `../`, that is not and
+      does not lie in a protected path, `.pi` or `.claude`
+      (`cd ./sub`). With no directory, `~`, `-` or a bare name, the shell
+      goes where `HOME`, `OLDPWD` or `CDPATH` say. `popd` is never
+      read-only.
+
+    The arguments of `find`, `rg`, `git`, `cd` and `pushd` must not hold
+    an unquoted glob or brace. Every redirection must duplicate or close
+    a file descriptor (`2>&1`) or write to a path, without glob or brace
+    and not starting with `!` (zsh's `>!`), that is not and does not lie
+    in a protected path, `.pi` or `.claude` (`/dev/null`,
+    `/tmp/out.txt`). Anything else (`eval`, a shell, `xargs`, `sudo`, a
+    variable assignment, a shell keyword such as `for` or `if`) is not
+    read-only. So `ls -la .claude 2>/dev/null`,
     `find . -path ./.claude -prune -o -name '*.go' -print 2>/dev/null`,
     `grep -rn foo --exclude-dir=.claude . > /tmp/out.txt`,
     `du -sh ~/.claude 2>&1`, `git -C .claude log > /tmp/x` and
     `cat .pi/extensions/x.ts > /tmp/x.ts` pass, and
-    `ls $HOME/.claude 2>/dev/null`, `cd .claude && ls 2>/dev/null` and
-    `bash -c 'ls .claude 2>/dev/null'` are denied.
+    `ls $HOME/.claude 2>/dev/null`, `cd .claude && ls 2>/dev/null`,
+    `ls .claude > /tmp/x # list`, a read-only command on two lines, and
+    `bash -c 'ls .claude 2>/dev/null'` are denied. Split a denied
+    read-only command, or drop the comment, the second line or the
+    redirection.
   - **What it misses.** A name spliced from parts the shell joins when
     the command runs (`.p${X}i`, `${X:-.pi}`, `.p$@i`, an option glued
     to it as in `mv -t.pi`); globs and brace expansions (`.p?`,
@@ -280,7 +316,10 @@ it, because the protected paths are unknown; reads stay allowed.
     (`mv conf "$(cat name)"`); a script file, or a program in another
     language (`python3 -c …`), that writes on its own; a program a
     command starts that its configuration names (a repository's
-    `core.fsmonitor`); and writers not listed above.
+    `core.fsmonitor`, `diff.external`); a symlink made earlier that
+    leads into a protected path (`cd ./link`); a function, alias or
+    program on `PATH` that the user's shell setup puts in place of a
+    listed one; and writers not listed above (`sort -o`, `curl -o`).
 - **A Stop hook that cannot run does not block.** Claude Code cannot send an
   agent back to repair a hook that will not start. If the engine is missing,
   agents can stop with unchecked work, which is why the tech lead's final

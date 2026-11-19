@@ -47,6 +47,7 @@ func TestScanShell(t *testing.T) {
 		{`mv a $'.p'i $"x y" $ $x`, [][]string{{"mv", "a", ".pi", "x y", "$", "$x"}}, []string{"mv", "a", ".pi", "x y", "$", "$x"}},
 		{`echo $'a\'b' $'unclosed`, [][]string{{"echo", "a'b", "unclosed"}}, []string{"echo", "a'b", "unclosed"}},
 		{`echo "$'.pi'"`, [][]string{{"echo", "$'.pi'"}}, []string{"echo", "$'.pi'"}},
+		{"ln .p\\\ni \\\nx \"a\\\nb\" 'c\\\nd'", [][]string{{"ln", ".pi", "x", "ab", "c\\\nd"}}, []string{"ln", ".pi", "x", "ab", "c\\\nd"}},
 	}
 	for _, tt := range tests {
 		scan := scanShell(tt.command)
