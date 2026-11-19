@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -44,7 +43,8 @@ var gitDiffOutput = readOnlyOptions{
 
 // readOnlyGitCommands are the git commands that only read, each with the
 // options that keep it so; any other, such as `--output` or
-// `--ext-diff`, may write a file or run a program.
+// `--ext-diff`, may write a file or run a program. An option that takes a
+// value takes it only attached (see readOnlyOptions.attachedValue).
 var readOnlyGitCommands = map[string]readOnlyOptions{
 	"status": {
 		syntax:   separateShorts,
@@ -53,13 +53,16 @@ var readOnlyGitCommands = map[string]readOnlyOptions{
 	},
 	"log": gitDiffOutput.with(readOnlyOptions{
 		flags:    []string{"--oneline", "--graph", "--all", "--follow"},
-		attached: []string{"--decorate", "--format", "--pretty"},
-		valued:   []string{"-n", "--max-count", "--since", "--until", "--after", "--before", "--author", "--grep"},
+		attached: []string{"--decorate", "--pretty"},
+		attachedValue: []string{
+			"-n", "--max-count", "--since", "--until", "--after", "--before", "--author", "--grep", "--format",
+		},
 	}),
 	"diff": gitDiffOutput.with(readOnlyOptions{flags: []string{"--cached", "--staged"}}),
 	"show": gitDiffOutput.with(readOnlyOptions{
-		flags:    []string{"--oneline"},
-		attached: []string{"--format", "--pretty"},
+		flags:         []string{"--oneline"},
+		attached:      []string{"--pretty"},
+		attachedValue: []string{"--format"},
 	}),
 	"rev-parse": {
 		syntax:   separateShorts,
@@ -109,55 +112,22 @@ var findReadOnly = []string{
 	"-prune", "-quit", "-o", "-or", "-a", "-and", "-not", "-print", "-print0", "-printf", "-ls",
 }
 
-// namedDescriptor matches a word of the form `{name}` right before a
-// redirection operator, as far as the text shows: the shell then assigns
-// the descriptor it opens to the variable name (`{PATH}>/dev/null`).
-var namedDescriptor = regexp.MustCompile(`\}[<>&]`)
-
-// unscannedSyntax are characters the scanner does not read as the shell
-// does: an expansion (`$`, a backquote), a comment, in which quotes do
-// not count (`#`), a backslash, which with a newline after it joins
-// lines, even inside double quotes, and a parenthesis, quoted or not.
-// zsh reads parentheses after a word as glob qualifiers, some of which
-// run code (`ls *(e:'rm x':)`); bash and zsh read them as a subshell, an
-// arithmetic command (`(( PATH = 0 ))`) or a function definition
-// (`ls () …`), which set variables or define functions.
-const unscannedSyntax = "$`#\\()"
-
 // provablyReadOnly reports whether a shell command provably changes no
 // protected path, so that the shell guard need not deny it for naming
-// one. The scanner must read it as the shell does (see
-// scannedAsShellReads); each of its simple commands, in pipelines and
-// lists alike, is one of readOnlyCommands or passes its check in
+// one. Its text must be inert (see inertShellText), so that the scanner
+// reads it as bash and zsh do; each of its simple commands, in pipelines
+// and lists alike, is one of readOnlyCommands or passes its check in
 // checkedReadCommands, named literally; and every redirection writes to
 // no protected path (see safeRedirect). Anything else, `eval`, a shell, a
 // variable assignment, a shell keyword or a program it does not know, is
 // not read-only: in doubt, it is not.
 func provablyReadOnly(command string) bool {
-	if !scannedAsShellReads(command) {
+	if !inertShellText(command) {
 		return false
 	}
 	scan := scanShell(command)
 	return !slices.ContainsFunc(scan.commands, func(c shellCommand) bool { return !readOnlyCommand(c) }) &&
 		!slices.ContainsFunc(scan.redirects, func(r shellRedirect) bool { return !safeRedirect(r) })
-}
-
-// scannedAsShellReads reports whether the scanner provably reads command
-// as the shell does: it is one line of printable ASCII, spaces and tabs
-// (outside ASCII, a shell in another locale may read a byte after one
-// as part of a character, and the scanner splits only at spaces and
-// tabs), and holds none of unscannedSyntax, no here-document or
-// here-string (`<<`, whose body the shell reads by lines), and no
-// variable a redirection assigns (see namedDescriptor).
-func scannedAsShellReads(command string) bool {
-	return !strings.ContainsFunc(command, unscannedRune) && !strings.ContainsAny(command, unscannedSyntax) &&
-		!strings.Contains(command, "<<") && !namedDescriptor.MatchString(command)
-}
-
-// unscannedRune reports whether r is neither printable ASCII, a space
-// nor a tab.
-func unscannedRune(r rune) bool {
-	return (r < ' ' || r > '~') && r != '\t'
 }
 
 // readOnlyCommand reports whether a simple command only reads files. A
@@ -209,26 +179,53 @@ func readOnlyTest(args []string) bool {
 	return !slices.ContainsFunc(args, func(arg string) bool { return arg == "-v" || strings.Contains(arg, "[") })
 }
 
-// readOnlyGit checks git's arguments: only the own options of
-// readOnlyGitOptions and `-C <dir>`, then one of readOnlyGitCommands with
-// only the options that keep it read-only.
+// readOnlyGit checks git's arguments: none is an output option (see
+// isGitOutputOption); only the own options of readOnlyGitOptions and
+// `-C <dir>`, then one of readOnlyGitCommands with only the options that
+// keep it read-only.
 func readOnlyGit(args []string) bool {
-	i := 0
-	for i < len(args) && strings.HasPrefix(args[i], "-") {
-		switch {
-		case args[i] == "-C" && i+1 < len(args):
-			i += 2
-		case slices.Contains(readOnlyGitOptions, args[i]):
-			i++
-		default:
-			return false
-		}
+	if slices.ContainsFunc(args, isGitOutputOption) {
+		return false
 	}
-	if i == len(args) {
+	i, ok := gitCommandIndex(args)
+	if !ok {
 		return false
 	}
 	options, ok := readOnlyGitCommands[args[i]]
 	return ok && options.allow(args[i+1:])
+}
+
+// gitCommandIndex is the index of git's command among args, past its own
+// options, which must be those of readOnlyGitOptions or `-C <dir>` with a
+// dir that does not start with a dash; false when one is not, or no
+// command follows.
+func gitCommandIndex(args []string) (int, bool) {
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		switch {
+		case args[i] == "-C" && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-"):
+			i += 2
+		case slices.Contains(readOnlyGitOptions, args[i]):
+			i++
+		default:
+			return 0, false
+		}
+	}
+	return i, i < len(args)
+}
+
+// isGitOutputOption reports whether arg, a word after git, is git's
+// `--output`, with a value attached or not, or an abbreviation of it
+// (`--ou`, `--outp=x`), which writes the diff to a file. The option
+// allowlists refuse it already wherever they read an option; this check
+// refuses it wherever it stands, after `--` included. git reads its arguments in more than one pass (git log reads
+// its own options before its revision options), so a word the allowlist
+// reads as an operand or a value may be one git reads as an option; this
+// is the defense should the allowlist's reading and git's part again
+// (round 10, R10-CR-1).
+func isGitOutputOption(arg string) bool {
+	name, _, _ := strings.Cut(arg, "=")
+	return len(name) > len("--") && strings.HasPrefix("--output", name)
 }
 
 // readOnlyChdir is the check of cd and pushd: one directory, given

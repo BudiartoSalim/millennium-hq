@@ -251,17 +251,44 @@ it, because the protected paths are unknown; reads stay allowed.
     still be denied (`cp .claude/settings.json /tmp/x`); split such a
     command in two.
   - **The way out: provably read-only commands pass.** A command passes
-    the floor only when the guard reads it exactly as the shell does, so
-    it must be one line of printable ASCII, spaces and tabs, and hold no
-    `$`, backquote, `#` (a comment, in which quotes do not count),
-    backslash, `<<` (a here-document or here-string), `(` or `)`, quoted
-    or not, and no `}` right before `<`, `>` or `&` (`{name}>file`
-    assigns a variable). zsh, Claude Code's shell on macOS, reads
-    parentheses after a word as glob qualifiers, some of which run code
-    (`ls *(e:'rm -rf x':)`), and bash and zsh read them as a subshell, an
-    arithmetic command (`(( PATH = 0 ))`) or a function definition, so a
-    command with a subshell, or with `'('` among `find`'s arguments, is
-    never read-only. Then every simple command in it, in pipelines and
+    the floor only when the guard reads it exactly as bash and zsh do, so
+    its text must be made only of characters known to be inert in both;
+    anything else, whatever it is, keeps it from passing. Each review
+    found another syntax the guard read otherwise than a shell (comments,
+    here-documents, line continuations, zsh's glob qualifiers, which run
+    code, `ls *(e:'rm -rf x':)`, its numeric glob `<->`, extendedglob's
+    `^x` and `a~b`), so the guard accepts what it knows rather than
+    refusing what it knows. Outside quotes, a command may hold only:
+    - ASCII letters and digits, spaces, tabs, and `.` `_` `/` `:` `,`
+      `@` `+` `-`;
+    - the globs `*`, `?`, `[` and `]` (and the `[` command), which the
+      rules for globbed words below still apply to;
+    - `=`, except at the start of a word that is longer than `=` itself
+      (zsh replaces `=ls` by the path of `ls`, and reads `==` as one) or
+      right after another `=` (`x==ls`, with zsh's `MAGIC_EQUAL_SUBST`),
+      so `[ a = b ]` passes and `[ a == b ]` does not;
+    - `~` only as the first character of a word and followed by `/` or
+      the word's end (`~/.claude`, `cd ~`): `~x`, `~+`, `~-` and `a~b`
+      name other directories or are extendedglob's exclusion;
+    - the operators `|`, `||`, `;`, `&&`, `>`, `>>`, `>&` (`>&2`,
+      `2>&1`, `1>&2`, `>&-`), `&>` and `&>>`, with a file descriptor's
+      digits before them (`2>`, `2>>`). `&>` and `&>>` write both
+      streams to their target, which is checked as any other
+      redirection's. A lone `&`, `|&`, `;;`, `>|` and zsh's `&|` and `&!`
+      are not;
+    - quoted strings, closed, that hold only printable ASCII and spaces
+      but `$`, backquote, backslash, `!`, `#`, `(` and `)`; a single
+      quote right after a closing one (`'a''b'`, which zsh's
+      `RC_QUOTES` reads as one quote) is refused too.
+
+    So no `<` in any form (a redirection from a file, `<&0`, a
+    here-document or here-string, zsh's `<->`), and no `^`, `!`, `%`,
+    `{`, `}`, `(`, `)`, `#`, `$`, backquote, backslash, newline, other
+    control character or character outside ASCII, quoted or not where
+    the list above says so. A command with a subshell, with `!` or
+    `'('` among `find`'s arguments (write `-not`), or with an unquoted
+    `%` (`git log --format=%h`; write `'--format=%h'`) is never
+    read-only. Then every simple command in it, in pipelines and
     lists alike, must be named literally and be one of:
     - `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `egrep`, `fgrep`, `du`,
       `stat`, `readlink`, `realpath`, `basename`, `dirname`, `echo` or
@@ -282,8 +309,9 @@ it, because the protected paths are unknown; reads stay allowed.
       `-samefile`, `-readable`, `-writable`, `-executable`, `-true`,
       `-false`, `-follow`, `-noleaf`, `-daystart`, `-prune`, `-quit`,
       `-o`, `-or`, `-a`, `-and`, `-not`, `-print`, `-print0`, `-printf`,
-      `-ls` (plus `!`); any other, such as `-exec`, `-delete`, `-fprint`
-      or bfs's `-rm`, is not read-only;
+      `-ls` (not `!`, which is not inert text: write `-not`); any other,
+      such as `-exec`, `-delete`, `-fprint` or bfs's `-rm`, is not
+      read-only;
     - `rg` whose every option is one of `-n`, `-i`, `-S`, `-l`, `-c`,
       `-w`, `-F`, `-u` (also `-uu`), `-0`, `-e`, `-g`, `-t`, `-A`, `-B`,
       `-C`, `-m` (short options may be bundled, `-inA3`), or
@@ -293,33 +321,47 @@ it, because the protected paths are unknown; reads stay allowed.
       `--files`, `--json`, `--null`, `--regexp`, `--glob`, `--type`,
       `--after-context`, `--before-context`, `--context`, `--max-count`,
       `--max-depth`, `--color`, written in full, those that take a value
-      with it attached (`--glob=x`, `-A3`) or as the next word; any
-      other, such as `--pre`, `--hostname-bin` or `-z`, which run
-      programs, is not read-only;
+      with it attached (`--glob=x`, `-A3`) or as the next word, which
+      must not start with a dash (rg would take `-e -x` as the pattern
+      `-x`; the guard refuses it rather than tell); any other, such as
+      `--pre`, `--hostname-bin` or `-z`, which run programs, is not
+      read-only;
     - `git status`, `log`, `diff`, `show`, `rev-parse` or `ls-files`
-      with no own option but `-C <dir>`, `--no-pager`, `-P` or
-      `--no-optional-locks`, and after the command only options from its
-      list, each a word of its own and written in full:
+      with no own option but `-C <dir>` (a dir that does not start with
+      a dash), `--no-pager`, `-P` or `--no-optional-locks`, and after the
+      command only options from its list, each a word of its own, written
+      in full, and with its value attached, never as the next word:
       - `log`, `diff` and `show`: `-p`, `--patch`, `--name-only`,
-        `--name-status`, `--no-color`, and `--stat`, `-U`, `--unified`,
-        `--word-diff` and `--color`, alone or with a value attached
-        (`--stat=100`, `-U3`);
+        `--name-status`, `--no-color`, and `--stat[=…]`, `-U[<n>]`,
+        `--unified[=…]`, `--word-diff[=…]` and `--color[=…]`, alone or
+        with a value attached (`--stat=100`, `-U3`);
       - `log` also: `--oneline`, `--graph`, `--all`, `--follow`,
-        `--decorate`, `--format=…`, `--pretty`, `-<n>`, and `-n`,
-        `--max-count`, `--since`, `--until`, `--after`, `--before`,
-        `--author` and `--grep`, with a value attached or as the next
-        word;
+        `--decorate[=…]`, `--pretty[=…]`, `-<n>` (`-3`), and, only with
+        a value attached, `-n<n>` (`-n5`), `--max-count=…`,
+        `--since=…`, `--until=…`, `--after=…`, `--before=…`,
+        `--author=…`, `--grep=…` and `--format=…`. Written alone, git
+        takes the next word as the value, but `git log` reads its own
+        options (`--decorate`, `-q`) in a pass before the others, so
+        which word that is cannot be told from the text: `git log
+        --before --decorate --after --output=<file> -1` writes the
+        file;
       - `diff` also: `--cached`, `--staged`;
-      - `show` also: `--oneline`, `--format=…`, `--pretty`;
+      - `show` also: `--oneline`, `--pretty[=…]`, `--format=…`;
       - `status`: `-s`, `--short`, `-b`, `--branch`, `--long`,
-        `--porcelain`, `-u` (`-uno`), `--untracked-files`, `--ignored`;
+        `--porcelain[=…]`, `-u[<mode>]` (`-uno`),
+        `--untracked-files[=…]`, `--ignored[=…]`;
       - `rev-parse`: `--show-toplevel`, `--verify`, `-q`, `--quiet`,
-        `--abbrev-ref`, `--short`;
+        `--abbrev-ref[=…]`, `--short[=…]`;
       - `ls-files`: `-o`, `--others`, `-m`, `--modified`, `-d`,
         `--deleted`, `-c`, `--cached`, `--exclude-standard`, `-z`.
 
-      Any other, such as `--output` or `--ext-diff`, is not read-only;
-      after `--`, every word is a path;
+      Any other, such as `--ext-diff`, is not read-only; after `--`,
+      every word is a path. A word after `git` that is `--output`, starts
+      with `--output=`, or abbreviates it (`--o`, `--ou`, `--out`,
+      `--outp`, `--outpu`, with a value or not) makes the command not
+      read-only wherever it stands, after `--` too, so that a word the
+      guard reads as a path or a value but git reads as an option cannot
+      write a file;
     - `cd` or `pushd` with exactly one directory, written as an absolute
       path, `.`, `..`, or starting with `./` or `../`, that is not and
       does not lie in a protected path, `.pi` or `.claude`
@@ -328,7 +370,7 @@ it, because the protected paths are unknown; reads stay allowed.
       read-only.
 
     The arguments of `find`, `rg`, `git`, `cd`, `pushd`, `test` and `[`
-    must not hold an unquoted glob or brace. Every redirection must duplicate or close
+    must not hold an unquoted glob. Every redirection must duplicate or close
     a file descriptor (`2>&1`) or write to a path, without glob or brace
     and not starting with `!` (zsh's `>!`), that is not and does not lie
     in a protected path, `.pi` or `.claude` (`/dev/null`,
@@ -341,10 +383,12 @@ it, because the protected paths are unknown; reads stay allowed.
     `cat .pi/extensions/x.ts > /tmp/x.ts` pass, and
     `ls $HOME/.claude 2>/dev/null`, `cd .claude && ls 2>/dev/null`,
     `ls .claude > /tmp/x # list`, a read-only command on two lines,
-    `(ls .claude) > /tmp/x` and `bash -c 'ls .claude 2>/dev/null'` are
-    denied. Split a denied
-    read-only command, or drop the comment, the second line or the
-    redirection.
+    `(ls .claude) > /tmp/x`, `bash -c 'ls .claude 2>/dev/null'`,
+    `grep x < .claude/settings.json > /tmp/x`,
+    `find .claude ! -name x 2>/dev/null` and
+    `git log -n 5 -- .claude > /tmp/x` are denied. Split a denied
+    read-only command, drop the comment, the second line or the
+    redirection, or rewrite it with inert text (`-n5`, `-not`).
   - **What it misses.** A name spliced from parts the shell joins when
     the command runs (`.p${X}i`, `${X:-.pi}`, `.p$@i`, an option glued
     to it as in `mv -t.pi`); globs and brace expansions (`.p?`,

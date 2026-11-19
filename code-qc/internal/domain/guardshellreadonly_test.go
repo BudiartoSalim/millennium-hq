@@ -56,8 +56,9 @@ func TestProvablyReadOnlyRefusesWhatTheScannerMayMisread(t *testing.T) {
 		"ls @C",
 		"ls\t@C ; ls  @P",
 		"ls '{x}' @C > /dev/null",
-		"ls @C < x > /tmp/y",
 	})
+	// No `<` in any form (R10-SEC-1).
+	assertProvablyReadOnly(t, false, []string{"ls @C < x > /tmp/y"})
 }
 
 // find is read-only only with the primaries and options of findReadOnly,
@@ -69,10 +70,13 @@ func TestProvablyReadOnlyFind(t *testing.T) {
 		"find -L @C -H -P",
 		"find . -path ./@C -prune -o -name '*.go' -print 2>/dev/null",
 		"find @C -type f -mtime -1 -size +10k -perm -644 -maxdepth 2 -print0",
-		"find @C ! -iname x -a -newer y -or -newermt 2024-01-01 -not -empty -ls",
+		"find @C -not -iname x -a -newer y -or -newermt 2024-01-01 -not -empty -ls",
 		"find @C -newerBt x -printf '%p'",
 	})
 	assertProvablyReadOnly(t, false, []string{
+		// `!` is not inert text, quoted or not (round 10).
+		"find @C ! -iname x",
+		"find @C '!' -iname x",
 		"find @M -name config.json -rm",
 		"find @C -name settings.json -rm 2>/dev/null",
 		"find @P/extensions -type f -rm",
@@ -97,16 +101,17 @@ func TestProvablyReadOnlyFind(t *testing.T) {
 }
 
 // rg is read-only only with the options of ripgrepReadOnly, alone or
-// bundled, their values attached or the next word (R9-CR-2): an option
-// that runs a program, spelled whole, with a value, abbreviated, or as a
-// short option in a bundle, and every option not listed, is not.
+// bundled, their values attached or the next word (R9-CR-2), a next word
+// that does not start with a dash (R10-CR-1): an option that runs a
+// program, spelled whole, with a value, abbreviated, or as a short option
+// in a bundle, and every option not listed, is not.
 func TestProvablyReadOnlyRipgrep(t *testing.T) {
 	assertProvablyReadOnly(t, true, []string{
 		"rg foo @C",
 		"rg -n --hidden -g '*.go' foo @C -- -x",
 		"rg -niSlcwF0 -uu -uuu foo @C",
 		"rg -nA3 -B 2 -C1 -m5 --max-count 2 --max-depth=3 foo @C",
-		"rg -e foo -efoo --regexp=x --regexp -z -g '*.go' --glob=x --glob -y -t go --type=go foo @C",
+		"rg -e foo -efoo --regexp=x --regexp=-z -g '*.go' --glob=x --glob y -t go --type=go foo @C",
 		"rg --line-number --ignore-case --smart-case --files-with-matches --count --word-regexp foo @C",
 		"rg --fixed-strings --no-ignore --unrestricted --json --null --color never --color=always foo @C",
 		"rg --files @C 2>/dev/null > /tmp/x",
@@ -134,32 +139,61 @@ func TestProvablyReadOnlyRipgrep(t *testing.T) {
 		"rg -e x -z foo @C",
 		"rg -A 3 --pre ./x foo @C",
 		"rg foo @C --pre ./x",
+		"rg --regexp -z foo @C",
+		"rg --glob -y foo @C",
+		"rg -e -x foo @C",
+		"rg -ne --pre=./x foo @C",
+		"rg -A -1 foo @C",
 	})
 }
 
 // git is read-only only with a read-only command and, after it, only the
-// options of readOnlyGitCommands for that command (R9-CR-2): an output
-// option, abbreviated or not, and every option not listed, is not.
+// options of readOnlyGitCommands for that command (R9-CR-2), each value
+// attached (R10-CR-1): an output option, abbreviated or not, and every
+// option not listed, is not, and an output option is not wherever it
+// stands, even after `--`.
 func TestProvablyReadOnlyGitOptions(t *testing.T) {
 	assertProvablyReadOnly(t, true, []string{
 		"git log --oneline -- @C",
 		"git diff --stat -- @C > /tmp/x",
 		"git status -s --short -b --branch --long --porcelain --porcelain=v2 -u -uno --untracked-files=no --ignored -- @C",
 		"git status --ignored=matching @C",
-		"git log -n 5 -n5 --max-count 3 --max-count=3 -3 --format=%h --pretty --pretty=oneline --stat --name-only -- @C",
-		"git log --name-status -p --patch --graph --decorate --decorate=full --all --since 2024-01-01 --until=now -- @C",
-		"git log --after x --before=y --author me --author=me --grep fix --grep=fix --follow -- @C/settings.json",
-		"git log --author --output=x -- @C",
+		"git log -n5 --max-count=3 -3 '--format=%h' --pretty --pretty=oneline --stat --name-only -- @C",
+		"git log --name-status -p --patch --graph --decorate --decorate=full --all --since=2024-01-01 --until=now -- @C",
+		"git log --after=x --before=y --author=me --grep=fix --follow -- @C/settings.json",
 		"git diff --stat=100 --name-only --name-status --cached --staged -U3 -U --unified=5 --word-diff -- @C",
 		"git diff --word-diff=color --color --color=always --no-color main -- @C > /tmp/x",
-		"git show --stat --name-only --oneline --format=%s --pretty=short -p HEAD:@C/settings.json",
+		"git show --stat --name-only --oneline --format=tformat:x --pretty=short -p HEAD:@C/settings.json",
 		"git rev-parse --show-toplevel --verify -q --quiet --abbrev-ref --abbrev-ref=strict --short --short=7 HEAD",
 		"git ls-files -o -m -d -c -z --others --modified --deleted --cached --exclude-standard -- @P",
 		"git -C @C --no-pager log -- -x",
-		"git log -- @C --output=x",
-		"git log -n",
+		"git log -- @C --out-of-tree --outputs",
 	})
 	assertProvablyReadOnly(t, false, []string{
+		// A value-taking option without its value attached (R10-CR-1).
+		"git log -n 5 -- @C",
+		"git log -n",
+		"git log --max-count 3 -- @C",
+		"git log --since 2024-01-01 -- @C",
+		"git log --until now -- @C",
+		"git log --after x -- @C",
+		"git log --before y -- @C",
+		"git log --author me -- @C",
+		"git log --grep fix -- @C",
+		"git log --format -- @C",
+		"git show --format HEAD",
+		"git log --author --output=x -- @C",
+		// The output option wherever it stands (R10-CR-1).
+		"git log -- @C --output=x",
+		"git log -- @C --output",
+		"git log -- @C --o=x",
+		"git log -- @C --ou",
+		"git log -- @C --out=x",
+		"git log -- @C --outpu=x",
+		"git -C --output=x log",
+		"git -C -x log",
+		// `%` is not inert text outside quotes (round 10).
+		"git log --format=%h -- @C",
 		"git log --outp=@C/settings.json 2>/dev/null",
 		"git log --out @C/settings.json",
 		"git log --ou=x -- @C",
@@ -354,4 +388,39 @@ func TestGuardShellDeniesTheRound8Probes(t *testing.T) {
 		"test -v 'a[HOME=7]'; ls @C > /tmp/x",
 		"(ls @C) > /tmp/x",
 	})
+}
+
+// The reviewers' probes of round 9 (R10-CR-1, R10-SEC-1, R10-SEC-2), each
+// of which the shell runs as a write of a protected path. git log reads
+// its own options (`--decorate`, `--quiet`) in a pass before its revision
+// options, so a word the allowlist skipped as the value of `--before`,
+// `--since`, `--author` or `-n` is gone when the revision options are
+// read, the option takes the next word instead, and `--output=…` is read
+// as an option (verified with git 2.53: `git log --before --decorate
+// --after --output=<f> --format=tformat:x -1` writes x to <f>). zsh reads
+// `<->` and `<1-9>` as numeric globs where the scanner read two
+// redirections, which hid `-delete`, `--pre=rm` and `--output=…` from
+// the option checks, and with extendedglob `^x` and `a~b` as globs that
+// may expand into a planted file named as an option (`-delete`).
+func TestGuardShellDeniesTheRound9Probes(t *testing.T) {
+	probes := []string{
+		"git log --before --decorate --after --output=@C/settings.json --format=tformat:x -1",
+		"git log --since --decorate --until --output=@M/config.json -1",
+		"git log --author --decorate --grep --output=@M/config.json -1",
+		"git log -n --decorate=full -n --output=@C/settings.json",
+		"find @M /dev/fd/<-> -delete",
+		"find @M <-> -rm",
+		"find @M <1-9> -delete 2>/dev/null",
+		"rg x @C /dev/fd/<-> --pre=rm",
+		"git diff <-> --output=@C/settings.json",
+		"git diff <1-9> --output=@C/settings.json",
+		"find @M ^x > /tmp/out",
+		"find @M *~x > /tmp/out",
+		"find @M a~b 2>/dev/null",
+		"find @M ~x 2>/dev/null",
+		"git diff ^x -- @C > /tmp/out",
+		"git diff a~b -- @C 2>/dev/null",
+	}
+	assertProvablyReadOnly(t, false, probes)
+	assertShellDenied(t, probes)
 }
