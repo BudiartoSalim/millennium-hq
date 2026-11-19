@@ -176,7 +176,10 @@ func TestProvablyReadOnly(t *testing.T) {
 		{"ls -la @C 2>/dev/null", true},
 		{"cat @P/settings.json | head -5 | wc -l; echo done && true || test -d @C; [ -d @P ]", true},
 		{"tail -n 3 x; egrep a x; fgrep b x; du -sh ~/@C 2>&1; stat @C; readlink @P; realpath @P", true},
-		{"basename @C; dirname @P/x; grep -rn rm @C; (ls @C)", true},
+		{"basename @C; dirname @P/x; grep -rn rm @C", true},
+		{"(ls @C)", false},
+		{"ls @C; (( ls , PATH = 0 ))", false},
+		{"ls *(e:'rm -rf @M':)", false},
 		{"printf '%s' x; ls @C", false},
 		{"ls $HOME/@C", false},
 		{"ls `pwd`/@C", false},
@@ -459,8 +462,10 @@ func targetForms(writer, target string) []string {
 // corpusWrappers run a command: as it is, in a shell's -c script, through
 // eval, a pipe, a here-string or env -S, after a prefix, from find
 // -exec, in a loop's body, a subshell or a command substitution, in a
-// directory a prefix enters, or on a line after a read-only command whose
-// comment or here-document holds a quote.
+// directory a prefix enters, on a line after a read-only command whose
+// comment or here-document holds a quote, in a zsh glob qualifier of a
+// read-only command (R9-SEC-1), or after an arithmetic command or a test
+// that assigns (R9-SEC-2).
 func corpusWrappers() []func(string) string {
 	quoted := func(format string) func(string) string {
 		return func(c string) string { return fmt.Sprintf(format, shellQuote(c)) }
@@ -475,6 +480,9 @@ func corpusWrappers() []func(string) string {
 		prefixed("for x in 1; do %s; done"), prefixed("(%s)"), prefixed(`echo "$(%s)"`), prefixed("env -C sub %s"),
 		prefixed("sudo -D sub %s"), prefixed("ls #'\n%s\n#'"), prefixed("ls # it's\n%s"),
 		prefixed("cat <<EOF\necho it's\nEOF\n%s"), prefixed("cat <<'EOF'\necho '\nEOF\n%s"),
+		quoted("ls *(e:%s:)"), quoted("ls x (e:%s:)"), quoted("ls > /tmp/o(e:%s:)"), quoted("cd ./x(e:%s:) && ls"),
+		quoted("ls *(echo ' ;'%s' 'c)"), quoted("ls > /tmp/o(echo ' ;'%s' 'c)"),
+		prefixed("(( ls , PATH = 0 )); %s"), prefixed("[ -v 'a[HOME=7]' ] && %s"),
 	}
 }
 

@@ -87,7 +87,7 @@ func TestScanShellReadsRedirections(t *testing.T) {
 
 // A simple command is globbed when a word of it holds an unquoted glob or
 // brace, which the shell may expand into any name; a quoted or escaped
-// one is a plain character.
+// one is a plain character, and so is a lone `[`.
 func TestScanShellMarksGlobbedCommands(t *testing.T) {
 	tests := []struct {
 		command string
@@ -98,6 +98,8 @@ func TestScanShellMarksGlobbedCommands(t *testing.T) {
 		{"find . -de*", []bool{true}},
 		{"ls x?; find . {-delete,}", []bool{true, true}},
 		{"ls [ab]; cat x", []bool{true, false}},
+		{"[ -d x ]; [ -d [ ]; [ -d x* ]", []bool{false, false, true}},
+		{"[ -d '['x ]; [ -d [x ]", []bool{false, true}},
 	}
 	for _, tt := range tests {
 		var got []bool

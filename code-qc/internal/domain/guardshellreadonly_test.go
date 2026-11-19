@@ -19,7 +19,10 @@ func assertProvablyReadOnly(t *testing.T, want bool, commands []string) {
 // (R8-SEC-1, R8-CR-1), a here-document, whose body the shell reads by
 // lines (R8-SEC-2), a backslash, with which a newline joins lines
 // (R8-SEC-3), a here-string, a second line, a character outside
-// printable ASCII, and a variable a redirection assigns.
+// printable ASCII, a variable a redirection assigns, and a parenthesis,
+// quoted or not, which zsh may read as glob qualifiers that run code
+// (R9-SEC-1), and bash and zsh as a subshell, an arithmetic command or a
+// function definition (R9-SEC-2, R9-CR-1).
 func TestProvablyReadOnlyRefusesWhatTheScannerMayMisread(t *testing.T) {
 	assertProvablyReadOnly(t, false, []string{
 		"ls #'\nprintf x > @C/settings.json\n#'",
@@ -41,6 +44,13 @@ func TestProvablyReadOnlyRefusesWhatTheScannerMayMisread(t *testing.T) {
 		"ls @C {PATH}>/dev/null",
 		"ls @C {fd}<x",
 		"ls @C {fd}&>x",
+		"ls @C *(e:'rm x':)",
+		"ls @C x(e:'rm x':)",
+		"ls @C ')'",
+		"ls @C '('",
+		"(ls @C)",
+		"ls @C; (( ls , PATH = 0 ))",
+		"ls () ( ls ); ls @C",
 	})
 	assertProvablyReadOnly(t, true, []string{
 		"ls @C",
@@ -59,7 +69,7 @@ func TestProvablyReadOnlyFind(t *testing.T) {
 		"find -L @C -H -P",
 		"find . -path ./@C -prune -o -name '*.go' -print 2>/dev/null",
 		"find @C -type f -mtime -1 -size +10k -perm -644 -maxdepth 2 -print0",
-		"find @C ! -iname x -a '(' -newer y -or -newermt 2024-01-01 ')' -not -empty -ls",
+		"find @C ! -iname x -a -newer y -or -newermt 2024-01-01 -not -empty -ls",
 		"find @C -newerBt x -printf '%p'",
 	})
 	assertProvablyReadOnly(t, false, []string{
@@ -82,15 +92,26 @@ func TestProvablyReadOnlyFind(t *testing.T) {
 		"find @C -",
 		"find @C -name -rm",
 		"find @C -del*",
+		"find @C ! -iname x -a '(' -newer y -or -newermt 2024-01-01 ')' -not -empty -ls",
 	})
 }
 
-// rg is read-only without an option that runs a program, spelled whole,
-// with a value, abbreviated, or as a short option in a bundle.
+// rg is read-only only with the options of ripgrepReadOnly, alone or
+// bundled, their values attached or the next word (R9-CR-2): an option
+// that runs a program, spelled whole, with a value, abbreviated, or as a
+// short option in a bundle, and every option not listed, is not.
 func TestProvablyReadOnlyRipgrep(t *testing.T) {
 	assertProvablyReadOnly(t, true, []string{
 		"rg foo @C",
-		"rg -n --hidden --no-search-zip -g '*.go' foo @C -- -x",
+		"rg -n --hidden -g '*.go' foo @C -- -x",
+		"rg -niSlcwF0 -uu -uuu foo @C",
+		"rg -nA3 -B 2 -C1 -m5 --max-count 2 --max-depth=3 foo @C",
+		"rg -e foo -efoo --regexp=x --regexp -z -g '*.go' --glob=x --glob -y -t go --type=go foo @C",
+		"rg --line-number --ignore-case --smart-case --files-with-matches --count --word-regexp foo @C",
+		"rg --fixed-strings --no-ignore --unrestricted --json --null --color never --color=always foo @C",
+		"rg --files @C 2>/dev/null > /tmp/x",
+		"rg --after-context 1 --before-context=1 --context 1 -- -z @C",
+		"rg foo - @C",
 	})
 	assertProvablyReadOnly(t, false, []string{
 		"rg --pre ./x foo @C",
@@ -102,17 +123,41 @@ func TestProvablyReadOnlyRipgrep(t *testing.T) {
 		"rg --host ./x foo @C",
 		"rg -z foo @C",
 		"rg -uz foo @C",
+		"rg -nz foo @C",
 		"rg --search-zip foo @C",
 		"rg --search foo @C",
+		"rg --no-search-zip foo @C",
+		"rg --hidden=x foo @C",
+		"rg --hid foo @C",
+		"rg --replace x foo @C",
+		"rg -r x foo @C",
+		"rg -e x -z foo @C",
+		"rg -A 3 --pre ./x foo @C",
+		"rg foo @C --pre ./x",
 	})
 }
 
-// git is read-only only with a read-only command and no output option
-// after it, abbreviated or not.
-func TestProvablyReadOnlyGitOutput(t *testing.T) {
+// git is read-only only with a read-only command and, after it, only the
+// options of readOnlyGitCommands for that command (R9-CR-2): an output
+// option, abbreviated or not, and every option not listed, is not.
+func TestProvablyReadOnlyGitOptions(t *testing.T) {
 	assertProvablyReadOnly(t, true, []string{
 		"git log --oneline -- @C",
 		"git diff --stat -- @C > /tmp/x",
+		"git status -s --short -b --branch --long --porcelain --porcelain=v2 -u -uno --untracked-files=no --ignored -- @C",
+		"git status --ignored=matching @C",
+		"git log -n 5 -n5 --max-count 3 --max-count=3 -3 --format=%h --pretty --pretty=oneline --stat --name-only -- @C",
+		"git log --name-status -p --patch --graph --decorate --decorate=full --all --since 2024-01-01 --until=now -- @C",
+		"git log --after x --before=y --author me --author=me --grep fix --grep=fix --follow -- @C/settings.json",
+		"git log --author --output=x -- @C",
+		"git diff --stat=100 --name-only --name-status --cached --staged -U3 -U --unified=5 --word-diff -- @C",
+		"git diff --word-diff=color --color --color=always --no-color main -- @C > /tmp/x",
+		"git show --stat --name-only --oneline --format=%s --pretty=short -p HEAD:@C/settings.json",
+		"git rev-parse --show-toplevel --verify -q --quiet --abbrev-ref --abbrev-ref=strict --short --short=7 HEAD",
+		"git ls-files -o -m -d -c -z --others --modified --deleted --cached --exclude-standard -- @P",
+		"git -C @C --no-pager log -- -x",
+		"git log -- @C --output=x",
+		"git log -n",
 	})
 	assertProvablyReadOnly(t, false, []string{
 		"git log --outp=@C/settings.json 2>/dev/null",
@@ -121,36 +166,48 @@ func TestProvablyReadOnlyGitOutput(t *testing.T) {
 		"git diff --output=x -- @C",
 		"git diff --output-indicator-new=x -- @C",
 		"git log -o x -- @C",
+		"git diff --ext-diff -- @C",
+		"git diff --textconv -- @C",
+		"git log --oneline=x -- @C",
+		"git log --onel -- @C",
+		"git log -n 5 --output x",
+		"git log -sb -- @C",
+		"git status -sb -- @C",
+		"git status -z -- @C",
+		"git diff -n 5 -- @C",
+		"git diff --cached --output=x",
+		"git show --cached -- @C",
+		"git rev-parse --git-path x",
+		"git ls-files --with-tree=x @P",
+		"git log @C --output=x",
 	})
 }
 
-// namesLongOption reads an option whole, with a value, abbreviated, or
-// extended, and nothing that is not a long option.
-func TestNamesLongOption(t *testing.T) {
-	longs := []string{"--pre", "--hostname-bin"}
-	tests := []struct {
-		arg  string
-		want bool
-	}{
-		{"--pre", true},
-		{"--pre=x", true},
-		{"--pr", true},
-		{"--p", true},
-		{"--pre-glob", true},
-		{"--h=x", true},
-		{"--", false},
-		{"-", false},
-		{"", false},
-		{"-pre", false},
-		{"pre", false},
-		{"--hidden", false},
-		{"--no-pre", false},
-	}
-	for _, tt := range tests {
-		if got := namesLongOption(tt.arg, longs); got != tt.want {
-			t.Errorf("namesLongOption(%q) = %v, want %v", tt.arg, got, tt.want)
-		}
-	}
+// test and [ are read-only only without `-v` and without an argument
+// that holds a `[`, with which bash evaluates a subscript as arithmetic
+// and assigns (R9-SEC-2, R9-CR-1); a glob among their arguments may
+// expand into either.
+func TestProvablyReadOnlyTest(t *testing.T) {
+	assertProvablyReadOnly(t, true, []string{
+		"test -d @C",
+		"[ -d @P ]",
+		"[ -f @C/settings.json ] && cat @C/settings.json > /tmp/x",
+		"test -n x -a -e @C",
+		"[ ']' = ']' ] && ls @C",
+	})
+	assertProvablyReadOnly(t, false, []string{
+		"[ -v 'a[HOME=7]' ] && ls @C",
+		"test -v 'a[HOME=7]'; ls @C",
+		"[ -v HOME ]; ls @C",
+		"test -v x; ls @C",
+		"[ 'a[HOME=7]' -eq 0 ]; ls @C",
+		"[ -n 'x[' ]; ls @C",
+		"[ [ ]; ls @C",
+		"[ -f x* ]; ls @C",
+		"test -f a?; ls @C",
+		"[ -f {a,b} ]; ls @C",
+		"[ -f [ab] ]; ls @C",
+	})
 }
 
 // cd and pushd are read-only only with one explicit directory outside
@@ -271,4 +328,30 @@ func TestGuardShellDeniesTheRound7Probes(t *testing.T) {
 			t.Errorf("%q: %s; a read-only command must pass", command, got.Reason)
 		}
 	}
+}
+
+// The reviewers' probes of round 8 (R9-SEC-1, R9-SEC-2, R9-CR-1), each of
+// which runs code or sets a variable the shell guard did not see: zsh
+// glob qualifiers whose `e` qualifier, or `+` and a command name, runs
+// code, wherever the parenthesis stands; an arithmetic command, a
+// function definition and test's `-v` that assign. Each names a protected
+// path and a write-like word, so the floor denies it once it is not
+// read-only.
+func TestGuardShellDeniesTheRound8Probes(t *testing.T) {
+	assertShellDenied(t, []string{
+		"ls *(echo ' ;rm -rf @M'c)",
+		"ls .(echo ' ;rm -rf @M'c)",
+		"ls > /tmp/o(echo ' ;rm -rf @M'c)",
+		"cd ./x(echo ' ;rm -rf @M'c) && ls",
+		"ls x (echo ' ;rm -rf @M'c)",
+		"cat @C/settings.json *(realpath ' ;printf x > @C/settings.json'a)",
+		"ls *(e:'rm -rf @M':)",
+		"ls */*(e:'printf x > @C/settings.json':) 2>/dev/null",
+		"ls -la @C 2>/dev/null *(+rm)",
+		"(( ls , PATH = 0 )); ls @C > /tmp/x",
+		"ls () ( ls ); ls @C > /tmp/x",
+		"[ -v 'a[HOME=7]' ] && ls @C > /tmp/x",
+		"test -v 'a[HOME=7]'; ls @C > /tmp/x",
+		"(ls @C) > /tmp/x",
+	})
 }
