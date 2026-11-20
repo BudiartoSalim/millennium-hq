@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -66,7 +67,19 @@ func runHook(t *testing.T, h *harness, fields map[string]any) (int, map[string]a
 	return code, out
 }
 
+// skipUnixPaths skips a test written with Unix paths on Windows, where
+// "/r" is rooted but not absolute and the hook rightly refuses it (see
+// joinToolPath). Windows paths have their own tests: TestJoinToolPath, and
+// the end-to-end TestHookFollowsJunctionsOnWindows.
+func skipUnixPaths(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("written with Unix paths, which are not absolute on Windows")
+	}
+}
+
 func TestPreToolUseHook(t *testing.T) {
+	skipUnixPaths(t)
 	h := &harness{guard: &fakeGuard{decision: domain.GuardDecision{Deny: true, Reason: "protected"}}, root: "/repo", config: fakeConfig{enabled: true}}
 	code, out := runHook(t, h, map[string]any{
 		"hook_event_name": "PreToolUse", "cwd": "/repo/sub", "session_id": "s",
@@ -90,6 +103,7 @@ func TestPreToolUseHook(t *testing.T) {
 // no path rule applies to, the targets for a write, and the paths in the
 // worktrees for a role rule.
 func TestPreToolUsePaths(t *testing.T) {
+	skipUnixPaths(t)
 	tests := []struct {
 		tool, role   string
 		input        map[string]any
@@ -225,6 +239,7 @@ func TestScopeCommand(t *testing.T) {
 }
 
 func TestPreToolUseDeniesWritesToLocalConfigs(t *testing.T) {
+	skipUnixPaths(t)
 	h := &harness{localDir: "/home/u/.config/millennium/projects"}
 	code, out := runHook(t, h, map[string]any{
 		"hook_event_name": "PreToolUse", "cwd": "/r", "tool_name": "Write",

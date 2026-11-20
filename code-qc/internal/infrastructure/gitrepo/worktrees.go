@@ -27,12 +27,9 @@ func (r *Repository) OtherWorktrees(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	recordsDir := filepath.Join(common, "worktrees")
-	records, err := os.ReadDir(recordsDir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read the repository's worktree records: %w", err)
+	records, exists, err := worktreeRecords(recordsDir)
+	if err != nil || !exists {
+		return nil, err
 	}
 	out, err := runLimited(ctx, r.root, maxWorktreeList, "worktree", "list", "--porcelain")
 	if err != nil {
@@ -44,6 +41,29 @@ func (r *Repository) OtherWorktrees(ctx context.Context) ([]string, error) {
 	}
 	own := filepath.Clean(r.root)
 	return slices.DeleteFunc(roots, func(root string) bool { return root == own }), nil
+}
+
+// worktreeRecords lists the entries of git's worktree records directory,
+// and whether it exists: when it does not, the repository has no linked
+// worktree. Anything else that is not a directory there is an error. Lstat
+// decides, not ReadDir: on Windows, reading a file as a directory reports
+// the path as not found, which would pass for "no worktrees".
+func worktreeRecords(dir string) ([]fs.DirEntry, bool, error) {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err == nil && !info.IsDir() {
+		err = fmt.Errorf("%s is not a directory", dir)
+	}
+	if err != nil {
+		return nil, true, fmt.Errorf("read the repository's worktree records: %w", err)
+	}
+	records, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, true, fmt.Errorf("read the repository's worktree records: %w", err)
+	}
+	return records, true, nil
 }
 
 // listedRecords counts the worktree records in dir that git lists: those

@@ -196,6 +196,7 @@ func TestParseWorktrees(t *testing.T) {
 	lines := func(s ...string) string { return strings.Join(s, "\n") + "\n" }
 	main := filepath.Join(t.TempDir(), "main")
 	linked := filepath.Join(main, "w")
+	elsewhere := filepath.Join(filepath.Dir(main), "elsewhere") // absolute on every OS, unlike "/elsewhere" on Windows
 	tests := []struct {
 		name     string
 		out      string
@@ -209,7 +210,7 @@ func TestParseWorktrees(t *testing.T) {
 		{"a detached HEAD without a branch line", lines("worktree "+main, "HEAD abc", "prunable", ""), 1, []string{main}, ""},
 		{"a newline in a path", lines("worktree "+main, "HEAD abc", "", "worktree "+linked, "x", "HEAD def", ""), 2, nil, `"x" does not belong after a "worktree" line`},
 		{"a path that reads as an attribute", lines("worktree "+linked, "HEAD 0", "HEAD def", "branch refs/heads/w", ""), 2, nil, `"HEAD def" does not belong after a "HEAD" line`},
-		{"a path that reads as a whole record", lines("worktree "+main, "HEAD abc", "", "worktree "+linked, "HEAD 0", "", "worktree /elsewhere", "HEAD def", ""), 2, nil,
+		{"a path that reads as a whole record", lines("worktree "+main, "HEAD abc", "", "worktree "+linked, "HEAD 0", "", "worktree "+elsewhere, "HEAD def", ""), 2, nil,
 			"it names 3 worktrees, and git records 2"},
 		{"an unfinished record", lines("worktree "+main, "HEAD abc"), 1, nil, `ends inside a record, after a "HEAD" line`},
 		{"no final newline", "worktree " + main, 1, nil, "git listed no worktree"},

@@ -100,6 +100,18 @@ func reachesNothing(err error) bool {
 	return errors.As(err, &nothing) && nothing.ReachesNothing()
 }
 
+// walkRoot is a temporary directory spelled as the walk spells the paths it
+// reaches: on Windows the temporary directory can be an 8.3 short name
+// (RUNNER~1), which the walk respells long.
+func walkRoot(t *testing.T) string {
+	t.Helper()
+	root, err := normalize(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 // runWalkCases walks each case's rel below root, as a protected location
 // and as a tool's path.
 func runWalkCases(t *testing.T, root string, tests []walkCase) {
@@ -159,7 +171,7 @@ func chain(at func(string) string, n int) map[string]fakeEntry {
 // or through more links than the OS follows (a loop), since the OS opens
 // nothing there; a tool's path (Resolve) is unknown there.
 func TestWalkFollowsEveryLink(t *testing.T) {
-	root := t.TempDir()
+	root := walkRoot(t)
 	at := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
 	dir, file := fakeEntry{kind: entryDir}, fakeEntry{kind: entryFile}
 	link := func(target string) fakeEntry { return fakeEntry{kind: entryLink, target: target} }
@@ -202,7 +214,7 @@ var tooManyLinks = fmt.Sprintf("more than %d links one after another", maxLinks)
 // path listed. A volume Windows lists no path for, or whose paths cannot
 // be listed, is unknown.
 func TestWalkFollowsVolumesWhereWindowsMountsThem(t *testing.T) {
-	root := t.TempDir()
+	root := walkRoot(t)
 	at := func(rel string) string { return filepath.Join(root, filepath.FromSlash(rel)) }
 	sep := string(filepath.Separator)
 	dir := fakeEntry{kind: entryDir}
