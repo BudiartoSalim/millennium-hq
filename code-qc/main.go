@@ -69,23 +69,27 @@ func buildDeps(ctx context.Context, dir string) (cli.Deps, error) {
 	g := gates(repo, node, analyzers, approvals.New(files.CommittedApprovals, files.LocalApprovals))
 	runGates := usecase.NewRunGates(loadConfig, repo, g)
 	writer := projectfiles.New(repo.Root())
+	resolver := gitrepo.NewResolver()
 	return cli.Deps{
-		Gates:          runGates,
-		Audit:          usecase.NewRunAudit(loadConfig, repo, g),
-		Config:         loadConfig,
-		Explain:        usecase.NewExplainFile(loadConfig),
-		Guard:          usecase.NewGuardToolCall(loadConfig),
-		Stop:           usecase.NewStopCheck(runGates, statestore.New(stateDir())),
-		Scope:          usecase.NewCheckScope(loadConfig, repo),
-		Apply:          usecase.NewApplyConfig(configfile.Codec{}, files, writer),
-		Discover:       usecase.NewDiscover(repo, repo, files.Committed),
-		Conventions:    usecase.NewConventions(files.Committed, files.Local, repo, configfile.Codec{}, writer, repo.Root()),
-		Root:           repo.Root(),
-		LocalConfigDir: localDir,
-		RepoPath:       repo.RepoPath,
-		ReadProposal:   configfile.ReadProposal,
-		Close:          closeAnalyzers,
-		EngineCommand:  engineCommand(),
+		Gates:           runGates,
+		Audit:           usecase.NewRunAudit(loadConfig, repo, g),
+		Config:          loadConfig,
+		Explain:         usecase.NewExplainFile(loadConfig),
+		Guard:           usecase.NewGuardToolCall(loadConfig),
+		Stop:            usecase.NewStopCheck(runGates, statestore.New(stateDir())),
+		Scope:           usecase.NewCheckScope(loadConfig, repo),
+		Apply:           usecase.NewApplyConfig(configfile.Codec{}, files, writer),
+		Discover:        usecase.NewDiscover(repo, repo, files.Committed),
+		Conventions:     usecase.NewConventions(files.Committed, files.Local, repo, configfile.Codec{}, writer, repo.Root()),
+		Root:            repo.Root(),
+		LocalConfigDir:  localDir,
+		RepoPath:        repo.RepoPath,
+		OtherWorktrees:  repo.OtherWorktrees,
+		ResolvePath:     resolver.Resolve,
+		ResolveLocation: resolver.Location,
+		ReadProposal:    configfile.ReadProposal,
+		Close:           closeAnalyzers,
+		EngineCommand:   engineCommand(),
 	}, nil
 }
 
@@ -125,7 +129,7 @@ func newAnalyzers(root, node string) (map[domain.Language]port.Analyzer, func())
 
 // openRepository opens the repository containing dir, the current directory
 // when dir is empty, and reports a directory outside any repository as
-// cli.ErrNoRepository.
+// cli.ErrNoRepository and one that does not exist as cli.ErrNoDirectory.
 func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error) {
 	if dir == "" {
 		wd, err := os.Getwd()
@@ -135,8 +139,11 @@ func openRepository(ctx context.Context, dir string) (*gitrepo.Repository, error
 		dir = wd
 	}
 	repo, err := gitrepo.Open(ctx, dir)
-	if errors.Is(err, gitrepo.ErrNotRepository) {
-		return nil, fmt.Errorf("%w: %v", cli.ErrNoRepository, err)
+	switch {
+	case errors.Is(err, gitrepo.ErrNotRepository):
+		return nil, fmt.Errorf("%s: %w", dir, cli.ErrNoRepository)
+	case errors.Is(err, gitrepo.ErrNoDirectory):
+		return nil, fmt.Errorf("%s: %w", dir, cli.ErrNoDirectory)
 	}
 	return repo, err
 }
@@ -150,7 +157,7 @@ func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]
 		gate.NewShell(repo, shelltools.New(repo.Root())),
 		gate.NewHygiene(analyzers, repo),
 		gate.NewBuild(tools, repo),
-		gate.NewTests(analyzers, repo, testrunner.New(repo.Root(), toolpath.Python()), repo),
+		gate.NewTests(analyzers, repo, testrunner.New(repo.Root(), toolpath.Python()), repo, goanalyzer.NewSources(repo.Root())),
 		gate.NewDeps(repo, manifests.Reader{}, approved, registry.New(registry.Public()), tools, time.Now),
 	}
 }
@@ -159,13 +166,17 @@ func gates(repo *gitrepo.Repository, node string, analyzers map[domain.Language]
 // per clone, named after the hash of git's common directory so every
 // worktree finds the same one, under MILLENNIUM_LOCAL_DIR or the user
 // config directory. Sandboxed agents cannot write there, and the hooks deny
-// their file tools too.
+// their file tools too, comparing absolute paths, so the directory must be
+// absolute.
 func localConfig(ctx context.Context, repo *gitrepo.Repository) (base, file string, err error) {
 	identity, err := repo.Identity(ctx)
 	if err != nil {
 		return "", "", err
 	}
 	base = os.Getenv("MILLENNIUM_LOCAL_DIR")
+	if base != "" && !filepath.IsAbs(base) {
+		return "", "", fmt.Errorf("MILLENNIUM_LOCAL_DIR is %s, which is not an absolute path; set it to one, or unset it", base)
+	}
 	if base == "" {
 		configDir, err := os.UserConfigDir()
 		if err != nil {

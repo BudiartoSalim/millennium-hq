@@ -26,6 +26,7 @@ func (*Hygiene) Rules() []port.Rule {
 		{Name: "secret", Disableable: true},
 		{Name: "banned-construct", Disableable: true},
 		{Name: "suppression-without-reason", Disableable: true},
+		{Name: "ignored-directive", Disableable: true},
 		{Name: "todo-without-link", Disableable: true},
 		{Name: "scan-failed", Disableable: false},
 	}
@@ -65,7 +66,10 @@ func (g *Hygiene) checkFile(ctx context.Context, in port.GateInput, file domain.
 	}
 	waivers := domain.ReadWaivers(content)
 	findings := domain.SecretFindings(file.Path, content, touched, waivers)
-	facts, ok, err := g.facts(ctx, in.Config, file.Path, content)
+	// A file of no language the engine knows gives "", which no component
+	// lists.
+	lang, _ := domain.DetectLanguage(file.Path, content)
+	facts, ok, err := g.facts(ctx, in.Config, file.Path, lang, content)
 	if err != nil {
 		return append(findings, domain.Finding{Rule: "scan-failed", File: file.Path, Message: err.Error()}), nil
 	}
@@ -74,16 +78,13 @@ func (g *Hygiene) checkFile(ctx context.Context, in port.GateInput, file domain.
 	}
 	findings = append(findings, domain.ConstructFindings(file.Path, facts.Constructs, touched, waivers)...)
 	findings = append(findings, domain.SuppressionFindings(file.Path, facts.Comments, touched)...)
+	findings = append(findings, domain.NodeCoverageFindings(file.Path, lang, content, facts.Comments, touched)...)
 	return append(findings, domain.TodoFindings(file.Path, facts.Comments, touched)...), nil
 }
 
-// facts analyses the file when a component that owns it lists its language;
-// other files get only the secret scan.
-func (g *Hygiene) facts(ctx context.Context, cfg domain.Config, p string, content []byte) (domain.FileFacts, bool, error) {
-	lang, ok := domain.DetectLanguage(p, content)
-	if !ok {
-		return domain.FileFacts{}, false, nil
-	}
+// facts analyses the file, of language lang, when a component that owns it
+// lists its language; other files get only the secret scan.
+func (g *Hygiene) facts(ctx context.Context, cfg domain.Config, p string, lang domain.Language, content []byte) (domain.FileFacts, bool, error) {
 	match, owned, err := cfg.ComponentFor(p)
 	if err != nil || !owned || !match.Component.Has(lang) {
 		// An ambiguous component is reported by the structure gate.

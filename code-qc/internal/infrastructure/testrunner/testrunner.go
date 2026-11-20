@@ -69,7 +69,10 @@ func (r *Runner) GoTest(ctx context.Context, dir string) (port.TestResult, error
 		return port.TestResult{}, fmt.Errorf("read the coverage profile: %w", err)
 	}
 	result.Coverage, err = parseGoProfile(data, modulePath, dir)
-	return result, err
+	if err != nil {
+		return port.TestResult{}, err
+	}
+	return result, nil
 }
 
 // PythonTest runs the embedded unittest helper for the project in dir.
@@ -160,7 +163,14 @@ func tempFile(pattern string) (string, func(), error) {
 
 // parseGoProfile reads "import/path/file.go:10.2,12.3 2 1" lines: a block
 // from line 10 to 12 with 2 statements that ran once. A line is covered
-// when any block on it ran.
+// when any block on it ran. The coverage is kept as cover wrote it, for
+// files that do not exist too: after a //line directive, cover credits the
+// code to the base name the directive gives, in the package's directory
+// (goyacc's "//line yaccpar:1" gives parser/yaccpar). The tests gate checks
+// the coverage of the files it judges. go test was asked to cover the
+// module's own packages only, so a name outside the module is an error; a
+// name no repository file can have (a backslash, the directory itself) is
+// left out.
 func parseGoProfile(data []byte, modulePath, moduleDir string) (domain.Coverage, error) {
 	coverage := domain.Coverage{}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -174,10 +184,13 @@ func parseGoProfile(data []byte, modulePath, moduleDir string) (domain.Coverage,
 			return nil, err
 		}
 		rel, ok := strings.CutPrefix(file, modulePath+"/")
-		if !ok {
-			continue
+		if rel = path.Clean(rel); !ok || rel == ".." || strings.HasPrefix(rel, "../") {
+			return nil, fmt.Errorf("the coverage profile names %s, which is not in module %s, though go test was asked to cover the module's own packages only", file, modulePath)
 		}
 		repoPath := path.Join(moduleDir, rel)
+		if !domain.IsRepoRelative(repoPath) {
+			continue
+		}
 		if coverage[repoPath] == nil {
 			coverage[repoPath] = domain.FileCoverage{}
 		}
@@ -188,21 +201,34 @@ func parseGoProfile(data []byte, modulePath, moduleDir string) (domain.Coverage,
 	return coverage, scanner.Err()
 }
 
+// parseProfileLine reads one block. The name comes first and may hold
+// spaces and colons, as a //line directive gives it, so the fields are
+// taken from the end.
 func parseProfileLine(line string) (file string, first, last, hits int, err error) {
-	location, counts, ok := strings.Cut(line, " ")
-	file, span, found := strings.Cut(location, ":")
-	fields := strings.Fields(counts)
-	if !ok || !found || len(fields) != 2 {
+	rest, hitsText, ok1 := cutLast(line, ' ')
+	location, statements, ok2 := cutLast(rest, ' ')
+	file, span, ok3 := cutLast(location, ':')
+	if !ok1 || !ok2 || !ok3 {
 		return "", 0, 0, 0, fmt.Errorf("unexpected coverage profile line %q", line)
 	}
 	start, end, _ := strings.Cut(span, ",")
 	first, err1 := strconv.Atoi(strings.Split(start, ".")[0])
 	last, err2 := strconv.Atoi(strings.Split(end, ".")[0])
-	hits, err3 := strconv.Atoi(fields[1])
-	if err := errors.Join(err1, err2, err3); err != nil {
+	hits, err3 := strconv.Atoi(hitsText)
+	_, err4 := strconv.Atoi(statements)
+	if err := errors.Join(err1, err2, err3, err4); err != nil {
 		return "", 0, 0, 0, fmt.Errorf("unexpected coverage profile line %q: %w", line, err)
 	}
 	return file, first, last, hits, nil
+}
+
+// cutLast slices s around the last sep.
+func cutLast(s string, sep byte) (before, after string, found bool) {
+	i := strings.LastIndexByte(s, sep)
+	if i < 0 {
+		return s, "", false
+	}
+	return s[:i], s[i+1:], true
 }
 
 type pythonReport struct {

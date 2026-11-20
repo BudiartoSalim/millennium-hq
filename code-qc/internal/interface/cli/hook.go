@@ -40,7 +40,7 @@ func (a *App) hook(ctx context.Context) int {
 		fmt.Fprintf(a.stderr, "millennium-code-qc: %v\n", err)
 		return exitBlocked
 	}
-	err = a.withDepsIn(ctx, in.Cwd, func(deps Deps) error {
+	err = a.withHookDeps(ctx, in.Cwd, func(deps Deps) error {
 		switch in.Event {
 		case "PreToolUse":
 			return a.preToolUse(ctx, deps, in)
@@ -61,6 +61,59 @@ func (a *App) hook(ctx context.Context) int {
 	return exitPass
 }
 
+// maxVanishedLevels bounds the walk up from a hook event's cwd that no
+// longer exists. A removed worktree is one level; a session deep inside one
+// a few more.
+const maxVanishedLevels = 32
+
+// withHookDeps is withDepsIn for the event's cwd.
+func (a *App) withHookDeps(ctx context.Context, cwd string, use func(Deps) error) error {
+	deps, err := a.hookDeps(ctx, cwd)
+	if deps.Close != nil {
+		defer deps.Close()
+	}
+	if err != nil {
+		return err
+	}
+	return use(deps)
+}
+
+// hookDeps builds the dependencies for the event's cwd. A cwd that no longer
+// exists, such as a worktree removed while the session was in it, is
+// evaluated in its nearest existing parent; otherwise every tool call, cd
+// included, would block. Each step is the lexical parent of an absolute,
+// clean path, so the walk reaches only directories the event names, and it
+// moves up only past a directory that does not exist: the first one that
+// does exist decides, and any other failure blocks.
+func (a *App) hookDeps(ctx context.Context, cwd string) (Deps, error) {
+	deps, err := a.deps(ctx, cwd)
+	if !errors.Is(err, ErrNoDirectory) {
+		return deps, err
+	}
+	release(deps)
+	if !filepath.IsAbs(cwd) || filepath.Clean(cwd) != cwd {
+		return Deps{}, fmt.Errorf("the hook's cwd %s does not exist, and the engine looks for an existing parent only of an absolute path in clean form "+
+			"(no . or .. parts, no trailing separator), so the hook blocks: change to a directory that exists, such as the repository root", cwd)
+	}
+	dir := cwd
+	for range maxVanishedLevels {
+		dir = filepath.Dir(dir)
+		deps, err := a.deps(ctx, dir)
+		if !errors.Is(err, ErrNoDirectory) {
+			return deps, err
+		}
+		release(deps)
+	}
+	return Deps{}, fmt.Errorf("the hook's cwd %s does not exist, nor do its %d nearest parents: change to a directory that exists", cwd, maxVanishedLevels)
+}
+
+// release frees what deps hold, if anything.
+func release(deps Deps) {
+	if deps.Close != nil {
+		deps.Close()
+	}
+}
+
 func readHookInput(r io.Reader) (hookInput, error) {
 	data, err := io.ReadAll(io.LimitReader(r, maxHookInput+1))
 	if err != nil {
@@ -79,15 +132,20 @@ func readHookInput(r io.Reader) (hookInput, error) {
 	return in, nil
 }
 
+// preToolUse decides a tool call: it locates the paths the call names as
+// far as the guard needs, keeps every agent out of the local configs, and
+// hands the call to the guard.
 func (a *App) preToolUse(ctx context.Context, deps Deps, in hookInput) error {
 	call := domain.ToolCall{Tool: in.ToolName, Role: domain.RoleOf(in.AgentType), Command: stringField(in.ToolInput, "command")}
-	if domain.IsWriteTool(call.Tool) && writesLocalConfig(deps.LocalConfigDir, toolPaths(in)) {
-		return a.deny("millennium-code-qc: local configs are protected: agents never change the rules they are checked against; the user changes them with `millennium-code-qc config apply --local`")
+	named, err := toolPaths(in, hostPaths)
+	if err != nil {
+		return err
 	}
-	for _, raw := range toolPaths(in) {
-		if p, err := deps.RepoPath(raw); err == nil {
-			call.Paths = append(call.Paths, p)
-		}
+	if call, err = locate(ctx, deps, call, named); err != nil {
+		return err
+	}
+	if writesLocalConfig(deps, call) {
+		return a.deny("millennium-code-qc: local configs are protected: agents never change the rules they are checked against; the user changes them with `millennium-code-qc config apply --local`")
 	}
 	decision := deps.Guard.Execute(ctx, call)
 	if !decision.Deny {
@@ -100,50 +158,6 @@ func (a *App) deny(reason string) error {
 	return a.writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{
 		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
 	}})
-}
-
-// writesLocalConfig reports whether any path is inside the local config
-// directory, which lies outside the repository the guard's rules cover.
-func writesLocalConfig(dir string, paths []string) bool {
-	if dir == "" {
-		return false
-	}
-	for _, p := range paths {
-		if rel, err := filepath.Rel(dir, p); err == nil && !strings.HasPrefix(rel, "..") {
-			return true
-		}
-	}
-	return false
-}
-
-// toolPaths lists the paths a tool call names, absolute or relative to the
-// session's cwd. Grep and Glob without a path search the cwd.
-func toolPaths(in hookInput) []string {
-	resolve := func(p string) string {
-		if filepath.IsAbs(p) {
-			return p
-		}
-		return filepath.Join(in.Cwd, p)
-	}
-	switch in.ToolName {
-	case "Edit", "Write", "MultiEdit", "Read":
-		return nonEmpty(resolve, stringField(in.ToolInput, "file_path"))
-	case "NotebookEdit":
-		return nonEmpty(resolve, stringField(in.ToolInput, "notebook_path"))
-	case "Grep", "Glob":
-		if p := stringField(in.ToolInput, "path"); p != "" {
-			return []string{resolve(p)}
-		}
-		return []string{in.Cwd}
-	}
-	return nil
-}
-
-func nonEmpty(resolve func(string) string, p string) []string {
-	if p == "" {
-		return nil
-	}
-	return []string{resolve(p)}
 }
 
 func stringField(fields map[string]any, name string) string {

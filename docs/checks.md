@@ -61,10 +61,17 @@ reason (see [Function limits](configuration.md#function-limits)).
 | `nesting-depth` | 3 levels | Each `if`, loop, `switch`, `select` and function literal opens a level; `else if` does not. |
 | `cognitive-complexity` | 15 | See below. |
 
-Generated files are skipped: a `Code generated ... DO NOT EDIT.` header in
-Go, or `@generated` / `DO NOT EDIT` in the first lines of a TypeScript or
-Python file. Test files are `_test.go`; `*.test.ts(x)`, `*.spec.ts(x)` and
-files under `__tests__/`; `test_*.py`, `*_test.py` and files under `tests/`.
+Generated files outside tested layers are skipped: a `Code generated ...
+DO NOT EDIT.` header in Go; `@generated` or `Code generated ... DO NOT
+EDIT` in the first five lines of a TypeScript file; and those or a bare
+`DO NOT EDIT` in the first five lines of a Python file. In a **tested layer** (`domain` and
+`application` under clean-architecture) the marker exempts nothing, since
+anyone who edits a file can add one: a marked file there is held to the
+limits like hand-written code, and each finding on it says so. Declare
+generated code in a tested layer with
+[`exclude`](configuration.md#generated-code) in the config instead. Test files are
+`_test.go`; `*.test.ts(x)`, `*.spec.ts(x)` and files under `__tests__/`;
+`test_*.py`, `*_test.py` and files under `tests/`.
 
 Which functions are measured: in Go, every function and method. In TypeScript,
 function declarations, functions and arrow functions assigned to top-level
@@ -143,7 +150,8 @@ Runs on the lines a change touched (every line, for a new file or an audit).
 |---|---|---|
 | `secret` | Any text file, in a component or not, holds something shaped like a credential: AWS, GitHub, Slack, Google, Stripe, Anthropic and OpenAI keys, private keys, JSON Web Tokens, or a random-looking quoted value assigned to a name such as `password`, `token` or `api_key`. Placeholders (`changeme`, `${VAR}`, `<your-key>`, `example`) are ignored. | Load it from the environment or a secret store, and rotate it if it was real. A deliberate fixture can be waived (below). |
 | `banned-construct` | Analysed code uses something that is a common security hole: `eval`, `new Function`, Python `exec`; a command run through a shell (`shell=True`, `os.system`, `exec.Command("sh", "-c", ...)`, `child_process.exec`, `curl ... \| sh`); TLS verification off (`InsecureSkipVerify`, `verify=False`, `rejectUnauthorized: false`); unsafe deserialisation (`pickle.loads`, `yaml.load` without a safe loader); raw HTML (`innerHTML`, `dangerouslySetInnerHTML`); a TypeScript `any`. | Use the safe form the message names. If the construct is truly needed, waive it with a reason. |
-| `suppression-without-reason` | A directive switches a checker off without saying why: `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `//nolint`, `#nosec`, `# noqa`, `# type: ignore`, `# pragma: no cover`, `# shellcheck disable=`, coverage ignores. | Add the reason after ` -- ` or a second comment marker, or as a comment on the line above: `//nolint:gosec // the hash is a cache key, not a secret`. A reason has at least ten letters. |
+| `suppression-without-reason` | A directive switches a checker off without saying why: `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `//nolint`, `#nosec`, `# noqa`, `# type: ignore`, `# pragma: no cover`, `# shellcheck disable=`, coverage ignores (`istanbul`, `c8` and `v8 ignore`, and Node's `/* node:coverage disable */` and `/* node:coverage ignore next */`). Node's test runner reads its directives from the raw lines of a file, not from its comments, so in a TypeScript file a line that holds one counts wherever it sits: in a comment, a string or a template literal (`export const tag = "/* node:coverage disable */";` switches coverage off for the rest of the file). | Add the reason after ` -- ` or a second comment marker, or as a comment on the line above: `//nolint:gosec // the hash is a cache key, not a secret`. A reason has at least ten letters. A comment above that is itself a suppression or a coverage directive (`node:coverage enable` included) is no reason, nor is a comment on a line that mentions `node:coverage` anywhere. Node reads its directives only as written, so a `node:coverage` directive takes its reason on the line above only (see `ignored-directive`); if the text is not meant as a directive, write it so that Node does not read it (`"/* node:" + "coverage disable */"`). |
+| `ignored-directive` | A line of a TypeScript file, in a comment, a string or anywhere else, reads like one of Node's coverage directives (`node:coverage disable`, `enable` or `ignore next`) but is not written as Node reads it, so Node ignores it: Node's test runner reads only `/* node:coverage disable */`, `/* node:coverage enable */`, `/* node:coverage ignore next */` and `/* node:coverage ignore next <n> */`, written exactly so, anywhere on a line. A reason added after the directive (`/* node:coverage disable -- why */`), other spacing, or the `//` form makes it no directive, and an ignored `enable` leaves coverage off for the rest of the file. Only TypeScript runs on Node: the same text in Go or Python steers nothing and is not reported. | Write the directive exactly, and put its reason in a comment on the line above: `// the Windows branch runs only on Windows` then `/* node:coverage ignore next */`. Text that is not meant as a directive, such as a string naming one, is split so that it no longer reads like one (`"node:" + "coverage disable"`). |
 | `todo-without-link` | A `TODO`, `FIXME`, `XXX` or `HACK` marker has no issue reference. | Link one (`#123`, `PROJ-45` or a URL), or do the work now. |
 | `scan-failed` | A file cannot be read or analysed, so it could hold anything. | Fix the cause; exclude large generated or vendored files in the config. |
 
@@ -187,16 +195,54 @@ or a parent's in a workspace that hoists it; `go vet` runs with
 
 Changed logic in a **tested layer** (`domain` and `application` under
 clean-architecture) is held to its tests. A file is logic when it has at least
-one function and is neither test code nor generated; files that only declare
-types or interfaces are exempt.
+one function and is not test code; files that only declare types or
+interfaces are exempt. A generated-code marker (see
+[Limits](#limits) for each language's) does not exempt a file here, whether it
+was there before or added in the change: `tests-missing` and
+`uncovered-change` apply to it, and their findings say that the marker does
+not exempt files in a tested layer. Generated code in a tested layer is
+declared with [`exclude`](configuration.md#generated-code), which no check reads
+past, apart from the `//line` directives of a Go file that name a file
+beside it (`foreign-coverage`).
+
+Only **runtime code** counts: what is left once comments, whitespace and, in
+TypeScript, the syntax the compiler erases are taken away. The erased syntax
+is `interface` and `type` declarations, `declare` declarations, type-only
+imports and exports (`import type`, `export type`, and an inline `type`
+specifier such as `import { type Pair, add }`), type annotations and
+overload signatures without a body; the project's own TypeScript compiler
+decides, from the code it emits. Code that only looks like a type still
+counts: enums (`const enum` and `declare const enum` included), namespaces
+with values, class fields that are not `declare` or `abstract`, parameter
+properties, decorators and the annotations of what they decorate, value
+imports, `import x = require(...)` and `export =`. So do the comments the
+toolchain reads: Go's `//go:` directives, `//line`, `// +build`, `//export`,
+`//extern` and the cgo preamble; TypeScript's triple-slash directives, JSX
+pragmas (`@jsx`, `@jsxFrag`, `@jsxImportSource`, `@jsxRuntime`) and
+`//# sourceMappingURL=` and `//# sourceURL=`; Python's encoding
+declaration; and a hashbang (`#!/usr/bin/env node`) on the first line of a
+TypeScript or Python file, so changing it needs a test change. Its line
+still holds no code a test can run, so `uncovered-change` never reports it,
+though Node's coverage gives it zero hits. A Python docstring is a string, so it is runtime
+code too, and a Python f-string or t-string counts as written, spacing
+inside its `{...}` included (`f"{x = }"` prints differently from
+`f"{x=}"`).
+
+When the engine cannot tell which code is runtime, it treats all of it as
+runtime: for a Python file that declares an encoding other than UTF-8, for
+TypeScript or Python content that is not valid UTF-8 or that ends a line
+with anything but a line feed (a lone carriage return, U+2028, U+2029), and
+whenever the analysis of a version fails.
 
 | Rule | Tier | Fires when | Fix |
 |---|---|---|---|
-| `tests-missing` | both | Changed logic comes without a change to its tests (in an audit: has no tests). A test counts when it is, in Go, any `_test.go` file in the same package; in TypeScript, `<name>.test.ts`/`.spec.ts` or `__tests__/<name>.ts` in the component; in Python, `test_<name>.py` or `<name>_test.py` in the component. | Add or update the test. Writing it first is welcome, not required. |
+| `tests-missing` | both | Changed logic comes without a change to its tests (in an audit: has no tests). A modified file whose runtime code is unchanged against the base, token for token, needs no test change: a change to comments, whitespace or (TypeScript) erased type syntax alone does not fire. Changing a string, a docstring, an identifier, an operator or Python indentation does. A new file always needs its tests, and so does a modified file whose base version cannot be read or analysed. A test counts when it is, in Go, any `_test.go` file in the same package; in TypeScript, `<name>.test.ts`/`.spec.ts` or `__tests__/<name>.ts` in the component; in Python, `test_<name>.py` or `<name>_test.py` in the component. | Add or update the test. Writing it first is welcome, not required. |
 | `tests-failed` | full | A test suite of a touched module or component fails, or does not compile. | Fix the code or the test. |
-| `uncovered-change` | full | A changed executable line of logic never runs in any test of its module (any test, not only those of its own package). In an audit every line counts. | Add a test that exercises it, or remove the line if no caller can reach it. |
+| `uncovered-change` | full | A changed executable line of logic never runs in any test of its module (any test, not only those of its own package), or no test runs the file at all. Only lines that hold runtime code count: a comment line or an erased declaration that the coverage report gives zero hits (as Node's report does through source maps) is not reported, while a line with both code and a comment is; a change that touches no runtime line is not reported even in a file no test runs. In an audit every line counts. | Add a test that exercises it, or remove the line if no caller can reach it. |
+| `line-directive` | both | A changed Go file in a tested layer, test files included, holds a `//line` or `/*line` directive, touched or not. The directive moves the positions the coverage profile reports, so the changed lines below it would never be reported as untested. | Remove it. A generated file that needs it (goyacc output, for one) is declared with [`exclude`](configuration.md#generated-code), or kept outside the tested layers. |
+| `foreign-coverage` | full | Another Go file in the same directory as changed logic, whatever it is (an excluded or generated file, a test file, a file no build includes), holds a `//line` or `/*line` directive that names the changed file, such as `//line real.go:5` beside `real.go`. Go's cover counts the code after such a directive as the named file's: it keeps only the base name of the file the directive names and puts it in the directive's own directory. Code that ran there would pass for untested lines of the changed file, so coverage of a file in a tested layer may come only from that file. This holds whatever ran the suite, `go test` or a component's own [recipe](configuration.md#test-recipes) around it. Only the directories of changed logic are read, and only once its suite passed. What `go build` never reads lends nothing: a name starting with `_` or `.`, and a directory, through a symlink too. | Remove the directive, or make it name no file of that directory. |
 | `tests-unconfigured` | full | A TypeScript component has no test recipe, so its tests cannot be run. | Add `"test"` to the component (see [Configuration](configuration.md#test-recipes)). |
-| `tool-failed` | full | A suite could not run at all. | The message says why. |
+| `tool-failed` | full | A suite could not run at all; or the coverage report gives a line that changed logic does not have (see below); or a `.go` file beside changed Go logic cannot be read for its line directives (not a regular file, such as a FIFO or a dangling symlink, or larger than 64 MiB), so what it lends is unknown. That blocks the changed logic of that directory only. | The message says why. For an unreadable `.go` file: remove it, split it, or give it a name `go build` ignores (one starting with `_`). |
 
 How each language's suite runs:
 
@@ -208,6 +254,23 @@ How each language's suite runs:
 
 When a suite fails, its files' coverage is not reported on top: the failure
 already blocks.
+
+The coverage report of changed logic in a tested layer is checked before it
+is used, whichever tool wrote it (the Go profile, the Python helper, an
+lcov report): a line past the end of the file, as git counts its lines,
+blocks that file with `tool-failed`, since the report then describes other
+positions than the file's and the lines it should have given go
+unreported. The message names the causes that fit the file's language: in
+Go, a `//line` directive moves positions so, and so does a stale build of
+another version of the file; in TypeScript, a report from another version
+of the file or a source map that does not match it; in Python, a report
+from another version of the file. Only the files the gate judges are checked: generated code
+outside the tested layers or under `exclude` may hold any directive,
+goyacc's `//line yaccpar:1` included, unless it names changed logic beside
+it (`foreign-coverage`). A Go
+profile that names a file outside the module blocks the module's suite
+with `tool-failed`, since `go test` was asked to cover the module's own
+packages only.
 
 ## `deps`
 

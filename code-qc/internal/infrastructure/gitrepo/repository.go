@@ -27,22 +27,39 @@ const specialFile = fs.ModeDevice | fs.ModeCharDevice | fs.ModeNamedPipe | fs.Mo
 // Repository is a git working tree.
 type Repository struct {
 	root string
+	// commonDir caches gitCommonDir.
+	commonDir string
 }
 
 // ErrNotRepository means the directory is not inside a git working tree.
 var ErrNotRepository = errors.New("not inside a git repository")
 
+// ErrNoDirectory means the directory does not exist, such as a worktree
+// removed while a session was still in it.
+var ErrNoDirectory = errors.New("the directory does not exist")
+
 // Open finds the repository containing dir.
 func Open(ctx context.Context, dir string) (*Repository, error) {
 	out, err := run(ctx, dir, "rev-parse", "--show-toplevel")
-	var gitErr *gitError
-	if errors.As(err, &gitErr) && strings.Contains(gitErr.stderr, "not a git repository") {
-		return nil, fmt.Errorf("%s: %w", dir, ErrNotRepository)
-	}
 	if err != nil {
-		return nil, fmt.Errorf("find repository root: %w", err)
+		return nil, openError(dir, err)
 	}
 	return &Repository{root: trimLine(out)}, nil
+}
+
+// openError says why git could not find a repository in dir. Only a dir
+// that is not there at all, looked at without following a final symlink,
+// is ErrNoDirectory: a file, a dangling symlink, or a directory git cannot
+// enter or use stays an error of its own.
+func openError(dir string, err error) error {
+	var gitErr *gitError
+	if errors.As(err, &gitErr) && strings.Contains(gitErr.stderr, "not a git repository") {
+		return fmt.Errorf("%s: %w", dir, ErrNotRepository)
+	}
+	if _, statErr := os.Lstat(dir); errors.Is(statErr, fs.ErrNotExist) {
+		return fmt.Errorf("%s: %w", dir, ErrNoDirectory)
+	}
+	return fmt.Errorf("find repository root: %w", err)
 }
 
 // Root is the absolute path of the working tree.
@@ -149,8 +166,7 @@ func (r *Repository) git(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	cmd := gitCommand(ctx, dir, args)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -158,6 +174,45 @@ func run(ctx context.Context, dir string, args ...string) ([]byte, error) {
 		return nil, &gitError{args: args, stderr: strings.TrimSpace(stderr.String()), err: err}
 	}
 	return out, nil
+}
+
+// runLimited is run for a command whose output the repository controls the
+// size of: more than limit bytes is an error, not a buffer that grows.
+func runLimited(ctx context.Context, dir string, limit int, args ...string) ([]byte, error) {
+	cmd := gitCommand(ctx, dir, args)
+	stdout := &limitedBuffer{limit: limit}
+	var stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = stdout, &stderr
+	err := cmd.Run()
+	if stdout.exceeded {
+		return nil, fmt.Errorf("git %s printed more than %d bytes", strings.Join(args, " "), limit)
+	}
+	if err != nil {
+		return nil, &gitError{args: args, stderr: strings.TrimSpace(stderr.String()), err: err}
+	}
+	return stdout.buf.Bytes(), nil
+}
+
+func gitCommand(ctx context.Context, dir string, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	return cmd
+}
+
+// limitedBuffer keeps up to limit bytes and fails the write that would pass
+// it, which closes the pipe, so the command stops instead of filling memory.
+type limitedBuffer struct {
+	buf      bytes.Buffer
+	limit    int
+	exceeded bool
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if b.buf.Len()+len(p) > b.limit {
+		b.exceeded = true
+		return 0, errors.New("output limit exceeded")
+	}
+	return b.buf.Write(p)
 }
 
 // checkRevision refuses values git would parse as options, so a base passed

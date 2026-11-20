@@ -41,3 +41,9 @@ Findings in the review-protocol format, plus a short summary: what you
 covered, how (which searches, which entry points), and what remains unexamined
 in `not_reviewed`. Coverage matters as much as the findings: the lead needs to
 know what "no findings" means.
+
+When a change is under review, set `origin` as `review-protocol` says:
+check `<base>`, and when you cannot tell, use `introduced`. Only in an audit
+with no change under review are findings usually `pre-existing`. When the
+user asked for the research, the user decides which findings are fixed now
+and which are filed as follow-ups.

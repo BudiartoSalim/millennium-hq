@@ -84,7 +84,7 @@ apply to any file.
 | `conventions` | no | `[]` | Convention packs: the built-in `clean-architecture` and `react-feature-based`, or the project's own (see [Convention packs](#convention-packs)). |
 | `limits` | no | the conventions' | Single-project form: function limits that replace the conventions' own (see [Function limits](#function-limits)). |
 | `components` | monorepo form | | See above. |
-| `exclude` | no | `[]` | Paths no check reads. `**` matches any number of segments; a directory excludes everything inside it. |
+| `exclude` | no | `[]` | Paths no check reads (except for the line directives of Go files, see [Generated code](#generated-code)). `**` matches any number of segments; a directory excludes everything inside it. This is how generated code in a tested layer is declared: there a generated-code marker in the file exempts it from nothing (see [Generated code](#generated-code)). |
 | `test` | no | | Single-project form: the test recipe (below). |
 | `disable` | no | `[]` | Rules switched off, each with a reason (below). |
 | `testing` | no | `tests-required` | Changed production code needs tests. |
@@ -105,6 +105,29 @@ Component fields:
 | `reason` | no | Why the component is an exception; shown by `config explain`. |
 | `test` | no | The component's test recipe (below). |
 | `limits` | no | The component's own function limits, with a reason (below). |
+
+### Generated code
+
+A generated-code marker in a file (Go's `// Code generated ... DO NOT
+EDIT.`; `@generated` or `Code generated ... DO NOT EDIT` in the first five
+lines of a TypeScript file; those or a bare `DO NOT EDIT` in the first five
+lines of a Python file) exempts the file from the function limits only
+outside tested layers. In a tested layer (`domain` and `application` under
+clean-architecture) the marker counts for nothing: anyone who edits a file
+can add one, so a marked file there gets `tests-missing`, `uncovered-change`
+and the limits like hand-written code, and each of those findings says that
+the marker does not exempt files in a tested layer. To keep generated code
+in a tested layer out of the checks, list it in `exclude`, which only the
+user changes (through `config apply`):
+
+```json
+"exclude": ["services/billing/internal/domain/zz_generated.go"]
+```
+
+One thing about an excluded Go file still counts: a `//line` directive in
+it that names a file beside it lends that file the coverage of the code
+after it, so the tests gate reports such a directive on changed logic in a
+tested layer ([`foreign-coverage`](checks.md#tests)).
 
 ### Convention packs
 
@@ -393,7 +416,9 @@ millennium-code-qc config apply --local my-proposal.json
 ```
 
 The config goes to `<user config dir>/millennium/projects/<id>/config.json`
-(set `MILLENNIUM_LOCAL_DIR` to move it), where `<id>` comes from the clone's
+(set `MILLENNIUM_LOCAL_DIR` to an absolute path to move it; the engine
+refuses a relative one, since the hooks compare local-config paths as
+absolute paths), where `<id>` comes from the clone's
 git directory, so every worktree of it uses the same config. Nothing in the
 repository changes. A committed config always wins over a local one. Sandboxed
 agents cannot write there, and the hooks deny their file tools.

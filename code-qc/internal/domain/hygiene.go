@@ -13,8 +13,15 @@ const minReasonLetters = 10
 
 var (
 	// suppression matches the directives that switch a checker off for a
-	// line, a block or a file, across the supported languages.
+	// line, a block or a file, across the supported languages, in comments.
+	// Node's coverage directives are matched on raw lines instead (see
+	// NodeCoverageFindings).
 	suppression = regexp.MustCompile(`eslint-disable(-next-line|-line)?|@ts-(ignore|expect-error|nocheck)|//\s*nolint|\bNOLINT\b|lint:ignore|#\s*nosec|//\s*#nosec|#\s*noqa|#\s*type:\s*ignore|#\s*pragma:\s*no\s*cover|shellcheck\s+disable=|(istanbul|c8|v8)\s+ignore`)
+	// coverageDirective matches every mention of node:coverage, the
+	// directive that switches coverage back on included. Like a
+	// suppression, it steers a tool, so it never explains the suppression
+	// below it.
+	coverageDirective = regexp.MustCompile(`node:coverage\b`)
 	// todo matches a work-left-to-do marker word at the start of a comment,
 	// or anywhere when a colon or an opening parenthesis follows it. The same
 	// word inside prose, or hyphenated, is not a marker.
@@ -26,24 +33,25 @@ var (
 	waiver = regexp.MustCompile(`millennium:allow\s+([a-z-]+)\s*--\s*(.*)`)
 )
 
-// SuppressionFindings reports suppression directives that carry no reason.
-// A reason is text after the directive, separated by " -- " or a further
-// comment marker ("//nolint:gosec // reason"), or a comment on the line
-// directly above that is not itself a directive. Only comments on touched
-// lines are checked.
+// SuppressionFindings reports suppression directives in comments that
+// carry no reason. A reason is text after the directive, separated by
+// " -- " or a further comment marker ("//nolint:gosec // reason"), or a
+// comment on the line directly above that is not itself a suppression or
+// coverage directive. Only comments on touched lines are checked.
 func SuppressionFindings(file string, comments []Comment, touched LineSet) []Finding {
 	byLine := commentsByLine(comments)
 	var findings []Finding
 	for _, c := range comments {
-		loc := suppression.FindStringIndex(c.Text)
-		if loc == nil || !touched.Contains(c.Line) {
+		if !touched.Contains(c.Line) {
 			continue
 		}
-		if hasReason(c.Text[loc[1]:]) || explainedAbove(byLine, c.Line) {
+		text := strings.TrimSpace(c.Text)
+		loc := suppression.FindStringIndex(text)
+		if loc == nil || hasReason(text[loc[1]:]) || explainedAbove(byLine, c.Line) {
 			continue
 		}
 		findings = append(findings, Finding{Rule: "suppression-without-reason", File: file, Line: c.Line, Message: fmt.Sprintf(
-			"%q switches a check off without saying why; add \" -- <reason>\" or a comment on the line above", strings.TrimSpace(c.Text))})
+			"%q switches a check off without saying why; add \" -- <reason>\" or a comment on the line above", text)})
 	}
 	return findings
 }
@@ -75,7 +83,7 @@ func hasReason(rest string) bool {
 
 func explainedAbove(byLine map[int]Comment, line int) bool {
 	above, ok := byLine[line-1]
-	return ok && suppression.FindStringIndex(above.Text) == nil && letters(above.Text) >= minReasonLetters
+	return ok && !suppression.MatchString(above.Text) && !coverageDirective.MatchString(above.Text) && letters(above.Text) >= minReasonLetters
 }
 
 func commentsByLine(comments []Comment) map[int]Comment {

@@ -50,11 +50,13 @@ func (c Coverage) Merge(other Coverage) {
 }
 
 // Uncovered returns the touched executable lines that never ran, as ranges
-// for a readable message. Lines that are not executable are not counted.
-func (f FileCoverage) Uncovered(touched LineSet) []LineRange {
+// for a readable message. Lines that are not executable are not counted, and
+// neither are lines without runtime code: a coverage tool working through a
+// source map can give a comment or an erased type declaration zero hits.
+func (f FileCoverage) Uncovered(touched LineSet, runtime RuntimeCode) []LineRange {
 	var lines []int
 	for line, hits := range f {
-		if hits == 0 && touched.Contains(line) {
+		if hits == 0 && touched.Contains(line) && runtime.Holds(line) {
 			lines = append(lines, line)
 		}
 	}
@@ -126,9 +128,25 @@ func moduleStem(p string) string {
 	return name
 }
 
-// NeedsTests reports whether analysed code is production logic: not test
-// code, not generated, and with at least one function. Files that only
-// declare types or interfaces need no tests of their own.
+// LineDirectiveFindings reports every line directive of a file in a tested
+// layer, touched or not: a directive above unchanged lines still moves the
+// coverage of the changed lines below it, to lines that do not exist or to
+// lines that ran, so untested code would pass as tested. Only the config's
+// exclude, which declares generated code, takes a file out of this check.
+func LineDirectiveFindings(file string, directives []LineDirective) []Finding {
+	var findings []Finding
+	for _, d := range directives {
+		findings = append(findings, Finding{Rule: "line-directive", File: file, Line: d.Line, Message: fmt.Sprintf(
+			"%s in a tested layer: it moves the line numbers that coverage reports, so untested code could pass as tested; remove it, or, if the file is generated, declare it with \"exclude\" in the config", d.Text)})
+	}
+	return findings
+}
+
+// NeedsTests reports whether analysed code of a tested layer is production
+// logic: not test code, and with at least one function. Files that only
+// declare types or interfaces need no tests of their own. A generated-code
+// marker does not count: in a tested layer only the config's exclude
+// declares generated code (see LayerTesting).
 func NeedsTests(facts FileFacts) bool {
-	return !facts.Test && !facts.Generated && len(facts.Functions) > 0
+	return !facts.Test && len(facts.Functions) > 0
 }

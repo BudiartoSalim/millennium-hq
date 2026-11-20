@@ -1,6 +1,7 @@
 package gitrepo
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -101,13 +102,32 @@ func TestRepoPath(t *testing.T) {
 		{filepath.Join(dir, "sub", "deeper"), "..", "sub", true},
 		{dir, ".", "", true},
 		{dir, filepath.Join(dir, "sub"), "sub", true},
+		{dir, "sub/new/file.go", "sub/new/file.go", true},
 		{dir, "..", "", false},
 		{filepath.Join(dir, "sub"), "../../elsewhere", "", false},
+		{dir, filepath.Dir(dir), "", false},
 	}
 	for _, tt := range tests {
 		got, err := repo.relativeTo(tt.cwd, tt.arg)
 		if (err == nil) != tt.ok || got != tt.want {
 			t.Errorf("relativeTo(%q, %q) = %q, %v; want %q, ok %v", tt.cwd, tt.arg, got, err, tt.want, tt.ok)
+		}
+		if !tt.ok && !errors.Is(err, ErrOutsideRepository) {
+			t.Errorf("relativeTo(%q, %q): %v, want ErrOutsideRepository", tt.cwd, tt.arg, err)
+		}
+	}
+}
+
+// An absolute path maps without the process's working directory; a relative
+// one is taken from it.
+func TestRepoPathTakesOnlyARelativePathFromTheWorkingDirectory(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "sub/a.go", "package a")
+	repo := open(t, dir)
+	t.Chdir(filepath.Join(dir, "sub"))
+	for arg, want := range map[string]string{"a.go": "sub/a.go", filepath.Join(dir, "sub", "a.go"): "sub/a.go", "..": ""} {
+		if got, err := repo.RepoPath(arg); err != nil || got != want {
+			t.Errorf("RepoPath(%q) = %q, %v; want %q", arg, got, err, want)
 		}
 	}
 }

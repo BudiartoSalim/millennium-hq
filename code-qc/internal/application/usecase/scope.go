@@ -71,11 +71,10 @@ func parseAllowed(raw []string) ([]domain.Pattern, error) {
 	return patterns, nil
 }
 
+// scopeFinding is what is wrong with a changed path, if anything.
 func scopeFinding(cfg domain.Config, allowed []domain.Pattern, p string) (domain.Finding, bool) {
-	for _, protected := range domain.ProtectedPaths() {
-		if domain.Within(p, protected) {
-			return domain.Finding{Gate: "scope", Rule: "protected-path", File: p, Message: "the branch changes " + protected + ", which no agent may change"}, true
-		}
+	if finding, ok := protectedFinding(p); ok {
+		return finding, true
 	}
 	if domain.Within(p, cfg.AcceptanceTests) {
 		return domain.Finding{Gate: "scope", Rule: "acceptance-test-changed", File: p, Message: "the branch changes an acceptance test; only qa-tester changes those"}, true
@@ -86,6 +85,25 @@ func scopeFinding(cfg domain.Config, allowed []domain.Pattern, p string) (domain
 		}
 	}
 	return domain.Finding{Gate: "scope", Rule: "out-of-scope", File: p, Message: "outside the work package (" + patternList(allowed) + ")"}, true
+}
+
+// protectedFinding reports a changed path that changes protected paths.
+// They match as the guard matches them, anywhere in the path and in any
+// spelling that reaches them (domain.ProtectedPathIn): a branch is checked
+// out on case-insensitive and Windows file systems too, and a nested
+// checkout's or directory's rules are protected like the root's. A path
+// that is a leading part of one (domain.ProtectedLeadIn) is a file or a
+// symlink in place of the directory that holds them: a symlink `.pi` to
+// `conf` makes the branch's `conf/extensions/x.ts` an extension pi loads.
+func protectedFinding(p string) (domain.Finding, bool) {
+	if protected, ok := domain.ProtectedPathIn(p); ok {
+		return domain.Finding{Gate: "scope", Rule: "protected-path", File: p, Message: "the branch changes " + protected + ", which no agent may change"}, true
+	}
+	if lead, ok := domain.ProtectedLeadIn(p); ok {
+		return domain.Finding{Gate: "scope", Rule: "protected-path", File: p,
+			Message: "the branch puts a file or a symlink at " + lead + ", where protected paths lie; a symlink there makes what it leads to the protected paths, which no agent may change"}, true
+	}
+	return domain.Finding{}, false
 }
 
 func patternList(patterns []domain.Pattern) string {

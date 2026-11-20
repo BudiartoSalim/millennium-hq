@@ -12,3 +12,7 @@ millennium.proposal.json
 # The pi extension's dev tools (verify.sh links the TypeScript fixture here) and coverage.
 /pi/node_modules
 /pi/lcov.info
+
+# Agent worktrees (config apply ignores these in every opted-in project).
+/.claude/worktrees/
+/.pi/worktrees/

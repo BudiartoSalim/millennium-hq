@@ -81,11 +81,27 @@ type Construct struct {
 	Detail string
 }
 
+// LineDirective is a Go //line or /*line directive. It is not risky in
+// itself, but it moves the positions the compiler and the coverage tool
+// report, so the tests gate holds it to rules of its own (see
+// LineDirectiveFindings and ForeignCoverage).
+type LineDirective struct {
+	// Line is the physical line the directive is on.
+	Line int
+	// Text is the directive as written.
+	Text string
+	// File is the file name the directive gives, as written; empty when it
+	// gives none.
+	File string
+}
+
 // FileFacts is what a language analyzer extracts from one source file. Every
 // language produces the same facts, so the rules are written once.
 type FileFacts struct {
 	Path string
-	// Generated marks machine-written code, which the limits skip.
+	// Generated marks a file that carries a generated-code marker. Outside
+	// tested layers the limits skip it; in a tested layer it counts for
+	// nothing (see LayerTesting).
 	Generated bool
 	// Test marks test code, which the function-length limit skips.
 	Test       bool
@@ -93,4 +109,8 @@ type FileFacts struct {
 	Functions  []FunctionFacts
 	Comments   []Comment
 	Constructs []Construct
+	// LineDirectives are the file's line directives; only Go has them.
+	LineDirectives []LineDirective
+	// Runtime is the file's runtime code; its zero value is unknown.
+	Runtime RuntimeCode
 }

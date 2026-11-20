@@ -39,7 +39,8 @@ plugin/                       what users install
   scripts/millennium-code-qc          the launcher: verifies and runs the locked engine release
   code-qc.lock                 engine version and per-platform SHA-256, written by release-build.sh
 .claude-plugin/marketplace.json  this repository as the millennium-hq marketplace
-.github/workflows/            the engine release workflow (docs/releasing.md)
+.github/workflows/            the engine release workflow, and the Windows tests of the
+                              engine's Windows-specific code (docs/releasing.md)
 schema/                      JSON Schemas of a project's .millennium/config.json and of a
                               convention pack's pack.json
 .millennium/config.json       this repository's own config: the engine audits itself
@@ -48,6 +49,7 @@ scripts/check-modes.sh        fails unless plugin/scripts/ is executable in git 
                               release-build.sh run it; scripts/test-check-modes.sh tests it)
 scripts/release-build.sh      reproducible release builds and the engine lock
 scripts/test-launcher.sh      the launcher's tests (verify.sh runs them)
+CHANGELOG.md                  user-facing changes, newest first
 docs/                         user documentation; docs/design.md is the design
 ```
 

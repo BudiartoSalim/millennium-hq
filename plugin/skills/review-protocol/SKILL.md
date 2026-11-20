@@ -35,6 +35,17 @@ does, not by what anyone meant.
   | `medium` | A bug in a less common path, or a defect that will cause bugs soon (a missing test for a real edge case, a fragile design at a boundary). |
   | `low` | Worth fixing, low consequence. |
 
+- **Origin**, by what the change did to the problem:
+
+  | Origin | Meaning |
+  |---|---|
+  | `introduced` | The change adds it; `<base>` does not have it. |
+  | `worsened` | `<base>` has it, and the change makes it reachable, more likely or worse. |
+  | `pre-existing` | `<base>` has it, and the change leaves it as it was. |
+
+  Check `<base>` before you call a finding `worsened` or `pre-existing`; when
+  you cannot tell, use `introduced` and say why. Report pre-existing problems
+  you find next to the change: the lead decides what to do with them.
 - One finding per problem. Uncertain? Say how confident you are and what would
   confirm it. A short list of real findings beats a long list of maybes.
 - Do not fix the code. Suggest the fix in a sentence.
@@ -61,6 +72,7 @@ End your answer with exactly one JSON object in a fenced `json` block:
     {
       "id": "CR-1",
       "severity": "high",
+      "origin": "introduced",
       "category": "edge-case",
       "file": "services/cart/internal/domain/total.go",
       "line": 42,
@@ -75,11 +87,15 @@ End your answer with exactly one JSON object in a fenced `json` block:
 }
 ```
 
-- `verdict` is `approved` only with no critical, high or medium findings.
+- `verdict` is `approved` only with no critical, high or medium findings
+  that are `introduced` or `worsened`; `pre-existing` ones are reported but
+  do not block it.
 - `id` prefixes: `CR` (correctness-reviewer), `SEC` (security-engineer), `MR`
   (maintainability-reviewer), `PERF` (performance-reviewer), `QT` (qa-tester).
 - `category` is a short slug such as `spec`, `edge-case`, `test-quality`,
   `injection`, `authz`, `naming`, `architecture`, `complexity-at-scale`.
+- `origin` is required on every finding: `introduced`, `worsened` or
+  `pre-existing`.
 - `proof` and `line` are optional; omit a field rather than inventing it.
 - `not_reviewed` lists what you could not judge and why, so the lead knows
   the limits of your review.

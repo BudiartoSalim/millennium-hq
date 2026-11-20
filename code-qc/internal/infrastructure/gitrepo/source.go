@@ -3,6 +3,7 @@ package gitrepo
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -161,41 +162,66 @@ func (r *Repository) abs(p string) string {
 	return filepath.Join(r.root, filepath.FromSlash(p))
 }
 
-// RepoPath turns a command-line path, relative to the current directory or
-// absolute, into a repository-relative one. Both sides have symlinks
-// resolved, so a symlinked working directory still maps correctly. The
-// repository root itself becomes "".
+// ErrOutsideRepository means a path lies outside the repository. A caller
+// that cares only about the repository's files may skip such a path; any
+// other failure to map a path is an error of its own.
+var ErrOutsideRepository = errors.New("outside the repository")
+
+// RepoPath turns a path, relative to the current directory or absolute, into
+// a repository-relative one. Only a relative path reads the current
+// directory, so an absolute one still maps when the process's working
+// directory is gone. Symlinks are resolved on both sides, in the root and in
+// the longest part of the path that exists (a write may create the rest),
+// so a path through a symlink maps to what it reaches. The repository root
+// itself becomes "".
 func (r *Repository) RepoPath(arg string) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("find working directory: %w", err)
+	cwd := ""
+	if !filepath.IsAbs(arg) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("find the working directory for %s: %w", arg, err)
+		}
+		cwd = wd
 	}
 	return r.relativeTo(cwd, arg)
 }
 
+// relativeTo maps arg, a relative one taken from cwd. cwd's symlinks are
+// resolved before joining, so ".." leaves the directory cwd really is.
 func (r *Repository) relativeTo(cwd, arg string) (string, error) {
-	base, err := filepath.EvalSymlinks(cwd)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", cwd, err)
-	}
-	root, err := filepath.EvalSymlinks(r.root)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", r.root, err)
-	}
-	target := arg
+	target := filepath.Clean(arg)
 	if !filepath.IsAbs(target) {
+		base, err := filepath.EvalSymlinks(cwd)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", cwd, err)
+		}
 		target = filepath.Join(base, target)
 	}
-	rel, err := filepath.Rel(root, target)
+	return mapResolved(r.root, target, arg)
+}
+
+// mapResolved maps target, absolute and clean, into root, both with their
+// links followed (see Resolver.Resolve); arg names the path in errors.
+func mapResolved(root, target, arg string) (string, error) {
+	resolver := NewResolver()
+	resolved, err := resolver.Resolve(target)
 	if err != nil {
-		return "", fmt.Errorf("%s is not inside the repository: %w", arg, err)
+		return "", err
 	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." {
-		return "", nil
+	resolvedRoot, err := resolver.Resolve(filepath.Clean(root))
+	if err != nil {
+		return "", err
 	}
-	if !domain.IsRepoRelative(rel) {
-		return "", fmt.Errorf("%s is outside the repository", arg)
+	return insideRoot(resolvedRoot, resolved, arg)
+}
+
+// insideRoot makes target relative to root, both resolved and clean,
+// matching root's part without regard to case, or reports arg as
+// ErrOutsideRepository.
+func insideRoot(root, target, arg string) (string, error) {
+	rel, ok := domain.RelativeFold(filepath.ToSlash(root), filepath.ToSlash(target))
+	if !ok || rel != "" && !domain.IsRepoRelative(rel) {
+		return "", fmt.Errorf("%s is %w", arg, ErrOutsideRepository)
 	}
 	return rel, nil
 }
@@ -278,13 +304,9 @@ func parentDir(dir string) string {
 // Identity names the repository stably across its worktrees: the resolved
 // path of git's common directory, which every worktree of a clone shares.
 func (r *Repository) Identity(ctx context.Context) (string, error) {
-	out, err := r.git(ctx, "rev-parse", "--git-common-dir")
+	dir, err := r.gitCommonDir(ctx)
 	if err != nil {
-		return "", fmt.Errorf("find the git directory: %w", err)
-	}
-	dir := trimLine(out)
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(r.root, dir)
+		return "", err
 	}
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {

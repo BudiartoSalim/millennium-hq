@@ -70,8 +70,30 @@ func Python(root string, python []string) *Analyzer {
 	return a
 }
 
-// Analyze asks the helper for the facts of one file.
+// depth is what a request asks the helper to establish.
+type depth int
+
+const (
+	// plain leaves out the runtime code, which costs a TypeScript helper
+	// several times the rest of the analysis.
+	plain depth = iota
+	// runtime asks for the runtime code too.
+	runtime
+)
+
+// Analyze asks the helper for the facts of one file, without its runtime
+// code, which stays unknown.
 func (a *Analyzer) Analyze(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
+	return a.analyze(ctx, path, content, plain)
+}
+
+// AnalyzeRuntime asks the helper for the facts of one file with its
+// runtime code. An answer without it leaves the runtime code unknown.
+func (a *Analyzer) AnalyzeRuntime(ctx context.Context, path string, content []byte) (domain.FileFacts, error) {
+	return a.analyze(ctx, path, content, runtime)
+}
+
+func (a *Analyzer) analyze(ctx context.Context, path string, content []byte, d depth) (domain.FileFacts, error) {
 	if a.failure != nil {
 		return domain.FileFacts{}, a.failure
 	}
@@ -83,14 +105,14 @@ func (a *Analyzer) Analyze(ctx context.Context, path string, content []byte) (do
 		}
 		a.proc = proc
 	}
-	line, err := a.proc.exchange(ctx, request{Path: path, Content: string(content)})
+	line, err := a.proc.exchange(ctx, request{Path: path, Content: string(content), Runtime: d == runtime})
 	if err != nil {
 		// A helper that died or hung cannot be trusted with the next file.
 		a.failure = fmt.Errorf("the %s analyzer stopped: %w", a.language, err)
 		a.Close()
 		return domain.FileFacts{}, a.failure
 	}
-	return decode(path, line)
+	return decode(path, content, line)
 }
 
 // Close stops the helper process.
@@ -101,9 +123,11 @@ func (a *Analyzer) Close() {
 	}
 }
 
+// request is one line to the helper. Runtime asks for the runtime code.
 type request struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	Runtime bool   `json:"runtime"`
 }
 
 type process struct {

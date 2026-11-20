@@ -125,6 +125,17 @@ Notes:
   worktree for spikes, and a brief keeps their output to a design note. The
   chosen approach is part of the spec, so reviewers check the code against
   the decision.
+- **The runtime is inventoried, and security checks have defaults.** The
+  design, the spec's Runtime section and the threat model list what the code
+  really runs under (operating systems, shells, the actual tool
+  implementations, toolchain versions, harnesses), and engineers verify
+  against that list rather than assumed defaults. Code that decides what is
+  allowed uses an allowlist, denies what it cannot classify, does not trust
+  a re-implementation of another program's parser, and comes with a
+  differential test when a protection is rewritten or narrowed. The
+  `solution-design`, `threat-model` and `engineering-standards` skills carry
+  the inventory; `solution-design` and `engineering-standards` the defaults,
+  and `threat-model` asks about parser differentials at every boundary.
 - **When a gate seems wrong, the lead escalates.** The playbook forbids working
   around a gate; the lead brings the case to the user. The stop hook enforces
   the same: repeated blocked attempts escalate to the user instead of passing.
@@ -152,14 +163,21 @@ understand and design (lead, with the user; solution-design): reference
   -> lead triage: every finding gets a disposition (fix / defer + reason /
      reject + reason) in the decision log
   -> fix loop, bounded rounds: every bug fix comes with a regression test;
-     a significant rewrite gets a fresh review and a re-test
+     a significant rewrite gets a fresh review and a re-test; a component
+     with medium-or-higher findings to fix in two consecutive fix rounds
+     gets a design note with options and the user's decision; after 3
+     rounds with findings open, the user decides
   -> final gates: the CI-equivalent run (every check, against the target
      branch, config required) plus the full test suite and supply chain
   -> summary with the decision log
 ```
 
-Reviewer output is structured JSON (severity, `file:line`, evidence, failure
-scenario, suggested fix) so findings can be triaged and logged mechanically.
+Reviewer output is structured JSON (severity, origin, `file:line`, evidence,
+failure scenario, suggested fix) so findings can be triaged and logged
+mechanically. The origin (`introduced`, `worsened`, `pre-existing`) sets the
+default: pre-existing findings become follow-ups unless the change makes them
+reachable or worse, or the user asks, and they do not block a reviewer's
+`approved` verdict.
 
 ## Parallel work
 
@@ -246,7 +264,11 @@ Additional rules:
   rather than trusting them.
 - **Suppressions need a reason.** New `eslint-disable`, `@ts-ignore`, `nosec`,
   `# type: ignore`, `//nolint` and similar comments are blocked unless they carry
-  a written justification, and every one is listed in the summary.
+  a written justification, and every one is listed in the summary. A
+  suppression is matched where its tool reads it: most tools read comments,
+  but Node's test runner reads `node:coverage` directives from the raw lines
+  of a TypeScript file, strings and template literals included, so those
+  are matched on raw lines (`domain.NodeCoverageFindings`).
 
 ## Changing the rules: proposals and `config apply`
 
@@ -401,7 +423,44 @@ The engine separates two concerns, so new languages and conventions are
 additions, not rewrites:
 
 - **Language analyzers** turn code into facts: imports per file, functions with
-  length, nesting and cognitive complexity, comments, calls. Go is analysed in
+  length, nesting and cognitive complexity, comments, calls, and the file's
+  runtime code (the lines that hold runtime tokens, and a SHA-256 digest of
+  the runtime token sequence), which the tests gate uses so that comments,
+  whitespace and erased TypeScript types need no test and no coverage. Each
+  language's own scanner or compiler classifies, erring toward runtime: Go's
+  `go/scanner`, the TypeScript compiler's comment-free `transpileModule`
+  output and source map (plus the syntax it can drop that still runs, such
+  as value imports and `const enum`), and Python's `tokenize`. Runtime facts
+  are known or unknown; unknown (an analysis failure, a helper answer
+  without them, content a helper cannot number as git does) counts every
+  line as runtime and every file as changed. Runtime facts are computed
+  only on request (`port.RuntimeAnalyzer`), which only the tests gate makes,
+  for its candidates and their base: the TypeScript transpile costs several
+  times a plain analysis, and every other gate reads every changed file on
+  every Stop hook. The analysis cache keys a result by what was asked, so a
+  plain result never answers a request for runtime facts; a plain failure
+  does, since the runtime analysis would fail the same way after its costly
+  part. `port.AnalyzeRuntime` is the one place where an analyzer without
+  the method gives unknown runtime code. Lines are physical, as git numbers
+  them: Go's `//line` directives (their own fact, `FileFacts.LineDirectives`,
+  not a risky construct) move none. They do move cover-profile positions,
+  and cover credits the code after one to the base name it gives, in the
+  directive's own directory. So the test runners report coverage as the
+  tool wrote it (a Go profile naming a file outside the module is still an
+  error), and the tests gate checks the coverage of the files it judges
+  only. For a Go file whose suite passed, whatever ran it (`go test` or a
+  recipe around cover), it asks `port.ForeignCoverageSource` which code the
+  Go sources of that file's directory credit to another file, once per
+  directory; names `go build` never reads (a leading `_` or `.`, a
+  directory) lend nothing, and a source it cannot read blocks the judged
+  files of its directory only (`tool-failed`). The checks are: no line
+  past the end of the file (`tool-failed`, for every coverage source, by
+  `domain.LineCount`, with a message naming the causes of the file's
+  language), no
+  directive in a tested-layer file (`line-directive`), and no other file's
+  code credited to it, an excluded file's included (`foreign-coverage`).
+  Generated code elsewhere, goyacc's `//line yaccpar:1` for one, blocks
+  nothing. Go is analysed in
   the engine (`go/ast`); TypeScript and Python by two small helpers of ours (a
   JS file using the project's own `typescript`, a stdlib Python script using
   `ast`), run with the project's runtime, because a correct TS or Python parser
@@ -447,13 +506,22 @@ protected paths: an empty one holds no settings, agents cannot write them
 (the guard and the sandbox both refuse), and excluding them would bring the
 false blocks back for every project that has none.
 
+What exempts a file in a tested layer depends only on what agents cannot
+change: the config's `exclude` and the layer the config and packs assign.
+A generated-code marker is file content, which any agent can write, so in a
+tested layer it exempts the file from neither the tests gate nor the limits;
+a finding on a marked file there says so and points to `exclude`. Outside
+tested layers the marker still exempts a file from the limits, a residual
+risk accepted because only the limits are at stake there.
+
 Hooks:
 
 | Check | How |
 |---|---|
 | Hook input | JSON on stdin: tool, file, calling agent |
 | Per-agent rules | Engineer cannot edit acceptance tests; qa-tester cannot read source; edit content checked for new suppressions |
-| Protected paths | Edit/Write on protected paths denied for every agent |
+| Protected paths | Edit/Write on protected paths denied for every agent in an opted-in checkout, matched as a segment sequence anywhere in the path, as named and with symlinks resolved, without regard to case and with each segment read as Win32 opens it (trailing dots and spaces stripped, cut at a `:` stream) on every OS, so they are protected in every checkout whether or not git lists it (enumerating checkouts kept leaking: a worktree moved with `mv`, a path with a newline); for every write, each protected location of the acting checkout and of every listed worktree is resolved too, and a target inside where one leads is named by the location (`.pi` a symlink to `conf` makes `conf/extensions` protected); a location that is a dangling link is followed as it reads, one below a file or through more links than the OS follows in one path (a loop; 40 on Linux, 63 on Windows) reaches nothing, and one whose lead is unknown (a directory the engine may not search, a link it cannot read, a per-process path such as `/proc/self`, `/proc/<pid>` or `/dev/fd`, which the engine would resolve in its own process) blocks every write while it is unknown, whichever listed checkout it belongs to, since it may lead anywhere (user decision, 2026-11-18, R5-SEC-1); a worktree root that reaches nothing (a dangling link, a file or a loop on its way) is compared as named, and one that cannot be resolved for any other reason (a directory the engine may not search, such as `chmod 000` on `.claude/worktrees`, a link it cannot read, a per-process or device target) blocks every write, and every read a role rule checks, with a message naming the worktree and the way out (user decision, 2026-11-19, R6-SEC-1, replacing R2-SEC-2's rule that compared every unresolvable root as named). The engine walks paths and follows links itself rather than with `filepath.EvalSymlinks`, which on Windows walks through a directory junction unfollowed: junctions are followed via `os.Readlink`, and a name-redirecting reparse point it cannot read blocks; a volume target (`\\?\Volume{GUID}\`, what `os.Readlink` gives for a volume mount point since Go 1.23) goes on from where Windows mounts the volume, listed by kernel32's `GetVolumePathNamesForVolumeNameW` through the standard library's `syscall`, and blocks when it is mounted nowhere; a CI job on a Windows runner runs this code (docs/releasing.md); a tool path with a `..` part blocks, since the OS follows a symlink before `..` and text cleaning does not, and so does a Windows path that is neither absolute nor plainly relative. A session whose own checkout is not opted in is not guarded (user decision, 2026-11-18; deciding opt-in by each target's checkout is a follow-up). `scope`'s `protected-path` uses the same matching, and also flags a changed path that ends with a leading part of a protected path (`.pi`, `.claude`), which in git is a file or symlink in place of the directory. The shell guard is a floor with one way out (user decision, 2026-11-19, round 7, after rounds 5 and 6 narrowed it by enumerating writers and each let through forms round 4 denied): it denies a command that can write (a write-like word anywhere, a replacing command, or a git whose own options set its config) and names a protected path or a word ending in `.pi` or `.claude`, read in its text, in the fields between white space, quotes, operators, `=` and expansion characters, and in the words the shell reads (quotes removed, `$'…'` decoded, redirection targets included, and every word that holds shell syntax read as a script, four levels deep), so it never allows what round 4 denied; and it lets through a command that is provably read-only: its text made only of characters known to be inert in bash and zsh, a whitelist rather than a list of refused syntax, since every round found another syntax the engine's scanner read otherwise than a shell (comments, here-document bodies and line continuations hid writes in round 7; zsh's glob qualifiers run code, `ls *(e:'…':)`, and subshells, `(( … ))` and function definitions set variables, round 9, R9-SEC-1, R9-SEC-2; zsh's numeric glob `<->` read as two redirections and extendedglob's `^` and `~` hid options, round 10, R10-SEC-1, R10-SEC-2): outside quotes only ASCII letters and digits, spaces, tabs, `. _ / : , @ + -`, the globs `* ? [ ]`, `=` but at a word's start (zsh's `=cmd`) or after another `=` or a `:` (zsh's `MAGIC_EQUAL_SUBST`, round 11, R11-SEC-4), `~` only at a word's start before `/` or the word's end, and the operators `| || ; && > >>` and `>&` only before one digit or `-` that ends the word (`2>&1`, `>&-`), with at most one descriptor digit before a redirection, since zsh reads `10>x` as the word `10` and a redirection (round 11, R11-SEC-2), and no other `&`: the scanner ended the command at the `&` of `&>` and `&>>`, where bash and zsh go on with it (`find x &>/dev/null echo -delete` runs `find x echo -delete`, round 11, R11-SEC-1); inside closed quotes, printable ASCII but `$`, backquote, backslash, `!`, `#`, `(` and `)`, and no `''` inside single quotes (zsh's `RC_QUOTES`); so no unquoted `<` in any form (a quoted one is literal, R11-CR-2), `^`, `!`, `%`, `{`, `}`, newline or character outside ASCII; every simple command named literally from a short read-only allowlist, each with an allowlist of read-only options (`find` only its tests and `-print`, so bfs's `-rm` and every action fail; `rg` only its searching and printing options, so `--pre`, `--hostname-bin`, `-z` and any option not listed fail, and a value given as the next word must not start with a dash; each `git` read-only subcommand only its listed reading options, written in full, so `--output`, `--ext-diff` and any option not listed fail, round 9, R9-CR-2, each value attached (`--since=x`, `-n5`), never the next word, since `git log` reads its own options in an earlier pass and a skipped value word shifts what the rest reads (`git log --before --decorate --after --output=<f>` writes `<f>`), and any `--output`, `--output=…` or abbreviation of it after `git`, after `--` too, fails on its own as defense in depth against such parser-pass differences, round 10, R10-CR-1, and `-<n>` only after `log`, round 11, R11-CR-1; `grep`, `egrep` and `fgrep` only the options GNU grep and ugrep (Claude Code's grep) both read as searching and printing, so ugrep's `--filter` (runs a program), `--save-config` (writes a file), `--config`, `-z`, `-Z` and any option not listed fail, round 11, R11-SEC-3; `test` and `[` without `-v` or an argument holding `[`, whose array subscript bash evaluates and can assign; `cd` and `pushd` with one explicit directory, absolute or starting `./` or `../`; `printf`, `file` and `popd` are not on the list), and every redirection to a file descriptor or a literal path outside protected paths, `.pi` and `.claude` (round 8, R8-SEC-1 to R8-SEC-6). In doubt, a command is not read-only. A sweep test over every writer, wrapper and target spelling checks that nothing round 4 denied is allowed and that no writer is read-only. Spliced names (`.p${X}i`, `-t.pi`), globs and braces, relative paths that resolve into a protected location without naming it (R8-N1-1), and programs that write on their own stay documented limits (R7-SEC-4) |
+| Role rules in every worktree | The engineer's acceptance-test rule and the qa-tester's black-box rule apply, with the acting session's config, to each path placed in the worktree it lies in (the innermost, as worktrees nest); `git worktree list` is asked for every write and for the qa-tester's reads in an opted-in repository with linked worktrees, and a list it cannot read unambiguously, or that names more worktrees than there are records with a `gitdir` file git can read a byte of, blocks the call. A worktree moved with plain `mv` is outside the role rules (git lists its old path); its protected paths stay protected. Each rule declares which of a call's located paths it reads, and what the hook locates is derived from those declarations, so no rule gets fewer paths than it reads |
 | Stop gating | Block "done" while gates fail; escalate after repeated attempts |
 
 Supply chain: see [Supply chain](#supply-chain).
@@ -745,7 +813,7 @@ millennium-hq/
                                  on disk
   schema/                        JSON Schema of the project config
   scripts/                       verify, file-mode check, launcher tests, reproducible release builds
-  .github/workflows/             the engine release workflow
+  .github/workflows/             the engine release workflow, and the engine's Windows tests
   docs/
   AGENTS.md                      rules for developing this plugin
 ```

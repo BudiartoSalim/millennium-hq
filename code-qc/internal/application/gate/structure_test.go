@@ -16,8 +16,15 @@ type fakeAnalyzer struct {
 	facts map[string]domain.FileFacts
 }
 
+// factsKey is the content a fake analyzer looks facts up by: the content
+// without the line feeds at its end, which give a file lines (see long).
+func factsKey(content []byte) string { return strings.TrimRight(string(content), "\n") }
+
+// long is content with 20 lines, so coverage can give lines up to 20.
+func long(content string) string { return content + strings.Repeat("\n", 20) }
+
 func (f fakeAnalyzer) Analyze(_ context.Context, path string, content []byte) (domain.FileFacts, error) {
-	facts, ok := f.facts[string(content)]
+	facts, ok := f.facts[factsKey(content)]
 	if !ok {
 		return domain.FileFacts{}, errors.New("parse " + path + ": syntax error")
 	}

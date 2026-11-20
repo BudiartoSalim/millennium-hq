@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -68,6 +69,16 @@ func repoPath(arg string) (string, error) {
 	return "sub/" + arg, nil
 }
 
+// resolveAsNamed stands in for Deps.ResolvePath where no path is a
+// symlink: the path, cleaned.
+func resolveAsNamed(abs string) (string, error) { return filepath.Clean(abs), nil }
+
+// locateAsNamed stands in for Deps.ResolveLocation where no location is a
+// symlink: the location below the root.
+func locateAsNamed(root, protected string) (string, error) {
+	return filepath.Join(root, filepath.FromSlash(protected)), nil
+}
+
 type harness struct {
 	gates          *fakeGates
 	audit          *fakeAudit
@@ -80,6 +91,7 @@ type harness struct {
 	conventions    *fakeConventions
 	root           string
 	localDir       string
+	worktrees      []string
 	terminal       bool
 	config         fakeConfig
 	depsErr        error
@@ -120,7 +132,8 @@ func (h *harness) run(t *testing.T, args ...string) int {
 	deps := func(_ context.Context, dir string) (Deps, error) {
 		h.gotDir = dir
 		return Deps{Gates: h.gates, Audit: h.audit, Config: h.config, Explain: h.explain, Guard: h.guard,
-			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath, ReadProposal: readProposalFile}, h.depsErr
+			Stop: h.stop, Scope: h.scope, Apply: h.applier, Discover: h.discover, Conventions: h.conventions, Root: h.root, LocalConfigDir: h.localDir, RepoPath: repoPath, ReadProposal: readProposalFile,
+			OtherWorktrees: func(context.Context) ([]string, error) { return h.worktrees, nil }, ResolvePath: resolveAsNamed, ResolveLocation: locateAsNamed}, h.depsErr
 	}
 	app := New("1.2.3", &h.stdin, &h.stdout, &h.stderr, deps)
 	app.terminal = func() bool { return h.terminal }

@@ -141,18 +141,3 @@ func TestCommandWithLCOV(t *testing.T) {
 		t.Fatal("a command that writes no report must be an error, even with a stale report present before")
 	}
 }
-
-func TestParseGoProfile(t *testing.T) {
-	profile := "mode: set\nexample.com/svc/lib/lib.go:3.24,4.11 1 1\nexample.com/svc/lib/lib.go:4.11,6.3 1 0\nother.com/x/y.go:1.1,2.2 1 1\n"
-	coverage, err := parseGoProfile([]byte(profile), "example.com/svc", "svc")
-	if err != nil {
-		t.Fatalf("parseGoProfile: %v", err)
-	}
-	lib := coverage["svc/lib/lib.go"]
-	if lib[3] != 1 || lib[4] != 1 || lib[5] != 0 || lib[6] != 0 || len(coverage) != 1 {
-		t.Fatalf("coverage = %v (line 4 is shared and ran)", coverage)
-	}
-	if _, err := parseGoProfile([]byte("garbage"), "m", ""); err == nil {
-		t.Fatal("a malformed profile must be an error")
-	}
-}

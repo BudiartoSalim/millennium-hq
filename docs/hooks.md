@@ -21,6 +21,25 @@ as untrusted.
 The counter of blocked stops is kept per session and agent in the plugin's
 data directory, where sandboxed agents cannot write.
 
+## A working directory that is gone
+
+Every event names the session's working directory, and the engine handles
+it in the repository that contains that directory. When the directory no
+longer exists, typically a worktree removed while a session was still in it,
+the engine uses the nearest parent that does exist instead. For a worktree
+under `.claude/worktrees/` that is the main checkout: the guard and the gates
+apply as they do there, `.millennium/` stays protected, and the session can
+`cd` back into the repository. A parent outside any git repository passes,
+as any directory outside a repository does.
+
+The engine moves up only past directories that do not exist at all, at most
+32 levels, and only from an absolute path in clean form (no `.` or `..`
+parts, no trailing separator); any other missing working directory blocks
+every event, with a message asking you to change to a directory that
+exists. A working directory that exists
+but cannot be used, such as a file, a dangling symlink, or a directory git
+cannot enter or refuses, blocks every event with git's message, as before.
+
 ## Convention guides
 
 Every convention pack carries a `guide.md`: what belongs in each layer and
@@ -41,10 +60,160 @@ conventions.
 
 | Rule | Applies to | Denied |
 |---|---|---|
-| Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off) |
-| Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`): the engineer cannot change the tests that judge its work |
-| Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
-| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that look like they write a protected path |
+| Protected paths | every agent, the main session included | writing `.millennium/` (the config, dependency approvals), `.claude/settings.json`, `.claude/settings.local.json`, and pi's `.pi/settings.json` and `.pi/extensions/` (a project extension runs inside pi and could switch millennium's off), wherever they lie |
+| Acceptance tests | the software-engineer agent | writing under `paths.acceptanceTests` (default `tests/acceptance`), in any worktree of the repository: the engineer cannot change the tests that judge its work |
+| Black-box testing | the qa-tester agent | reading code inside a component, and searching (Grep, Glob) inside a component or a directory that contains one, in any worktree of the repository; the acceptance tests, anything outside the components, and documents inside them (Markdown and text, JSON and YAML such as API descriptions, images, PDFs, README) stay readable by path |
+| Rule changes | every agent | running `millennium-code-qc config apply`, and shell commands that can write and name a protected path, or `.pi` or `.claude`, which hold protected paths, however it is spelled (`cp x '.claude'/settings.json`, `ln -s conf $'\x2epi'`, `D=.claude; tee $D/settings.json`, `echo 'ln -s conf .pi' \| sh`, `env -C .claude …`, `chmod 000 .claude`), unless the command provably only reads (`ls -la .claude 2>/dev/null`, `git diff -- .claude > /tmp/x`); see [What the hooks cannot do](#what-the-hooks-cannot-do) |
+
+The guard checks every path a tool names twice: as written, and with its
+symlinks resolved in the longest part of the path that exists (a write may
+create the rest). So a symlink to a protected file, or a path through a
+symlinked directory, is denied like the protected path itself. A relative
+path is taken from the event's working directory, even one that no longer
+exists, never from the engine's own. A path the engine cannot resolve,
+such as one through a dangling symlink, below a file, or in a directory it
+may not search, blocks the call with the reason, because it might lead to
+a protected path. So does a path with a `..` part: the OS follows a
+symlink before it takes `..`, so such a path can lead elsewhere than it
+reads. Name the path without `..`, such as by its absolute path. On
+Windows, so does a path that is neither absolute nor plainly relative: a
+rooted one (`\repo\file`, on the current drive) or a drive-relative one
+(`C:file`, from that drive's own working directory), which the OS does not
+read from the session's directory. Name such a path in full.
+
+On Windows a directory junction (`mklink /J`, which needs no privilege)
+is followed like a symlink, though Go's own symlink resolution walks
+through junctions without following them. A reparse point that redirects
+a name but whose target the engine cannot read blocks the call with the
+reason, since where a path through it leads is unknown. The engine also
+spells each resolved path by its long names, so a short 8.3 name
+(`PROGRA~1`) is no other spelling of a protected path. A volume mount
+point, or a junction to a volume, reads as the volume's device path
+(`\\?\Volume{...}\`); the engine goes on from where Windows mounts that
+volume: the mount point itself for a second disk, VHD or Dev Drive
+mounted at a folder such as `C:\dev`, so a repository there works as on
+any drive. A volume Windows lists no drive letter or folder for, and any
+other device path (`\\?\C:\...`, `\??\...`), which no other spelling of
+the same file matches, blocks.
+
+On Linux and macOS, a path through `/proc/self`, `/proc/thread-self`,
+`/proc/<pid>`, `/dev/fd`, `/dev/stdin`, `/dev/stdout` or `/dev/stderr` is
+unknown: each leads somewhere else for each process that opens it, so the
+engine, in its own process, cannot tell where it leads for pi or a tool.
+A tool's path through one blocks the call, and a protected location that
+leads through one blocks every write (see below).
+
+A protected path is protected wherever it lies: `.millennium` as any
+segment of a path, and `.claude/settings.json`, `.claude/settings.local.json`,
+`.pi/settings.json` and `.pi/extensions` as segments one after another
+anywhere in it. So an agent in an opted-in checkout writes the rules of no
+checkout: not those of the repository, of any of its worktrees (the main
+checkout, a linked worktree, one moved with plain `mv` that git no longer
+lists, or one whose path git cannot list clearly), nor of any other
+checkout on the machine. A directory of yours that merely has such a
+segment in its path is protected too.
+
+Each segment is read as Windows opens it, on every OS: Windows strips a
+name's trailing dots and spaces, and opens `name:stream` (`::$DATA`
+included) as the file `name`, so `.claude\settings.local.json.`,
+`.pi\extensions.\x.ts` and `settings.json::$DATA` are the protected paths
+themselves. Elsewhere this denies a few more names.
+
+A protected location reached through a symlink is protected by its real
+path too. If `.pi` is a symlink to `conf`, pi loads `conf/extensions` as
+the project's extensions, so a write of `conf/extensions/x.ts` is denied
+like one of `.pi/extensions/x.ts`; the same holds for a symlinked
+`.millennium` or `.claude`, and for a settings file that is itself a
+symlink. For every write, whoever makes it, the engine resolves each
+protected location of the acting checkout and of every worktree
+`git worktree list` names, and denies writes inside where they lead: from
+a linked worktree, the main checkout's `conf/extensions/x.ts` is denied
+as well as the worktree's own.
+
+A protected location that leads nowhere blocks nothing. A dangling
+symlink, such as a committed relative link that dangles in a worktree, is
+followed as it reads, and what it would lead to is protected: with `.pi`
+a dangling link to `conf`, creating `conf/extensions/x.ts` is denied. A
+location below a file (a file named `.claude`), and one through more
+links than the OS follows in one path (40 on Linux, 63 reparse points on
+Windows), such as a link to itself, reach nothing: the OS creates nothing
+there, so nothing needs protecting. Each call resolves the locations
+anew, so once such a location leads somewhere, that place is protected.
+
+A location whose lead is unknown blocks every write, in every checkout,
+until it can be resolved: one through a directory the engine may not
+search (`chmod 000` on a worktree), a link it cannot read, or a
+per-process path. Such a location might lead anywhere, the main
+checkout's `conf/` included, so no write can be checked. The message
+names the location and the way out: restore access to it, fix or remove
+the link it leads through, or remove a linked worktree you no longer need
+(`git worktree remove --force <path>`). Reads are not affected.
+A worktree whose root reaches nothing is not looked at, and one whose
+root cannot be resolved otherwise blocks every write (see below).
+
+The guard acts only for a session whose own checkout is opted in (it has a
+config, in the repository or a local one). A session in a checkout that is
+not is not guarded at all, even when that checkout lies inside or beside
+an opted-in one: a worktree checked out at a commit from before the
+repository opted in, a submodule, or a nested repository. From such a
+session a file tool can write the opted-in checkout's
+`.millennium/config.json`, so the protection above holds for sessions in
+an opted-in checkout only. Start agents in an opted-in checkout.
+
+The role rules (acceptance tests, black box) apply in every worktree of
+the repository: each path is placed in the worktree it lies in, the
+innermost one where worktrees nest (Claude Code's lie inside the main
+checkout's `.claude/worktrees/`), and checked there; a searched directory
+that holds a whole worktree reaches all of it. They apply the acting
+session's config, the rules that session is checked against, to every
+worktree: another worktree's acceptance tests are those under the acting
+session's `paths.acceptanceTests`, and its components those of the acting
+session's config. The worktrees are those `git worktree list` names, asked
+for every write (whose protected locations in each worktree may lead where
+it lands) and for the qa-tester's reads, in an opted-in repository whose
+git directory has linked worktrees; other reads never list them. A list
+that cannot be read unambiguously, such as one with a worktree whose path
+holds a newline, blocks the call with the reason, every write included,
+until you remove that worktree; the list may name no more worktrees than
+git keeps records for (entries under `.git/worktrees` with a `gitdir`
+file git can read at least one byte of, the ones git lists). A worktree
+whose root reaches nothing (its parent replaced by a dangling symlink, a
+file, or a link loop) holds no file the OS can open, so it is compared
+as git names it and blocks nothing; nor does one whose directory is
+simply gone. A
+worktree whose root cannot be resolved for any other reason, such as
+`chmod 000` on the `.claude/worktrees` that holds it, a link on its way
+that cannot be read, or a link to a per-process or device path, may hold
+protected locations that lead anywhere, the main checkout's `conf/`
+included: every write blocks, and so does every read a role rule checks
+(the qa-tester's), until it can be resolved. The message names the
+worktree, why it cannot be resolved, and the way out: restore access to
+it (such as with `chmod`), or, if it is a linked worktree you no longer
+need, remove it (`git worktree remove --force <path>`, or
+`git worktree prune` once its directory is gone). Other reads are not
+affected. A protected location below a root that resolves blocks while
+its lead is unknown (see above).
+
+The role rules reach only the worktrees `git worktree list` names. A
+worktree moved with plain `mv` rather than `git worktree move` is listed
+at the path it left (as prunable), so its new path lies outside the role
+rules: the software engineer can write the acceptance tests there, and
+qa-tester can read its code. Its protected paths stay protected all the
+same, since they are matched wherever they lie. Move worktrees with
+`git worktree move`, or run `git worktree repair` after a plain `mv`.
+
+Every path rule matches without regard to case, on every OS: on a
+case-insensitive file system (macOS, Windows, WSL on a Windows drive)
+`.MILLENNIUM/config.json` is the config, and `SRC/Main.go` is code in the
+`src` component. On a case-sensitive one this denies a few extra paths.
+The one exception is the acceptance tests for the qa-tester, which only
+allow: they match as spelled, so another spelling never allows more.
+
+The local configs, which lie outside the repository, are matched the same
+way: as written and with symlinks resolved, without regard to case, so a
+symlink in the repository does not reach them. Paths are compared
+absolute, so `MILLENNIUM_LOCAL_DIR`, when set, must be an absolute path; a
+relative one blocks every event with a message saying so.
 
 If the config cannot be read, every file change is denied until a human fixes
 it, because the protected paths are unknown; reads stay allowed.
@@ -55,7 +224,219 @@ it, because the protected paths are unknown; reads stay allowed.
   ways no pattern recognises. The OS sandbox is what stops that: `millennium
   config apply` writes sandbox rules that deny writes to the protected paths
   for every command, and Claude Code's sandbox already protects `.git/config`,
-  `.git/hooks` and its own settings.
+  `.git/hooks` and its own settings. The match is coarse on purpose, a
+  floor with one way out:
+  - **The floor.** A command that can write and names a protected path,
+    or `.pi` or `.claude`, is denied. It can write when a write-like word
+    appears anywhere in it: a redirection (`>`), `tee`, `sed -i` or
+    `--in-place`, `perl -i`, `awk -i inplace`, `mv`, `cp`, `rm`, `ln`,
+    `chmod`, `truncate`, `install`, `dd`, `unlink`, `link`, `rsync`,
+    `tar`, `patch`, `sponge`, `git checkout`, `restore`, `rm`, `mv` or
+    `apply`, find's `-delete`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`
+    or bfs's `-rm`, an option starting `--ou` (git's `--output` and its
+    abbreviations), or a git whose own options set its config (`git -c …`,
+    `--config-env`, `--exec-path`), since any git command can then be an
+    alias. It names one when a word, or a part of one between white
+    space, quotes, operators, `=`, `$`, `{` and `}`, is a protected path or
+    ends in `.pi` or `.claude` (`sub/.pi`, `~/.claude/`, `D=.claude`,
+    `"$(echo .pi)"`), read as written and as the shell reads it: quotes
+    removed, a backslash-newline joining what it splits (`.p\⏎i`), `$'…'`
+    strings decoded (`$'\x2epi'`), redirection targets included. Every
+    word that holds shell syntax is read as a script as well, whatever
+    runs it (`bash -c -- '…'`, `echo '…' | sh`, `sh <<< '…'`,
+    `env -S '…'`, `su -c`, `ssh`, a git alias, `"$(…)"`), as are `eval`'s
+    arguments and each line of a command of several lines (so a quote in
+    a comment or a here-document hides no line after it), four levels
+    deep; deeper scripts are read as text. The write may go elsewhere and
+    still be denied (`cp .claude/settings.json /tmp/x`); split such a
+    command in two.
+  - **The way out: provably read-only commands pass.** A command passes
+    the floor only when the guard reads it exactly as bash and zsh do, so
+    its text must be made only of characters known to be inert in both;
+    anything else, whatever it is, keeps it from passing. Each review
+    found another syntax the guard read otherwise than a shell (comments,
+    here-documents, line continuations, zsh's glob qualifiers, which run
+    code, `ls *(e:'rm -rf x':)`, its numeric glob `<->`, extendedglob's
+    `^x` and `a~b`), so the guard accepts what it knows rather than
+    refusing what it knows. Outside quotes, a command may hold only:
+    - ASCII letters and digits, spaces, tabs, and `.` `_` `/` `:` `,`
+      `@` `+` `-`;
+    - the globs `*`, `?`, `[` and `]` (and the `[` command), which the
+      rules for globbed words below still apply to;
+    - `=`, except at the start of a word that is longer than `=` itself
+      (zsh replaces `=ls` by the path of `ls`, and reads `==` as one) or
+      right after another `=` or a `:` (`x==ls` and `x=a:=ls`, with
+      zsh's `MAGIC_EQUAL_SUBST`), so `[ a = b ]` passes and `[ a == b ]`
+      does not;
+    - `~` only as the first character of a word and followed by `/` or
+      the word's end (`~/.claude`, `cd ~`): `~x`, `~+`, `~-` and `a~b`
+      name other directories or are extendedglob's exclusion;
+    - the operators `|`, `||`, `;`, `&&`, `>` and `>>`, and `>&` only
+      before one digit or `-` that ends the word (`>&2`, `2>&1`, `1>&2`,
+      `>&-`), each redirection with at most one digit before it as its
+      file descriptor (`2>`, `2>>`): zsh reads only one, so `10>x` is
+      the word `10` and a redirection there, and descriptor 10 in bash.
+      Any other `&` is not: a lone `&`, `|&`, zsh's `&|` and `&!`, and
+      `&>` and `&>>` (write `>x 2>&1`), after which bash and zsh go on
+      with the same command, so a word after the target is one more
+      argument (`find x &>/dev/null echo -delete` runs `find x echo
+      -delete`). Nor are `;;`, `>|` or `>& file`;
+    - quoted strings, closed, that hold only printable ASCII and spaces
+      but `$`, backquote, backslash, `!`, `#`, `(` and `)`; a single
+      quote right after a closing one (`'a''b'`, which zsh's
+      `RC_QUOTES` reads as one quote) is refused too.
+
+    So no unquoted `<` in any form (a redirection from a file, `<&0`, a
+    here-document or here-string, zsh's `<->`; inside quotes it is
+    literal, `grep '<x>'`), and no `^`, `!`, `%`,
+    `{`, `}`, `(`, `)`, `#`, `$`, backquote, backslash, newline, other
+    control character or character outside ASCII, quoted or not where
+    the list above says so. A command with a subshell, with `!` or
+    `'('` among `find`'s arguments (write `-not`), or with an unquoted
+    `%` (`git log --format=%h`; write `'--format=%h'`) is never
+    read-only. Then every simple command in it, in pipelines and
+    lists alike, must be named literally and be one of:
+    - `ls`, `cat`, `head`, `tail`, `wc`, `du`, `stat`, `readlink`,
+      `realpath`, `basename`, `dirname`, `echo` or `true`, with any
+      arguments: none of them has an option that writes, runs a program
+      or sets a variable. `printf` (`-v` sets one) and `file`
+      (`--compile` writes) are not on the list;
+    - `grep`, `egrep` or `fgrep` whose every option is one of `-r`,
+      `-R`, `-n`, `-i`, `-l`, `-L`, `-c`, `-w`, `-x`, `-v`, `-E`, `-F`,
+      `-G`, `-P`, `-s`, `-q`, `-H`, `-h`, `-o`, `-a`, `-I`, `-A`, `-B`,
+      `-C`, `-e`, `-f`, `-m` (short options may be bundled, `-rnA3`), or
+      `--null`, `--line-number`, `--ignore-case`, `--files-with-matches`,
+      `--files-without-match`, `--count`, `--word-regexp`,
+      `--line-regexp`, `--invert-match`, `--extended-regexp`,
+      `--fixed-strings`, `--perl-regexp`, `--recursive`,
+      `--dereference-recursive`, `--no-messages`, `--quiet`, `--silent`,
+      `--with-filename`, `--no-filename`, `--only-matching`, `--text`,
+      `--color[=…]`, `--colour[=…]`, `--include`, `--exclude`,
+      `--exclude-dir`, `--include-dir`, `--binary-files`, `--regexp`,
+      `--file`, `--max-count`, `--after-context`, `--before-context`,
+      `--context`, written in full, those that take a value with it
+      attached (`--include=x`, `-A3`) or as the next word, which must not
+      start with a dash. These read the same in GNU grep and in ugrep,
+      which Claude Code runs as `grep`; any other is not read-only, such
+      as ugrep's `--filter` (runs a program), `--save-config` (writes a
+      file), `--config`, `---FILE`, `--pager`, `--view`, and `-z` and
+      `-Z`, which mean something else in each;
+    - `test` or `[` without `-v` and without an argument that holds a
+      `[` (other than the name `[` itself): bash evaluates an array
+      subscript as arithmetic, so `[ -v 'a[HOME=7]' ]` sets `HOME`;
+    - `find` whose every argument that starts with a dash is a number
+      (`-mtime -1`), `-newerXY`, or one of `-L`, `-H`, `-P`, `-name`,
+      `-iname`, `-path`, `-ipath`, `-wholename`, `-iwholename`, `-regex`,
+      `-iregex`, `-regextype`, `-lname`, `-ilname`, `-type`, `-xtype`,
+      `-maxdepth`, `-mindepth`, `-depth`, `-mount`, `-xdev`, `-newer`,
+      `-anewer`, `-cnewer`, `-mtime`, `-mmin`, `-atime`, `-amin`,
+      `-ctime`, `-cmin`, `-size`, `-empty`, `-perm`, `-user`, `-group`,
+      `-uid`, `-gid`, `-nouser`, `-nogroup`, `-links`, `-inum`,
+      `-samefile`, `-readable`, `-writable`, `-executable`, `-true`,
+      `-false`, `-follow`, `-noleaf`, `-daystart`, `-prune`, `-quit`,
+      `-o`, `-or`, `-a`, `-and`, `-not`, `-print`, `-print0`, `-printf`,
+      `-ls` (not `!`, which is not inert text: write `-not`); any other,
+      such as `-exec`, `-delete`, `-fprint` or bfs's `-rm`, is not
+      read-only;
+    - `rg` whose every option is one of `-n`, `-i`, `-S`, `-l`, `-c`,
+      `-w`, `-F`, `-u` (also `-uu`), `-0`, `-e`, `-g`, `-t`, `-A`, `-B`,
+      `-C`, `-m` (short options may be bundled, `-inA3`), or
+      `--line-number`, `--ignore-case`, `--smart-case`,
+      `--files-with-matches`, `--count`, `--word-regexp`,
+      `--fixed-strings`, `--hidden`, `--no-ignore`, `--unrestricted`,
+      `--files`, `--json`, `--null`, `--regexp`, `--glob`, `--type`,
+      `--after-context`, `--before-context`, `--context`, `--max-count`,
+      `--max-depth`, `--color`, written in full, those that take a value
+      with it attached (`--glob=x`, `-A3`) or as the next word, which
+      must not start with a dash (rg would take `-e -x` as the pattern
+      `-x`; the guard refuses it rather than tell); any other, such as
+      `--pre`, `--hostname-bin` or `-z`, which run programs, is not
+      read-only;
+    - `git status`, `log`, `diff`, `show`, `rev-parse` or `ls-files`
+      with no own option but `-C <dir>` (a dir that does not start with
+      a dash), `--no-pager`, `-P` or `--no-optional-locks`, and after the
+      command only options from its list, each a word of its own, written
+      in full, and with its value attached, never as the next word:
+      - `log`, `diff` and `show`: `-p`, `--patch`, `--name-only`,
+        `--name-status`, `--no-color`, and `--stat[=…]`, `-U[<n>]`,
+        `--unified[=…]`, `--word-diff[=…]` and `--color[=…]`, alone or
+        with a value attached (`--stat=100`, `-U3`);
+      - `log` also: `--oneline`, `--graph`, `--all`, `--follow`,
+        `--decorate[=…]`, `--pretty[=…]`, `-<n>` (`-3`), and, only with
+        a value attached, `-n<n>` (`-n5`), `--max-count=…`,
+        `--since=…`, `--until=…`, `--after=…`, `--before=…`,
+        `--author=…`, `--grep=…` and `--format=…`. Written alone, git
+        takes the next word as the value, but `git log` reads its own
+        options (`--decorate`, `-q`) in a pass before the others, so
+        which word that is cannot be told from the text: `git log
+        --before --decorate --after --output=<file> -1` writes the
+        file;
+      - `diff` also: `--cached`, `--staged`;
+      - `show` also: `--oneline`, `--pretty[=…]`, `--format=…`;
+      - `status`: `-s`, `--short`, `-b`, `--branch`, `--long`,
+        `--porcelain[=…]`, `-u[<mode>]` (`-uno`),
+        `--untracked-files[=…]`, `--ignored[=…]`;
+      - `rev-parse`: `--show-toplevel`, `--verify`, `-q`, `--quiet`,
+        `--abbrev-ref[=…]`, `--short[=…]`;
+      - `ls-files`: `-o`, `--others`, `-m`, `--modified`, `-d`,
+        `--deleted`, `-c`, `--cached`, `--exclude-standard`, `-z`.
+
+      Any other, such as `--ext-diff`, is not read-only; after `--`,
+      every word is a path. A word after `git` that is `--output`, starts
+      with `--output=`, or abbreviates it (`--o`, `--ou`, `--out`,
+      `--outp`, `--outpu`, with a value or not) makes the command not
+      read-only wherever it stands, after `--` too, so that a word the
+      guard reads as a path or a value but git reads as an option cannot
+      write a file;
+    - `cd` or `pushd` with exactly one directory, written as an absolute
+      path, `.`, `..`, or starting with `./` or `../`, that is not and
+      does not lie in a protected path, `.pi` or `.claude`
+      (`cd ./sub`). With no directory, `~`, `-` or a bare name, the shell
+      goes where `HOME`, `OLDPWD` or `CDPATH` say. `popd` is never
+      read-only.
+
+    The arguments of `find`, `grep`, `egrep`, `fgrep`, `rg`, `git`,
+    `cd`, `pushd`, `test` and `[` must not hold an unquoted glob, which
+    may expand into an option. Every redirection must duplicate or close
+    a file descriptor (`2>&1`) or write to a path, without glob or brace
+    and not starting with `!` (zsh's `>!`), that is not and does not lie
+    in a protected path, `.pi` or `.claude` (`/dev/null`,
+    `/tmp/out.txt`). Anything else (`eval`, a shell, `xargs`, `sudo`, a
+    variable assignment, a shell keyword such as `for` or `if`) is not
+    read-only. So `ls -la .claude 2>/dev/null`,
+    `find . -path ./.claude -prune -o -name '*.go' -print 2>/dev/null`,
+    `grep -rn foo --exclude-dir=.claude . > /tmp/out.txt`,
+    `du -sh ~/.claude 2>&1`, `git -C .claude log > /tmp/x` and
+    `cat .pi/extensions/x.ts > /tmp/x.ts` pass, and
+    `ls $HOME/.claude 2>/dev/null`, `cd .claude && ls 2>/dev/null`,
+    `ls .claude > /tmp/x # list`, a read-only command on two lines,
+    `(ls .claude) > /tmp/x`, `bash -c 'ls .claude 2>/dev/null'`,
+    `grep x < .claude/settings.json > /tmp/x`,
+    `find .claude ! -name x 2>/dev/null`,
+    `ls .claude &>/dev/null` and
+    `git log -n 5 -- .claude > /tmp/x` are denied. Split a denied
+    read-only command, drop the comment, the second line or the
+    redirection, or rewrite it with inert text (`-n5`, `-not`,
+    `>/dev/null 2>&1`).
+  - **What it misses.** A name spliced from parts the shell joins when
+    the command runs (`.p${X}i`, `${X:-.pi}`, `.p$@i`, an option glued
+    to it as in `mv -t.pi`); globs and brace expansions (`.p?`,
+    `.claude/settings.js*`, `.claude/settings.{json,}`); a name only a
+    variable or a command substitution produces at run time
+    (`mv conf "$(cat name)"`); a script file, or a program in another
+    language (`python3 -c …`), that writes on its own; a program a
+    command starts that its configuration names (a repository's
+    `core.fsmonitor`, `diff.external`); a symlink made earlier that
+    leads into a protected path (`cd ./link`); a relative path that
+    resolves into a protected location without naming it, since the
+    guard reads the command's text, not the directory it runs in (from
+    a worktree under `.claude/worktrees/`,
+    `cd ../.. && echo {} > settings.json` or
+    `echo {} > ../../settings.json` writes `.claude/settings.json`;
+    Claude Code's OS sandbox covers this, pi has none); a function,
+    alias or program on `PATH` that the user's shell setup puts in place
+    of a listed one; and writers not listed above (`sort -o`,
+    `curl -o`).
 - **A Stop hook that cannot run does not block.** Claude Code cannot send an
   agent back to repair a hook that will not start. If the engine is missing,
   agents can stop with unchecked work, which is why the tech lead's final

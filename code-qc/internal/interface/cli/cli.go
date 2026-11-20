@@ -130,6 +130,10 @@ type Discoverer interface {
 // hooks then do nothing, since nothing there is opted in.
 var ErrNoRepository = errors.New("not inside a git repository")
 
+// ErrNoDirectory is what a DepsFactory returns when the directory does not
+// exist; a hook then looks in its nearest existing parent.
+var ErrNoDirectory = errors.New("the directory does not exist")
+
 // Deps are what the commands call.
 type Deps struct {
 	Gates   GateRunner
@@ -147,9 +151,30 @@ type Deps struct {
 	Root string
 	// LocalConfigDir holds the local configs; no agent may write there.
 	LocalConfigDir string
-	// RepoPath turns a command-line path, relative to the current
-	// directory, into a repository-relative one.
+	// RepoPath turns a path, relative to the current directory or
+	// absolute, into a repository-relative one, with symlinks resolved; an
+	// absolute path needs no current directory. A path outside the
+	// repository is an error.
 	RepoPath func(arg string) (string, error)
+	// OtherWorktrees lists the absolute roots of the repository's other
+	// working trees, the main checkout and every linked worktree, Root
+	// excepted; a listing it cannot read unambiguously is an error.
+	OtherWorktrees func(ctx context.Context) ([]string, error)
+	// ResolvePath is an absolute path, cleaned, with its symlinks resolved
+	// in the longest part of it that exists; a part that exists but cannot
+	// be resolved is an error. The error of a path that reaches nothing (a
+	// link that leads to nothing, a part below a file, a link loop) has a
+	// ReachesNothing method that reports true; any other error means that
+	// what the path reaches is unknown, as when a part may not be looked at.
+	ResolvePath func(abs string) (string, error)
+	// ResolveLocation is where a write to protected, a protected location
+	// such as `.pi/extensions` (slash-separated), in the checkout at root,
+	// as ResolvePath resolves it, lands: with its links followed, one that
+	// leads nowhere as it reads, since a write lands there once its target
+	// exists. It is "" when nothing can be written there (a part of it is
+	// a file, or it goes through more links than the OS follows), and an
+	// error when where it lands is unknown.
+	ResolveLocation func(root, protected string) (string, error)
 	// ReadProposal reads a proposal file named on the command line,
 	// bounded and strictly.
 	ReadProposal func(path string) ([]byte, error)
